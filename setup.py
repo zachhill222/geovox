@@ -1,21 +1,15 @@
 from setuptools import setup, Extension
 from Cython.Build import cythonize
-import numpy
 
 extensions = [
-    Extension(
-        name="my_cython_package.parallel_example",
-        sources=["my_cython_package/parallel_example.pyx"],
-        include_dirs=[numpy.get_include()],
-        extra_compile_args=["-fopenmp"],   # Enable OpenMP
-        extra_link_args=["-fopenmp"],      # Link against OpenMP
-    )
+    Extension("geovox.utility", ["lib/utility.pyx"]),
+    Extension("geovox.particles", ["lib/particles.pyx", "lib/utility.pyx"])
 ]
 
 setup(
-    name="my_cython_package",
+    name="geovox",
     version="0.1",
-    packages=["my_cython_package"],
+    packages=["geovox"],
     ext_modules=cythonize(extensions),
-    install_requires=["cython", "numpy"],
+    install_requires=["cython"],
 )
