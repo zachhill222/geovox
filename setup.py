@@ -7,13 +7,11 @@ from autogen_pxd import process_directory, delete_existing_pxd_files
 extensions = [
     Extension(
         name="geovox.utility",
-        sources=["geovox/utility.pyx"],
-        include_dirs=[],  # Include directories for dependencies (e.g., NumPy)
+        sources=["geovox/utility.pyx"]
     ),
     Extension(
         name="geovox.particles",
-        sources=["geovox/particles.pyx"],
-        include_dirs=["geovox"],  # Include directories for dependencies (e.g., NumPy)
+        sources=["geovox/particles.pyx"]
     )
 ]
 
