@@ -1,9 +1,20 @@
 from setuptools import setup, Extension
 from Cython.Build import cythonize
+from autogen_pxd import process_directory, delete_existing_pxd_files
 
+
+# define extensions
 extensions = [
-    Extension("geovox.utility", ["lib/utility.pyx"]),
-    Extension("geovox.particles", ["lib/particles.pyx", "lib/utility.pyx"])
+    Extension(
+        name="geovox.utility",
+        sources=["geovox/utility.pyx"],
+        include_dirs=[],  # Include directories for dependencies (e.g., NumPy)
+    ),
+    Extension(
+        name="geovox.particles",
+        sources=["geovox/particles.pyx"],
+        include_dirs=["geovox"],  # Include directories for dependencies (e.g., NumPy)
+    )
 ]
 
 setup(

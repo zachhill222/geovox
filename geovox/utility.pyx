@@ -1,12 +1,11 @@
 ################# import basic math from C ####################
 from libc.math cimport sqrt, fabs #double to double
 
-
 ################# class for 3D points ####################
 cdef class Vector3:
-	cdef double x, y, z
+	# cdef double x, y, z
 
-	def __cinit__(self, double x, double y, double z):
+	def __init__(self, double x, double y, double z):
 		self.x = x
 		self.y = y
 		self.z = z
@@ -80,9 +79,9 @@ cdef class Vector3:
 
 ##################### class for 3D bounding boxes #########################
 cdef class Box: #closed box
-	cdef Vector3 low, high
+	# cdef Vector3 low, high
 
-	def __cinit__(self, Vector3 low, Vector3 high):
+	def __init__(self, Vector3 low, Vector3 high):
 		if not low < high:
 			raise Exception("low < high must return True")
 		self.low = low
@@ -123,21 +122,21 @@ cdef class Box: #closed box
 
 ######################## class for quaternions ######################
 cdef class Quaternion:
-	cdef double q0 #scalar component
-	cdef Vector3 qv #vector component
+	# cdef double q0 #scalar component
+	# cdef Vector3 qv #vector component
 
-	def __cinit__(self, double q0, Vector3 qv):
+	def __init__(self, double q0, Vector3 qv):
 		self.q0 = q0
 		self.qv = qv
 
 	def __mul__(self, Quaternion other):
-		cdef double Q0 = self.q0*other.q0 - self.qv.dot(other.qv)
-		cdef Vector3 QV = self.q0*other.qv + self.qv*other.q0 + self.qv.cross(other.qv)
+		cdef Quaternion Q0 = self.q0*other.q0 - self.qv.dot(other.qv)
+		cdef Quaternion QV = self.q0*other.qv + self.qv*other.q0 + self.qv.cross(other.qv)
 		return Quaternion(Q0, QV)
 
 	def __rmul__(self, Quaternion other):
-		cdef double Q0 = self.q0*other.q0 - self.qv.dot(other.qv)
-		cdef Vector3 QV = self.q0*other.qv + self.qv*other.q0 - self.qv.cross(other.qv)
+		cdef Quaternion Q0 = self.q0*other.q0 - self.qv.dot(other.qv)
+		cdef Quaternion QV = self.q0*other.qv + self.qv*other.q0 - self.qv.cross(other.qv)
 		return Quaternion(Q0, QV)
 
 	def __add__(self, Quaternion other):
