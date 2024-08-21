@@ -1,6 +1,5 @@
 from setuptools import setup, Extension
 from Cython.Build import cythonize
-from autogen_pxd import process_directory, delete_existing_pxd_files
 
 
 # define extensions
@@ -20,5 +19,5 @@ setup(
     version="0.1",
     packages=["geovox"],
     ext_modules=cythonize(extensions),
-    install_requires=["cython"],
+    install_requires=["cython", "scipy"],
 )
