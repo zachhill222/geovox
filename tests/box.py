@@ -73,3 +73,18 @@ print(f"box.high= {repr(newhigh)}: box= {repr(box)}")
 newhigh = Vector3(0,3,3)
 box.high = newhigh
 print(f"box.high= {repr(newhigh)}: box= {repr(box)}")
+
+
+print("\nTESTING SHIFTING BY A VECTOR:")
+box = Box(Vector3(0,1,2), Vector3(3,4,5))
+print(f"box= {repr(box)}")
+shift = Vector3(1,2,-3)
+print(f"shift= {repr(shift)}")
+
+print(f"box+shift= {repr(box+shift)}")
+print(f"box-shift= {repr(box-shift)}")
+
+box+=shift
+print(f"box+=shift -> box= {repr(box)}")
+box-=shift
+print(f"box-=shift -> box= {repr(box)}")

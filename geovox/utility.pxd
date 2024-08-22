@@ -1,6 +1,3 @@
-################# constants ################################################
-cdef double PI = 3.141592653589793238462643383279
-
 ################# class for 3D points ######################################
 cdef class Vector3:
 	cdef public double x, y, z
@@ -29,6 +26,7 @@ cdef class Quaternion:
 	cpdef Quaternion inv(self)
 	cpdef Vector3 rotate(self, Vector3 point)
 	cpdef Quaternion normalize(self)
+	cpdef Quaternion setrotation(self, double angle, Vector3 axis)
 
 
 

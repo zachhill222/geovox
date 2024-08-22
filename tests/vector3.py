@@ -1,4 +1,7 @@
 from geovox.utility import Vector3
+from time import time
+from sys import getsizeof
+from numpy import pi as PI
 
 U = Vector3(1,2,-3)
 u = Vector3(U.x, U.y, U.z)
@@ -76,3 +79,12 @@ u.z=u.x-u.y
 print("u.z=u.x-u.y -> u=",repr(u))
 print("u.z=",u.z)
 
+
+n = int(64e6)
+print(f"\nCREATING A LIST OF {n} Vector3 OBJECTS:")
+tic = time()
+vectorlist = []
+for i in range(n):
+	vectorlist.append(Vector3(PI,PI,PI))
+toc = time()
+print(f"TIME= {toc-tic} SECONDS, MEMORY= {getsizeof(vectorlist)/(2**20)} MB")

@@ -1,11 +1,18 @@
 ########## import special C functions and tools from utility.pyx ##########
-from geovox.utility cimport Vector3, Box, Quaternion, PI
-from scipy.special import beta
+from geovox.utility cimport Vector3, Box, Quaternion
+from libc.math cimport tgamma
 from libc.math cimport pow as fpow
 
-# Each shape must contain a volume and a function of the signature: bint contains(self, Vector3 point)
+# Each shape must contain a volume property and a function of the signature: bint contains(self, Vector3 point)
 # that determines if the point is contained in the particle. Each particle should be (mathematically) closed and convex.
+# Each shape must have a method to update both the center and rotation quaternion (if it has one)
 
+############# USEFUL STUFF ##############
+cpdef beta(double x, double y):
+	return tgamma(x)*tgamma(y)/tgamma(x+y)
+
+	
+C_SPHERE = 4.188790204786390984616857844373
 
 ############# BASE CLASS ################
 cdef class Shape3D:
@@ -19,71 +26,158 @@ cdef class Shape3D:
 
 ############ Sphere #################
 cdef class Sphere(Shape3D):
-	def __init__(self, double r, Vector3 center):
-		cdef Vector3 high = Vector3(center.x+r, center.y+r, center.z+r)
-		cdef Vector3 low = Vector3(center.x-r, center.y-r, center.z-r)
+	def __init__(self, double R, Vector3 center):
+		cdef Vector3 high = Vector3(center.x+R, center.y+R, center.z+R)
+		cdef Vector3 low = Vector3(center.x-R, center.y-R, center.z-R)
 		super().__init__(center, Box(low, high))
-		self.r      = r
-		self.r2     = r*r
-		self.volume = (4.0*PI/3.0)*(self.r2*self.r)
+		self.R      = R
+		self.R2     = R*R
 
-	cdef bint contains(self, Vector3 point):
+	cpdef bint contains(self, Vector3 point):
 		point-=self.center
-		return point.abs2 <= self.r2
+		return point.abs2 <= self.R2
+
+	@property
+	def volume(self): return C_SPHERE*(self.R2*self.R)
+	
+	@property
+	def bbox(self): return self.bbox
+
+	@property
+	def R(self): return self.R
+	@R.setter
+	def R(self, double value):
+		self.R = value
+		self.R2 = value*value
+		self.bbox = self.getbbox()
+
+
+	@property
+	def center(self): return self.center
+	@center.setter
+	def center(self, Vector3 value):
+		self.center = value
+		self.bbox = self.getbbox()
 
 	def __repr__(self):
-		return "Sphere(double "+str(self.r)+", "+repr(self.center)+")"
+		return f"Sphere(double {str(self.R)}, {repr(self.center)})"
+
+	def __str__(self):
+		string = "Sphere:\n"
+		string+= f"\tR= {self.R}\n"
+		string+= f"\tcenter= {repr(self.center)}\n"
+		return string
 
 
 ############ Prism #################
 cdef class Prism(Shape3D):
 	def __init__(self, Vector3 R, Vector3 center, Quaternion Q):
-		# determine bounding box
-		cdef double maxR  = R.infNorm()
-		cdef Vector3 low  = Vector3(maxR, maxR, maxR)
-		cdef Vector3 high = Vector3(-maxR, -maxR, -maxR)
-		cdef Box testbox  = Box(low, high)
-		cdef Vector3 vertex
-		for n in range(8):
-			vertex = Q.rotate(testbox.vertex(n))
-			low.x = min(low.x, vertex.x)
-			low.y = min(low.x, vertex.y)
-			low.z = min(low.x, vertex.z)
-			high.x = max(high.x, vertex.x)
-			high.y = max(high.x, vertex.y)
-			high.z = max(high.x, vertex.z)
-
-		# finish initialization
-		super().__init__(center, Box(low, high))
-
-		self.prism = Box(-R,R) #prism in local coordinates
 		self.R = R
+		self.localprism = Box(-self.R, self.R)
 		self.Q = Q #if rotations are opposite to what are expected, your quaternion should probably be passed to __init__ as Q.conj()
-		self.volume = 8.0*self.R.x*self.R.y*self.R.z
+		self.center = center
+		self.bbox = self.getbbox()
 
-	cdef bint contains(self, Vector3 point):
+	cdef Box getbbox(self):
+		# determine bounding box
+		cdef double maxR  = self.R.infNorm() + 1.0
+		cdef Vector3 low  = Vector3(maxR, maxR, maxR) #placeholder to guarentee components from a vertex are used
+		cdef Vector3 high = Vector3(-maxR, -maxR, -maxR) #placeholder to guarentee components from a vertex are used
+		cdef Vector3 vert
+		for n in range(8):
+			vert = self.vertex(n)
+			low.x = min(low.x, vert.x)
+			low.y = min(low.y, vert.y)
+			low.z = min(low.z, vert.z)
+			high.x = max(high.x, vert.x)
+			high.y = max(high.y, vert.y)
+			high.z = max(high.z, vert.z)
+		box = Box(low, high)
+		box+=self.center
+		return box
+
+	cpdef bint contains(self, Vector3 point):
 		point-= self.center
 		point = self.Q.rotate(point)
-		return self.prism.contains(point)
+		return self.localprism.contains(point)
+
+	cpdef Vector3 vertex(self, int n):#get n-th vertex (.vtk ordering in local coordinates and then translated to global)
+		return self.Q.conj().rotate(self.localprism.vertex(n))+self.center
+
+	cpdef Vector3 facecenter(self, int n):
+		cdef Vector3 point
+		if n==0:   point = Vector3( -self.R.x, 0.0, 0.0)
+		elif n==1: point = Vector3(  self.R.x, 0.0, 0.0)
+		elif n==2: point = Vector3( 0.0, -self.R.y, 0.0)
+		elif n==3: point = Vector3( 0.0,  self.R.y, 0.0)
+		elif n==4: point = Vector3( 0.0, 0.0, -self.R.z)
+		elif n==5: point = Vector3( 0.0, 0.0,  self.R.z)
+
+		return self.Q.conj().rotate(point)+self.center
+
+	@property
+	def volume(self): return 8.0*self.R.x*self.R.y*self.R.z
+	
+	@property
+	def bbox(self): return self.bbox
+	
+	@property
+	def center(self): return self.center
+	@center.setter
+	def center(self, Vector3 value):
+		self.center = value
+		self.bbox = self.getbbox()
+
+	@property
+	def R(self): return self.R
+	@R.setter
+	def R(self, Vector3 value):
+		self.R = value
+		self.localprism = Box(-self.R, self.R)
+		self.bbox = self.getbbox()
+
+	@property
+	def Q(self): return self.Q
+	@Q.setter
+	def Q(self, Quaternion value):
+		self.Q = value
+		self.bbox = self.getbbox()
 
 	def __repr__(self):
-		return "Prism("+repr(self.R)+", "+repr(self.center)+", "+repr(self.Q)+")"
+		return f"Prism({repr(self.R)}, {repr(self.center)}, {repr(self.Q)})"
+
+	def __str__(self):
+		string = "Prism:\n"
+		string+= f"\tR= {repr(self.R)}\n"
+		string+= f"\tcenter= {repr(self.center)}\n"
+		string+= f"\tQ= {repr(self.Q)}\n"
+		return string
 
 
 ########### Ellipsoid ###########
 cdef class Ellipsoid(Prism):
 	def __init__(self, Vector3 R, Vector3 center, Quaternion Q):
 		super().__init__(R, center, Q)
-		self.volume *= (PI/6.0) #volume of the bounding prism times pi/6
 
-	cdef bint contains(self, Vector3 point):
+	@property
+	def volume(self):
+		return C_SPHERE*self.R.x*self.R.y*self.R.z #volume of the bounding prism times pi/6
+
+	cpdef bint contains(self, Vector3 point):
 		point-= self.center
 		point = self.Q.rotate(point)
 		point/= self.R
-		return point.abs2() <= 1
+		return point.abs2 <= 1
 
 	def __repr__(self):
-		return "Ellipsoid("+repr(self.R)+", "+repr(self.center)+", "+repr(self.Q)+")"
+		return f"Ellipsoid({repr(self.R)}, {repr(self.center)}, {repr(self.Q)})"
+
+	def __str__(self):
+		string = "Ellipsoid:\n"
+		string+= f"\tR= {repr(self.R)}\n"
+		string+= f"\tcenter= {repr(self.center)}\n"
+		string+= f"\tQ= {repr(self.Q)}\n"
+		return string
 
 
 ############ Super Ellipsoid ##########
@@ -94,10 +188,29 @@ cdef class SuperEllipsoid(Prism):
 		self.eps[1] = eps2
 		self.e0 = 1.0/eps1
 		self.e1 = 1.0/eps2
-		self.e2 = self.eps2/self.eps1
-		self.volume *= (0.25*eps1*eps2* beta(0.5*eps1, 1.0+eps1) * beta(0.5*eps2, 1.0+0.5*eps2))
+		self.e2 = eps2/eps1
 
-	cdef bint contains(self, Vector3 point):
+	@property
+	def volume(self):
+		return 2.0 * self.R.x*self.R.y*self.R.z * self.eps[0]*self.eps[1] * beta(0.5*self.eps[0], 1.0+self.eps[0]) * beta(0.5*self.eps[1], 1.0+0.5*self.eps[1])
+
+	@property
+	def eps1(self): return self.eps[0]
+	@eps1.setter
+	def eps1(self, double value):
+		self.eps[0] = value
+		self.e0 = 1.0/value
+		self.e2 = self.eps[1]/value
+
+	@property
+	def eps2(self): return self.eps[1]
+	@eps2.setter
+	def eps2(self, double value):
+		self.eps[1] = value
+		self.e1 = 1.0/value
+		self.e2 = value/self.eps[0]
+
+	cpdef bint contains(self, Vector3 point):
 		point-= self.center
 		point = self.Q.rotate(point)
 		point/=self.R
@@ -108,7 +221,16 @@ cdef class SuperEllipsoid(Prism):
 		return fpow((point.x+point.y), self.e2) + point.z <= 1.0
 
 	def __repr__(self):
-		return "SuperEllipsoid("+repr(self.R)+", "+"double[2] {{0}, {1}}, ".format(self.eps[0], self.eps[1])+repr(self.center)+", "+repr(self.Q)+")"
+		return f"SuperEllipsoid({repr(self.R)}, double {self.eps[0]}, double {self.eps[1]}, {repr(self.center)}, {repr(self.Q)})"
+
+	def __str__(self):
+		string = "Prism:\n"
+		string+= f"\tR= {repr(self.R)}\n"
+		string+= f"\tcenter= {repr(self.center)}\n"
+		string+= f"\tQ= {repr(self.Q)}\n"
+		string+= f"\teps1= {self.eps1}\n"
+		string+= f"\teps2= {self.eps2}\n"
+		return string
 
 
 

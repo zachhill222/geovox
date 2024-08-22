@@ -40,14 +40,9 @@ U.normalize()
 print(f"U.normalize()-> U= {repr(U)}")
 print(f"U.abs2= {U.abs2}")
 
-#set up rotation
-theta = PI/4
-axis  = Vector3(0,0,3).normalize()
-point = Vector3(1,0,1)
-
 print("\nASSIGNMENT:")
-q0 = cos(0.5*theta)
-qv = sin(0.5*theta)*axis
+q0 = 3
+qv = Vector3(1,2,3)
 
 print(f"Q= {repr(Q)}")
 Q.q0 = q0
@@ -57,8 +52,12 @@ print(f"Q.qv= {qv} -> Q= {repr(Q)}")
 
 
 print("\nROTATION")
-print(f"Q= {repr(Q)}")
-print(f"Q.theta= {Q.theta}= PI/{PI/Q.theta}")
+theta = PI/4
+axis  = Vector3(0,0,3)
+point = Vector3(1,0,1)
+Q.setrotation(theta, axis)
+print(f"Q.setrotation({theta}, {repr(axis)})= {repr(Q)}")
+print(f"Q.angle= {Q.angle}= PI/{PI/Q.angle}")
 print(f"Q.axis= {repr(Q.axis)}")
 print(f"point= {repr(point)}")
 print(f"Q.rotate(point)= {repr(Q.rotate(point))}")

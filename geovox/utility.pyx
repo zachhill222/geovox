@@ -1,8 +1,7 @@
 ################# import basic math from C ####################
-from libc.math cimport sqrt, fabs, acos #double to double
+from libc.math cimport sqrt, fabs, acos, cos, sin #double to double
 
-################# constants ################################################
-# cpdef const double PI = 3.141592653589793238462643383279
+
 
 ################# class for 3D points ####################
 cdef class Vector3:
@@ -139,8 +138,10 @@ cdef class Box: #non-degenerate closed box, faces parallel to coordinate planes
 
 		templow.x  = min(value.x, self.high.x)
 		temphigh.x = max(value.x, self.high.x)
+
 		templow.y  = min(value.y, self.high.y)
 		temphigh.y = max(value.y, self.high.y)
+		
 		templow.z  = min(value.z, self.high.z)
 		temphigh.z = max(value.z, self.high.z)
 		
@@ -157,8 +158,10 @@ cdef class Box: #non-degenerate closed box, faces parallel to coordinate planes
 
 		templow.x  = min(value.x, self.low.x)
 		temphigh.x = max(value.x, self.low.x)
+
 		templow.y  = min(value.y, self.low.y)
 		temphigh.y = max(value.y, self.low.y)
+
 		templow.z  = min(value.z, self.low.z)
 		temphigh.z = max(value.z, self.low.z)
 		
@@ -181,6 +184,8 @@ cdef class Box: #non-degenerate closed box, faces parallel to coordinate planes
 
 		raise Exception("n must be between 0 and 7")
 
+
+	# relation to other points/boxes
 	cpdef bint contains(self, Vector3 point):
 		return self.low <= point and point <= self.high
 
@@ -190,6 +195,25 @@ cdef class Box: #non-degenerate closed box, faces parallel to coordinate planes
 			if self.contains(other.vertex(n)): return True
 		return False
 
+
+	# shifting
+	def __add__(self, Vector3 other): #shift box by other
+		return Box(self.low+other, self.high+other)
+
+	def __iadd__(self, Vector3 other):
+		self.low+=other
+		self.high+=other
+		return self
+
+	def __sub__(self, Vector3 other): #shift box by -other
+		return Box(self.low-other, self.high-other)
+
+	def __isub__(self, Vector3 other):
+		self.low-=other
+		self.high-=other
+		return self
+
+	# representation
 	def __str__(self):
 		string = "Box:\n"
 		string+="\tlow=  "+self.low.__str__()+"\n"
@@ -218,13 +242,10 @@ cdef class Quaternion:
 		cdef double C = 1.0/self.abs2
 		return Quaternion(C*self.q0, (-C)*self.qv)
 
-	cpdef Vector3 rotate(self, Vector3 point):
-		cdef Quaternion V = Quaternion(0.0, point)
-		V = self*V*self.conj()
-		return V.qv
 
+	# rotations
 	@property
-	def theta(self):
+	def angle(self):
 		if abs(self.abs2 - 1) > 1e-8:
 			print(f"WARNING: Q= {repr(self)} is not a rotation quaternion")
 		return 2.0*acos(self.q0)
@@ -241,6 +262,18 @@ cdef class Quaternion:
 		self.qv = C*self.qv
 		return self
 
+	cpdef Quaternion setrotation(self, double angle, Vector3 axis):
+		self.qv = sin(0.5*angle)*axis.normalize()
+		self.q0 = cos(0.5*angle)
+		return self
+
+	cpdef Vector3 rotate(self, Vector3 point):
+		cdef Quaternion V = Quaternion(0.0, point)
+		V = self*V*self.conj()
+		return V.qv
+
+
+	# magnitude
 	@property
 	def abs2(self):
 		return self.q0*self.q0 + self.qv.x*self.qv.x + self.qv.y*self.qv.y + self.qv.z*self.qv.z
@@ -248,6 +281,8 @@ cdef class Quaternion:
 	def __abs__(self):
 		return sqrt(self.abs2)
 
+
+	# arithmetic
 	def __mul__(self, Quaternion other): #<Quaternion>*<Quaternion>
 		cdef double Q0 = self.q0*other.q0 - self.qv.dot(other.qv)
 		cdef Vector3 QV = self.q0*other.qv + other.q0*self.qv + self.qv.cross(other.qv)
@@ -267,9 +302,9 @@ cdef class Quaternion:
 
 	def __neg__(self):
 		return Quaternion(-self.q0, -self.qv)
-
 	
 
+	# represenation
 	def __str__(self):
 		string = "Quaternion:\n"
 		string+= "\tq0= {0}\n".format(self.q0)
