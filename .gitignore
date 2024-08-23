@@ -1,9 +1,10 @@
 # ignore python virtual environment
-./.venv
-./.workDebVenv
+.venv/
+.workDebVenv/
 
 # ignore compiled library and similar
 *.so
 *.c
 **/__pycache__/
 build/
+geovox.egg-info/
