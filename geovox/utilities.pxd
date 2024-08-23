@@ -30,6 +30,3 @@ cdef class Quaternion:
 	cpdef Quaternion setrotation(self, double angle, Vector3 axis)
 
 
-
-
-

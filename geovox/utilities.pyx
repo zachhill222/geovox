@@ -1,8 +1,8 @@
 ################# import basic math from C ####################
 from libc.math cimport sqrt, fabs, acos, cos, sin #double to double
-from geovox.vtkutil cimport VtkVoxel
+from geovox.vtkutil cimport VtkVoxel, IndexIJK
 
-cdef VtkVoxel VTK_VOXEL
+cdef VtkVoxel VTK_VOXEL = VtkVoxel()
 
 
 ################# class for 3D points ####################
@@ -185,23 +185,15 @@ cdef class Box: #non-degenerate closed box, faces parallel to coordinate planes
 
 
 	cpdef Vector3 vertex(self, int n): #get vertex in .vtk ordering
-		cdef bint* ijk = VTK_VOXEL.ijk(n)
+		cdef IndexIJK ijk = VTK_VOXEL.ijk(n)
+
 		cdef Vector3 vert = self.low.copy()
 		
 		if ijk[0]: vert.x = self.high.x
 		if ijk[1]: vert.y = self.high.y
 		if ijk[2]: vert.z = self.high.z
 
-		# if n==0:   return Vector3(self.low.x, self.low.y, self.low.z)
-		# elif n==1: return Vector3(self.high.x, self.low.y, self.low.z)
-		# elif n==2: return Vector3(self.high.x, self.high.y, self.low.z)
-		# elif n==3: return Vector3(self.low.x, self.high.y, self.low.z)
-		# elif n==4: return Vector3(self.low.x, self.low.y, self.high.z)
-		# elif n==5: return Vector3(self.high.x, self.low.y, self.high.z)
-		# elif n==6: return Vector3(self.high.x, self.high.y, self.high.z)
-		# elif n==7: return Vector3(self.low.x, self.high.y, self.high.z)
-
-		raise Exception("n must be between 0 and 7")
+		return vert
 
 
 	# relation to other points/boxes
