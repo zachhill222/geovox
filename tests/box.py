@@ -1,16 +1,17 @@
-from geovox.utility import Box, Vector3
+from geovox.utilities import Box, Vector3
 
 
 low1 = Vector3(-1,-2,-3)
 high1 = Vector3(1,2,3)
 box1 = Box(low1, high1)
-print("box1=",repr(box1))
+print(f"box1= {repr(box1)}")
+print(f"box1.sidelength= {repr(box1.sidelength)}")
+print(f"box1.volume= {box1.volume}")
 
-
-low2 = Vector3(0,0,0)
-high2 = Vector3(3,3,3)
+low2 = Vector3(0,0,3)
+high2 = Vector3(3,3,0)
 box2 = Box(low2, high2)
-print("box2=",repr(box2))
+print(f"box2= Box({repr(low2)}), {repr(high2)}) -> box2= {repr(box2)}")
 
 low3 = Vector3(3,3,3)
 high3 = Vector3(6,6,6)

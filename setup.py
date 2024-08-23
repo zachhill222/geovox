@@ -5,12 +5,16 @@ from Cython.Build import cythonize
 # define extensions
 extensions = [
     Extension(
-        name="geovox.utility",
-        sources=["geovox/utility.pyx"]
+        name="geovox.utilities",
+        sources=["geovox/utilities.pyx"]
     ),
     Extension(
         name="geovox.particles",
         sources=["geovox/particles.pyx"]
+    ),
+    Extension(
+        name="geovox.vtkutil",
+        sources=["geovox/vtkutil.pyx"]
     )
 ]
 

@@ -1,5 +1,5 @@
 ############# import classes from utility ############
-from geovox.utility cimport Vector3, Box, Quaternion
+from geovox.utilities cimport Vector3, Box, Quaternion
 
 
 ############# BASE CLASS ################

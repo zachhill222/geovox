@@ -1,0 +1,13 @@
+LICENSE
+README.md
+setup.py
+geovox/__init__.py
+geovox/particles.c
+geovox/utilities.c
+geovox/utility.c
+geovox/vtkutil.c
+geovox.egg-info/PKG-INFO
+geovox.egg-info/SOURCES.txt
+geovox.egg-info/dependency_links.txt
+geovox.egg-info/requires.txt
+geovox.egg-info/top_level.txt

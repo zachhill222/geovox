@@ -1,5 +1,6 @@
 # ignore python virtual environment
-geovoxenv/
+./.venv
+./.workDebVenv
 
 # ignore compiled library and similar
 *.so

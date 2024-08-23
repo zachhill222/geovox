@@ -1,4 +1,4 @@
-from geovox.utility import Vector3
+from geovox.utilities import Vector3
 from time import time
 from sys import getsizeof
 from numpy import pi as PI

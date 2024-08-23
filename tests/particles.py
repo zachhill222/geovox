@@ -1,4 +1,4 @@
-from geovox.utility import Vector3, Quaternion
+from geovox.utilities import Vector3, Quaternion
 from geovox.particles import Sphere, Prism, Ellipsoid, SuperEllipsoid
 
 from time import time
