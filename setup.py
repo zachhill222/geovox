@@ -15,6 +15,10 @@ extensions = [
     Extension(
         name="geovox.vtkutil",
         sources=["geovox/vtkutil.pyx"]
+    ),
+    Extension(
+        name="geovox.assembly",
+        sources=["geovox/assembly.pyx"]
     )
 ]
 
