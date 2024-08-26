@@ -1,6 +1,6 @@
 ########## import special C functions and tools from utility.pyx ##########
 from geovox.utilities cimport Vector3, Box, Quaternion
-from libc.math cimport tgamma
+from libc.math cimport tgamma, fabs
 from libc.math cimport pow as fpow
 
 # Each shape must contain a volume property and a function of the signature: bint contains(self, Vector3 point)
@@ -32,10 +32,16 @@ cdef class Sphere(Shape3D):
 		super().__init__(center, Box(low, high))
 		self.R      = R
 		self.R2     = R*R
+		self.R1     = 1.0/R
 
-	cpdef bint contains(self, Vector3 point):
-		point-=self.center
-		return point.abs2 <= self.R2
+	cpdef double levelval(self, Vector3 point): #evaluate level set squared
+		return (self.R1*(point-self.center)).abs2
+
+	cpdef Vector3 levelgrad(self, Vector3 point): #gradient of the level function
+		return 2.0*(point - self.center)
+
+
+	cpdef bint contains(self, Vector3 point): return self.levelval(point) <= 1.0
 
 	@property
 	def volume(self): return C_SPHERE*(self.R2*self.R)
@@ -96,10 +102,15 @@ cdef class Prism(Shape3D):
 		box+=self.center
 		return box
 
-	cpdef bint contains(self, Vector3 point):
+	cpdef double levelval(self, Vector3 point): #evaluate level set squared
 		point-= self.center
 		point = self.Q.rotate(point)
-		return self.localprism.contains(point)
+		point/= self.R
+		return point.infNorm()
+
+	# cpdef Vector3 levelgrad(self, Vector3 point): #gradient of the level function, not implemented
+
+	cpdef bint contains(self, Vector3 point): return self.levelval(point) <= 1.0
 
 	cpdef Vector3 vertex(self, int n):#get n-th vertex (.vtk ordering in local coordinates and then translated to global)
 		return self.Q.conj().rotate(self.localprism.vertex(n))+self.center
@@ -163,11 +174,20 @@ cdef class Ellipsoid(Prism):
 	def volume(self):
 		return C_SPHERE*self.R.x*self.R.y*self.R.z #volume of the bounding prism times pi/6
 
-	cpdef bint contains(self, Vector3 point):
+	cpdef double levelval(self, Vector3 point): #evaluate level set squared
 		point-= self.center
 		point = self.Q.rotate(point)
 		point/= self.R
-		return point.abs2 <= 1
+		return point.abs2
+
+	cpdef Vector3 levelgrad(self, Vector3 point): #gradient of the level function
+		point-= self.center
+		point = self.Q.rotate(point) #rotate into reference frame
+		point/= self.R #scale
+		point = 2.0*point #gradient is the sum of squares
+		return self.Q.conj().rotate(point) #rotate back into global reference frame
+
+	cpdef bint contains(self, Vector3 point): return self.levelval(point) <= 1.0
 
 	def __repr__(self):
 		return f"Ellipsoid({repr(self.R)}, {repr(self.center)}, {repr(self.Q)})"
@@ -186,39 +206,38 @@ cdef class SuperEllipsoid(Prism):
 		super().__init__(R, center, Q)
 		self.eps[0] = eps1
 		self.eps[1] = eps2
-		self.e0 = 1.0/eps1
-		self.e1 = 1.0/eps2
+		self.e0 = 2.0/eps1
+		self.e1 = 2.0/eps2
 		self.e2 = eps2/eps1
+
+		self.C_SUPERELLIPSOID = self.eps[0]*self.eps[1] * beta(0.5*self.eps[0], 1.0+self.eps[0]) * beta(0.5*self.eps[1], 1.0+0.5*self.eps[1])
 
 	@property
 	def volume(self):
-		return 2.0 * self.R.x*self.R.y*self.R.z * self.eps[0]*self.eps[1] * beta(0.5*self.eps[0], 1.0+self.eps[0]) * beta(0.5*self.eps[1], 1.0+0.5*self.eps[1])
+		return 2.0 * self.R.x*self.R.y*self.R.z * self.C_SUPERELLIPSOID
 
-	@property
-	def eps1(self): return self.eps[0]
-	@eps1.setter
-	def eps1(self, double value):
-		self.eps[0] = value
-		self.e0 = 1.0/value
-		self.e2 = self.eps[1]/value
-
-	@property
-	def eps2(self): return self.eps[1]
-	@eps2.setter
-	def eps2(self, double value):
-		self.eps[1] = value
-		self.e1 = 1.0/value
-		self.e2 = value/self.eps[0]
-
-	cpdef bint contains(self, Vector3 point):
+	cpdef double levelval(self, Vector3 point): #evaluate level set (squared)
 		point-= self.center
 		point = self.Q.rotate(point)
-		point/=self.R
+		point/= self.R
+		point.x = fpow(fabs(point.x), self.e1)
+		point.y = fpow(fabs(point.y), self.e1)
+		point.z = fpow(fabs(point.z), self.e0)
+		return fpow((point.x+point.y), self.e2) + point.z
 
-		point.x = fpow(point.x, self.e1)
-		point.y = fpow(point.y, self.e1)
-		point.z = fpow(point.z, self.e0)
-		return fpow((point.x+point.y), self.e2) + point.z <= 1.0
+	cpdef Vector3 levelgrad(self, Vector3 point): #gradient of the level function
+		point-= self.center
+		point = self.Q.rotate(point) #rotate into reference frame
+		point/= self.R #scale
+		cdef Vector3 grad = Vector3(0.0,0.0,0.0)
+		grad.x = self.e1 * fpow( fpow(point.x, self.e1)+fpow(point.y, self.e1), self.e2 ) * fpow(point.x, self.e1-1.0) / self.R.x
+		grad.y = self.e1 * fpow( fpow(point.x, self.e1)+fpow(point.y, self.e1), self.e2 ) * fpow(point.y, self.e1-1.0) / self.R.y
+		grad.z = self.e0 * fpow(point.z, self.e0-1.0) / self.R.z
+
+		return self.Q.conj().rotate(grad) #rotate back into global reference frame
+
+	cpdef bint contains(self, Vector3 point): return self.levelval(point) <= 1.0
+	# cpdef bint contains(self, Vector3 point): return True
 
 	def __repr__(self):
 		return f"SuperEllipsoid({repr(self.R)}, double {self.eps[0]}, double {self.eps[1]}, {repr(self.center)}, {repr(self.Q)})"
@@ -228,8 +247,8 @@ cdef class SuperEllipsoid(Prism):
 		string+= f"\tR= {repr(self.R)}\n"
 		string+= f"\tcenter= {repr(self.center)}\n"
 		string+= f"\tQ= {repr(self.Q)}\n"
-		string+= f"\teps1= {self.eps1}\n"
-		string+= f"\teps2= {self.eps2}\n"
+		string+= f"\teps1= {self.eps[0]}\n"
+		string+= f"\teps2= {self.eps[1]}\n"
 		return string
 
 

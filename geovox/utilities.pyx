@@ -184,7 +184,7 @@ cdef class Box: #non-degenerate closed box, faces parallel to coordinate planes
 			print("setting high= "+repr(value)+" would result in an invalid Box. high was not set.")
 
 
-	cpdef Vector3 vertex(self, int n): #get vertex in .vtk ordering
+	cpdef Vector3 vertex(self, int n): #get vertex in .vtk VOXEL ordering (different from hexahedron)
 		cdef IndexIJK ijk = VTK_VOXEL.ijk(n)
 
 		cdef Vector3 vert = self.low.copy()
@@ -195,15 +195,29 @@ cdef class Box: #non-degenerate closed box, faces parallel to coordinate planes
 
 		return vert
 
+	cpdef Vector3 facecenter(self, int n): #get n-th face center, n=0,1,...,5
+		return self.center + 0.5*self.facenormal(n)*self.sidelength
+
+	cpdef Vector3 facenormal(self, int n): #get n-th outward unit vector, n=0,1,...,5
+		if   n==0: return Vector3(-1.0, 0.0, 0.0)
+		elif n==1: return Vector3( 0.0,-1.0, 0.0)
+		elif n==2: return Vector3( 0.0, 0.0,-1.0)
+		elif n==3: return Vector3( 1.0, 0.0, 0.0)
+		elif n==4: return Vector3( 0.0, 1.0, 0.0)
+		elif n==5: return Vector3( 0.0, 0.0, 1.0)
 
 	# relation to other points/boxes
 	cpdef bint contains(self, Vector3 point):
 		return self.low <= point and point <= self.high
 
+	cpdef bint strictcontains(self, Vector3 point):
+		return self.low < point and point < self.high
+
 	cpdef bint intersects(self, Box other):
-		if other.high < self.low or other.low > self.high: return False
 		for n in range(8):
 			if self.contains(other.vertex(n)): return True
+		for n in range(8): #this shouldn't be necessary?
+			if other.contains(self.vertex(n)): return True
 		return False
 
 
@@ -223,6 +237,13 @@ cdef class Box: #non-degenerate closed box, faces parallel to coordinate planes
 		self.low-=other
 		self.high-=other
 		return self
+
+	# scaling
+	def __rmul__(self, double c): #scale from center
+		cdef Vector3 low = self.low - self.center
+		cdef Vector3 high = self.high - self.center
+		return Box(c*low+self.center, c*high+self.center)
+
 
 	# representation
 	def __str__(self):

@@ -89,3 +89,27 @@ box+=shift
 print(f"box+=shift -> box= {repr(box)}")
 box-=shift
 print(f"box-=shift -> box= {repr(box)}")
+
+
+print("\nTESTING FACE AND FACENORMAL:")
+box = Box(Vector3(0,0,0), Vector3(1,1,1))
+print(f"box= {repr(box)}")
+print(f"box.sidelength= {repr(box.sidelength)}")
+
+for n in range(6):
+	print(f"box.facenormal(n)= {repr(box.facenormal(n))},\t box.facecenter(n)= {repr(box.facecenter(n))}")
+
+
+print("\nTESTING VERTICES:")
+box = Box(Vector3(0,0,0), Vector3(1,1,1))
+print(f"box= {repr(box)}")
+for n in range(8):
+	print(f"box.vertex(n)= {repr(box.vertex(n))}")
+
+
+print("\nTESTING SCALING:")
+box = Box(Vector3(1,2,3), Vector3(4,5,6))
+print(f"box= {repr(box)}")
+box = 1.1*box
+print(f"box= 1.1*box -> box= {repr(box)}")
+print(f"box.center = {repr(box.center)}")

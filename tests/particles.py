@@ -157,13 +157,7 @@ print(P)
 print("\nprint(P.bbox):")
 print(P.bbox)
 
-print("\nTESTING EPSILON")
-P.eps1 = 0.5
-print(f"P.eps1 = 0.5 -> P.volume= {P.volume}")
-P.eps2/=5
-print(f"P.eps2/=5 -> P.volume= {P.volume}")
-
-print("\nTESTINGN CONTAINS")
+print("\nTESTING CONTAINS")
 point = P.facecenter(4)
 print(f"P.contains({repr(point)})= {P.contains(point)}")
 point += Vector3(0,0,-1e-5)

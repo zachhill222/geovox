@@ -8,3 +8,6 @@
 **/__pycache__/
 build/
 geovox.egg-info/
+
+# ignore .vtk files from examples
+*.vtk
