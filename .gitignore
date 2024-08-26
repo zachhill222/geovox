@@ -1,6 +1,7 @@
 # ignore python virtual environment
 .venv/
 .workDebVenv/
+.macDebVenv/
 
 # ignore compiled library and similar
 *.so
