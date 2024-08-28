@@ -3,6 +3,10 @@ from geovox.utilities cimport Vector3, Box, Quaternion
 from libc.math cimport tgamma, fabs
 from libc.math cimport pow as fpow
 
+# import numpy as np
+# cimport numpy as np
+
+
 # Each shape must contain a volume property and a function of the signature: bint contains(self, Vector3 point)
 # that determines if the point is contained in the particle. Each particle should be (mathematically) closed and convex.
 # Each shape must have a method to update both the center and rotation quaternion (if it has one)
@@ -86,9 +90,9 @@ cdef class Prism(Shape3D):
 
 	cdef Box getbbox(self):
 		# determine bounding box
-		cdef double maxR  = self.R.infNorm() + 1.0
-		cdef Vector3 low  = Vector3(maxR, maxR, maxR) #placeholder to guarentee components from a vertex are used
-		cdef Vector3 high = Vector3(-maxR, -maxR, -maxR) #placeholder to guarentee components from a vertex are used
+		cdef double maxR  = 2*abs(self.R)
+		cdef Vector3 low  = Vector3(maxR, maxR, maxR)+self.center #placeholder to guarentee components from a vertex are used
+		cdef Vector3 high = Vector3(-maxR, -maxR, -maxR)+self.center #placeholder to guarentee components from a vertex are used
 		cdef Vector3 vert
 		for n in range(8):
 			vert = self.vertex(n)
@@ -99,7 +103,6 @@ cdef class Prism(Shape3D):
 			high.y = max(high.y, vert.y)
 			high.z = max(high.z, vert.z)
 		box = Box(low, high)
-		box+=self.center
 		return box
 
 	cpdef double levelval(self, Vector3 point): #evaluate level set squared
@@ -243,7 +246,7 @@ cdef class SuperEllipsoid(Prism):
 		return f"SuperEllipsoid({repr(self.R)}, double {self.eps[0]}, double {self.eps[1]}, {repr(self.center)}, {repr(self.Q)})"
 
 	def __str__(self):
-		string = "Prism:\n"
+		string = "SuperEllipsoid:\n"
 		string+= f"\tR= {repr(self.R)}\n"
 		string+= f"\tcenter= {repr(self.center)}\n"
 		string+= f"\tQ= {repr(self.Q)}\n"

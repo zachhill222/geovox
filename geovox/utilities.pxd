@@ -18,6 +18,7 @@ cdef class Box: #closed box
 	cpdef bint intersects(self, Box other)
 	cpdef Vector3 facecenter(self, int n) #get n-th face center, n=0,1,...,5
 	cpdef Vector3 facenormal(self, int n) #get n-th outward unit vector, n=0,1,...,5
+	# cpdef Vector3 facesurface(self, int n, double theta1, double theta2)
 
 
 

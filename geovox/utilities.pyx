@@ -119,8 +119,23 @@ cdef class Vector3:
 	def __repr__(self):
 		return "Vector3"+self.__str__()
 
+	#hashing (for using sets, faster than lists)
+	def __key(self): return (self.x, self.y, self.z)
+	def __hash__(self): return hash(self.__key())
 
-##################### class for 3D bounding boxes #########################
+
+	#getitem
+	def __getitem__(self, key):
+		if key==0: return self.x
+		elif key==1: return self.y
+		elif key==2: return self.z
+
+	def __len__(self): return 3
+
+
+
+
+##################### class for 3D bounding boxes (similar to vtk voxel) #########################
 cdef class Box: #non-degenerate closed box, faces parallel to coordinate planes
 	# cdef Vector3 low, high
 
@@ -206,6 +221,30 @@ cdef class Box: #non-degenerate closed box, faces parallel to coordinate planes
 		elif n==4: return Vector3( 0.0, 1.0, 0.0)
 		elif n==5: return Vector3( 0.0, 0.0, 1.0)
 
+	# cpdef Vector3 facesurface(self, int n, double theta1, double theta2):
+	# 	cdef Vector3 axis1, axis2
+	# 	#theta should range from -1 to 1
+	# 	if   n==0:
+	# 		axis1 = 0.5*(self.vertex(0)+self.vertex(2))
+	# 		axis2 = 0.5*(self.vertex(0)+self.vertex(4))
+	# 	elif n==1:
+	# 		axis1 = 0.5*(self.vertex(0)+self.vertex(1))
+	# 		axis2 = 0.5*(self.vertex(0)+self.vertex(4))
+	# 	elif n==2:
+	# 		axis1 = 0.5*(self.vertex(0)+self.vertex(1))
+	# 		axis2 = 0.5*(self.vertex(0)+self.vertex(2))
+	# 	elif n==3:
+	# 		axis1 = 0.5*(self.vertex(7)+self.vertex(3))
+	# 		axis2 = 0.5*(self.vertex(7)+self.vertex(5))
+	# 	elif n==4:
+	# 		axis1 = 0.5*(self.vertex(7)+self.vertex(3))
+	# 		axis2 = 0.5*(self.vertex(7)+self.vertex(6))
+	# 	elif n==5:
+	# 		axis1 = 0.5*(self.vertex(7)+self.vertex(5))
+	# 		axis2 = 0.5*(self.vertex(7)+self.vertex(6))
+
+	# 	return self.facecenter(n) + theta1*axis1 + theta2*axis2
+
 	# relation to other points/boxes
 	cpdef bint contains(self, Vector3 point):
 		return self.low <= point and point <= self.high
@@ -254,6 +293,7 @@ cdef class Box: #non-degenerate closed box, faces parallel to coordinate planes
 
 	def __repr__(self):
 		return "Box("+repr(self.low)+", "+repr(self.high)+")"
+
 
 
 

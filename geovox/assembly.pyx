@@ -1,5 +1,7 @@
 # from geovox.utilities cimport Box, Vector3
 from geovox.vtkutil cimport VtkVoxel, IndexIJK
+from geovox.optimize cimport NelderMead
+# from libc.math cimport sqrt
 
 
 cdef class Node: #node of octree
@@ -10,8 +12,11 @@ cdef class Node: #node of octree
 		self.bbox = bbox
 		self.particle_list = []
 		self.nvert = -1
-		self.centroid = -1
-		
+
+		self.root = self #for storing global tree information
+		self.points = set() #if not calling divide(), this may need to be replaced with [self.bbox.vertex(n) for n in range(8)]
+		# self.pointindex = [] #if not calling divide(), this may need to be replaced with [n for n in range(8)] converted to int[8]
+
 
 	@property
 	def depth(self): return self.depth
@@ -22,39 +27,61 @@ cdef class Node: #node of octree
 		cdef Box subbox
 		cdef int nvert_temp
 
+		#optimization settings
+		cdef double minlevelval
+		cdef double facelevelval, facelevelval_temp
+		cdef int n, m, i, j
+		cdef int n_grid
+		cdef bint stopevals
+		cdef double theta1, theta2
+		cdef NelderMead optimizer
+
 		if self.isdivided:			
 			for child in self.children: child.divide()
 		else:
 			if len(self.particle_list) == 0: return #no need to divide here
 			if self.nvert == 8: return #particles are convex, no need to divide here, all child regions would have nvert=8 as well
+			
+			#parameters for checking dubious voxels
+			# minlevelval = 1.0
+			# n_grid = max(10-self.depth, 2)
 
+			# create children
 			for n in range(8):
 				subbox= Box(self.bbox.vertex(n), self.bbox.center)
 				self.children.append(Node(subbox, self.depth+1))
 
+			# update particle list and nvert
 			for child in self.children:
 				child.nvert = 0
-				child.centroid = 0
 
 				for P in self.particle_list:
-					# print("=========\n",child.bbox, P.bbox, child.bbox.intersects(P.bbox), P.bbox.intersects(child.bbox))
-					if not child.centroid: child.centroid = P.contains(child.bbox.center)
 					if child.bbox.intersects(P.bbox):
-
 						#compute vertex intersections
 						nvert_temp = 0
 						for n in range(8):
 							if P.contains(child.bbox.vertex(n)): nvert_temp += 1
 						child.nvert = max(child.nvert, nvert_temp)
 
-						if child.nvert > 0 or child.bbox.sidelength > P.bbox.sidelength:
+						if child.nvert > 0:
 							child.particle_list.append(P)
+						else:
+							minlevelval = 1.01# + 0.001*abs(child.bbox.sidelength)
+							optimizer = NelderMead(P.levelval, child.bbox, minlevelval)
+							optimizer.maxiter = 100
+							optimizer.penalty_weight = 2**self.depth
+							# print("NelderMead")
+							if optimizer.minimize() <= minlevelval:
+								child.particle_list.append(P)
 
+			# update root points and vertex index
+			for child in self.children:
+				child.root = self.root
+				self.root.points.update([child.bbox.vertex(n) for n in range(8)])
 			
 			#change parameters from self for a non-leaf node
 			self.particle_list = []
 			self.nvert = -1 #only leaf nodes should have a valid marker
-			self.centroid = -1 #only leaf nodes should have a valid marker
 			self.isdivided = True
 
 
@@ -109,29 +136,21 @@ cdef class Node: #node of octree
 
 
 	cpdef void voxelmesh(self, str filename):
+		#get leaves
 		leaves = self.leaflist()
-		# print("traversed tree")
 
-		cdef list _nodelist  = []
-		cdef list _voxellist = []
-		cdef list _nvertlist = []
-		cdef list _localelem = []
+		#get list of nodes, sort for better node ordering
+		cdef list _nodelist  = sorted(self.root.points)
 
-		for leaf in leaves:
-			# list unique nodes/points
-			for n in range(8):
-				if not (leaf.bbox.vertex(n) in _nodelist):
-					_nodelist.append(leaf.bbox.vertex(n))
+		#get voxel element node indices using a hash/dictionary
+		cdef dict _nodedict = dict(enumerate(_nodelist))
+		cdef dict _getnodeindex = dict(zip(_nodedict.values(), _nodedict.keys()))
+		cdef list _voxellist = [ [_getnodeindex[leaf.bbox.vertex(n)] for n in range(8)] for leaf in leaves]
 
-			# construct each leaf bbox in vtk_voxel ordering
-			_localelem = [_nodelist.index(leaf.bbox.vertex(n)) for n in range(8)]
-			_voxellist.append(_localelem)
+		#get nvert data from leaves
+		cdef list _nvertlist = [leaf.nvert for leaf in leaves]
 
-			# get nvert data
-			_nvertlist.append(leaf.nvert)
-		print("constructed data/mesh")
-
-
+		#write .vtk file
 		with open(filename, 'w') as _file:
 			###############  header ###############
 			_file.write("# vtk DataFile Version 2.0\n")

@@ -14,11 +14,12 @@ ctypedef fused particle_t:
 cdef class Node:
 	cdef bint isdivided
 	cdef list children
+	cdef public Node root
+	cdef public set points
 	cdef public list particle_list
 	cdef depth
 	cdef Box bbox
 	cdef public int nvert #number of vertices contained in a single marker. probably shouldn't be public.
-	cdef public int centroid
 	cpdef void divide(self)
 	cpdef Node getnode(self, Vector3 point)
 	cpdef void insertparticle(self, particle_t P)

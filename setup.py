@@ -19,7 +19,10 @@ extensions = [
     Extension(
         name="geovox.assembly",
         sources=["geovox/assembly.pyx"]
-    )
+    ),
+    Extension(
+        name="geovox.optimize",
+        sources=["geovox/optimize.pyx"])
 ]
 
 setup(
