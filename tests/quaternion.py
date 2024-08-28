@@ -1,4 +1,4 @@
-from geovox.utilities import Quaternion, Vector3
+from geovox.utilities import Vector3, Quaternion
 from numpy import sin, cos
 from numpy import pi as PI
 

@@ -4,11 +4,11 @@ from sys import getsizeof
 from numpy import pi as PI
 
 U = Vector3(1,2,-3)
-u = Vector3(U.x, U.y, U.z)
+u = U.copy()
 print("u= "+repr(u))
 
 V = Vector3(3,-5,-1)
-v = Vector3(V.x, V.y, V.z)
+v = V.copy()
 print("v= "+repr(v))
 
 print("\nTESTING VECTOR OPERATIONS")

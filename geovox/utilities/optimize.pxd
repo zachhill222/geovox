@@ -1,4 +1,5 @@
-from geovox.utilities cimport Vector3, Box
+from geovox.utilities.vector3 cimport Vector3
+from geovox.utilities.box cimport Box
 
 # ctypedef double (*f_type)(Vector3)
 

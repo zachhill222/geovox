@@ -1,5 +1,8 @@
 ############# import classes from utility ############
-from geovox.utilities cimport Vector3, Box, Quaternion
+from geovox.utilities.vector3 cimport Vector3
+from geovox.utilities.box cimport Box
+from geovox.utilities.quaternion cimport Quaternion
+
 
 ############# BASE CLASS ################
 cdef class Shape3D:
@@ -29,12 +32,10 @@ cdef class Prism(Shape3D):
 	cpdef Vector3 facecenter(self, int n) #get n-th facecenter (xlow, xhigh, ... in local coordinates and then translated to global)
 
 
-
 cdef class Ellipsoid(Prism):
 	cpdef double levelval(self, Vector3 point)
 	cpdef Vector3 levelgrad(self, Vector3 point)
 	cpdef bint contains(self, Vector3 point)
-
 
 
 cdef class SuperEllipsoid(Prism):

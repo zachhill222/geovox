@@ -1,6 +1,6 @@
-from geovox.assembly import Node
+from geovox.geometry import Node
+from geovox.geometry import Sphere, Prism, Ellipsoid, SuperEllipsoid
 from geovox.utilities import Vector3, Box, Quaternion
-from geovox.particles import Sphere, Prism, Ellipsoid, SuperEllipsoid
 
 from time import time
 from sys import getsizeof
@@ -9,12 +9,12 @@ box = Box(Vector3(-2,-2,-2), Vector3(2,2,2))
 
 
 Q   = Quaternion(1, Vector3(0,0,0))
-Q.setrotation(1, Vector3(1,1,1))
+# Q.setrotation(1, Vector3(1,1,1))
 
 # P   = Sphere(4/3, Vector3(0,0,0))
-P   = Prism(Vector3(1,0.5,0.25), Vector3(0,0,0), Q)
+# P   = Prism(Vector3(1,0.5,0.25), Vector3(0,0,0), Q)
 # P   = Ellipsoid(Vector3(1,0.5,0.125), Vector3(0,0,0), Q)
-# P   = SuperEllipsoid(Vector3(1,0.5,0.25), 1.0, 1.99, Vector3(0,0,0), Q)
+P   = SuperEllipsoid(Vector3(1,0.5,0.25), 1.0, 3.0, Vector3(0,0,0), Q)
 
 
 

@@ -1,4 +1,4 @@
-# ignore python virtual environment
+# ignore python virtual environments
 .venv/
 .workDebVenv/
 .macDebVenv/
@@ -12,3 +12,6 @@ geovox.egg-info/
 
 # ignore .vtk files from examples
 *.vtk
+
+# ignore test files for deletion
+*.deleteme

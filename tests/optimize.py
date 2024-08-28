@@ -1,4 +1,4 @@
-from geovox.optimize import NelderMead
+from geovox.utilities import NelderMead
 from geovox.utilities import Box, Vector3
 
 #define bounds
@@ -10,5 +10,6 @@ F = lambda X: abs(X-Y)
 
 #solve
 neldermead = NelderMead(F, bounds, 0)
-for n in range(20):
-	neldermead.takestep()
+neldermead.penalty_weight = 100
+neldermead.maxiter = 100
+print(neldermead.minimize())

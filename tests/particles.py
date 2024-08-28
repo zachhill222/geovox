@@ -1,5 +1,5 @@
 from geovox.utilities import Vector3, Quaternion
-from geovox.particles import Sphere, Prism, Ellipsoid, SuperEllipsoid
+from geovox.geometry import Sphere, Prism, Ellipsoid, SuperEllipsoid
 
 from time import time
 from sys import getsizeof

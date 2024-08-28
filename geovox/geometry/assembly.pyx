@@ -1,6 +1,4 @@
-# from geovox.utilities cimport Box, Vector3
-from geovox.vtkutil cimport VtkVoxel, IndexIJK
-from geovox.optimize cimport NelderMead
+
 # from libc.math cimport sqrt
 
 
@@ -215,7 +213,7 @@ cdef class Node: #node of octree
 
 
 
-cdef class Assembly:
-	def __init__(self, Box bbox, int maxdepth, list particle_list):
-		self.maxdepth = maxdepth
-		self.root = Node(bbox, 0)
+# cdef class Assembly:
+# 	def __init__(self, Box bbox, int maxdepth, list particle_list):
+# 		self.maxdepth = maxdepth
+# 		self.root = Node(bbox, 0)

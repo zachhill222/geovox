@@ -1,5 +1,7 @@
-from geovox.utilities cimport Box, Vector3
-from geovox.particles cimport Sphere, Prism, Ellipsoid, SuperEllipsoid
+from geovox.utilities.vector3 cimport Vector3
+from geovox.utilities.box cimport Box
+from geovox.geometry.particles cimport Sphere, Prism, Ellipsoid, SuperEllipsoid
+from geovox.utilities.optimize cimport NelderMead
 
 cdef int NONE_DEPTH = -999
 
@@ -29,6 +31,6 @@ cdef class Node:
 	cpdef void voxelmesh(self, str filename) #write to a .vtk file
 
 
-cdef class Assembly:
-	cdef public int maxdepth
-	cdef Node root
+# cdef class Assembly:
+# 	cdef public int maxdepth
+# 	cdef Node root

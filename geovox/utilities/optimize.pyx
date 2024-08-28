@@ -1,6 +1,3 @@
-from geovox.utilities cimport Vector3, Box
-# ctypedef double (*f_type)(Vector3)
-
 cdef class NelderMead:
 	def __init__(self, object F, Box bounds, double target):
 		#problem definition
