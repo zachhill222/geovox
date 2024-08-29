@@ -1,7 +1,3 @@
-
-# from libc.math cimport sqrt
-
-
 cdef class Node: #node of octree
 	def __init__(self, Box bbox, int depth):
 		self.isdivided = False
@@ -45,7 +41,7 @@ cdef class Node: #node of octree
 			# n_grid = max(10-self.depth, 2)
 
 			# create children
-			for n in range(8):
+			for n from 0 <= n < 8:
 				subbox= Box(self.bbox.vertex(n), self.bbox.center)
 				self.children.append(Node(subbox, self.depth+1))
 
@@ -57,7 +53,7 @@ cdef class Node: #node of octree
 					if child.bbox.intersects(P.bbox):
 						#compute vertex intersections
 						nvert_temp = 0
-						for n in range(8):
+						for n from 0 <= n < 8:
 							if P.contains(child.bbox.vertex(n)): nvert_temp += 1
 						child.nvert = max(child.nvert, nvert_temp)
 
@@ -75,7 +71,9 @@ cdef class Node: #node of octree
 			# update root points and vertex index
 			for child in self.children:
 				child.root = self.root
-				self.root.points.update([child.bbox.vertex(n) for n in range(8)])
+				for n from 0 <= n < 8:
+					self.root.points.add(child.bbox.vertex(n))
+					# self.root.points.update([child.bbox.vertex(n) for n in range(8)])
 			
 			#change parameters from self for a non-leaf node
 			self.particle_list = []
@@ -93,7 +91,7 @@ cdef class Node: #node of octree
 				self.particle_list.append(P)
 				
 				nvert_temp = 0
-				for n in range(8):
+				for n from 0 <= n < 8:
 					nvert_temp += P.contains(self.bbox.vertex(n))
 				self.nvert = max(self.nvert, nvert_temp)
 
@@ -103,7 +101,7 @@ cdef class Node: #node of octree
 		# print(f"Checking node: {self}\n")
 		if self.bbox.contains(point):
 			if self.isdivided:
-				for n in range(8):
+				for n from 0 <= n < 8:
 					node = self.children[n].getnode(point)
 					if not (node.depth == NONE_DEPTH):
 						return node
@@ -117,7 +115,6 @@ cdef class Node: #node of octree
 		for P in node.particle_list:
 			if P.contains(point): return True
 		return False
-
 
 
 	@property
@@ -134,6 +131,8 @@ cdef class Node: #node of octree
 
 
 	cpdef void voxelmesh(self, str filename):
+		cdef int leaf_ind, n
+
 		#get leaves
 		leaves = self.leaflist()
 
@@ -143,10 +142,10 @@ cdef class Node: #node of octree
 		#get voxel element node indices using a hash/dictionary
 		cdef dict _nodedict = dict(enumerate(_nodelist))
 		cdef dict _getnodeindex = dict(zip(_nodedict.values(), _nodedict.keys()))
-		cdef list _voxellist = [ [_getnodeindex[leaf.bbox.vertex(n)] for n in range(8)] for leaf in leaves]
 
-		#get nvert data from leaves
-		cdef list _nvertlist = [leaf.nvert for leaf in leaves]
+		#number of leaves/elements and points
+		cdef int n_leaves = len(leaves)
+		cdef int n_points = len(_nodelist)
 
 		#write .vtk file
 		with open(filename, 'w') as _file:
@@ -157,47 +156,37 @@ cdef class Node: #node of octree
 
 			############## points ###############
 			_file.write("DATASET UNSTRUCTURED_GRID\n")
-			_file.write(f"POINTS {len(_nodelist)} float\n")
+			_file.write(f"POINTS {n_points} float\n")
 			string = []
-			for i in range(len(_nodelist)): #Print node locations
-				string.append(f"{_nodelist[i].x} {_nodelist[i].y} {_nodelist[i].z}\n")
+			for leaf_ind from 0 <= leaf_ind < n_points: #Print node locations
+				string.append(f"{_nodelist[leaf_ind].x} {_nodelist[leaf_ind].y} {_nodelist[leaf_ind].z}\n")
 			string.append("\n")
 			_file.write(''.join(string))
 
 			############## voxels ###############
-			_file.write(f"CELLS {len(_voxellist)} {len(_voxellist)+8*len(_voxellist)}\n")
+			_file.write(f"CELLS {n_leaves} {n_leaves+8*n_leaves}\n")
 			string = []
-			for i in range(len(_voxellist)):
+			for leaf_ind from 0 <= leaf_ind < n_leaves:
 				string.append("8 ")
-				for j in range(8):
-					ind = _voxellist[i][j]
+				for n from 0 <= n < 8:
+					ind = _getnodeindex[leaves[leaf_ind].bbox.vertex(n)]
 					string.append(f"{ind} ")
 				string.append("\n")
 			string.append("\n")
 			_file.write(''.join(string))
 
-			_file.write(f"CELL_TYPES {len(_voxellist)}\n")
-			string = "11\n"*len(_voxellist) #might need \n
+			_file.write(f"CELL_TYPES {n_leaves}\n")
+			string = "11\n"*n_leaves #might need \n
 			string+= "\n"
 			_file.write(string)
 
-			############## depth ################
-			# _file.write(f"CELL_DATA {len(_depthlist)}\n")
-			# _file.write("SCALARS treedepth double\n")
-			# _file.write("LOOKUP_TABLE default\n")
-			# string = []
-			# for i in range(len(_depthlist)):
-			# 	string.append(f"{_depthlist[i]}\n")
-			# string.append("\n")
-			# _file.write(''.join(string))
-
 			############## nvert ################
-			_file.write(f"CELL_DATA {len(_nvertlist)}\n")
+			_file.write(f"CELL_DATA {n_leaves}\n")
 			_file.write("SCALARS nvert double\n")
 			_file.write("LOOKUP_TABLE default\n")
 			string = []
-			for i in range(len(_nvertlist)):
-				string.append(f"{_nvertlist[i]}\n")
+			for leaf_ind from 0<= leaf_ind < n_leaves:
+				string.append(f"{leaves[leaf_ind].nvert}\n")
 			string.append("\n")
 			_file.write(''.join(string))
 

@@ -1,5 +1,4 @@
-########## import special C functions and tools from utility.pyx ##########
-from geovox.utilities cimport Vector3, Box, Quaternion
+########## import special C functions ##########
 from libc.math cimport tgamma, fabs
 from libc.math cimport pow as fpow
 

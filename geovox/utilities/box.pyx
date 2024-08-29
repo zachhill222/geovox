@@ -1,5 +1,4 @@
 ################# imports ####################
-# from geovox.utilities.vector3 cimport Vector3
 from geovox.vtkutil cimport VtkVoxel, IndexIJK
 
 

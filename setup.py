@@ -17,6 +17,10 @@ extensions = [
         sources=["geovox/utilities/quaternion.pyx"]
     ),
     Extension(
+        name="geovox.utilities.matrix3",
+        sources=["geovox/utilities/matrix3.pyx"]
+    ),
+    Extension(
         name="geovox.utilities.optimize",
         sources=["geovox/utilities/optimize.pyx"]
     ),
