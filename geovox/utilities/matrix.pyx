@@ -8,9 +8,9 @@ cdef class Matrix3:
 
 	#standard access
 	def __getitem__(self, key): #return key-th row vector
-		if   key == 0: return Vector3(self._data[0], self._data[1], self._data[2])
-		elif key == 1: return Vector3(self._data[3], self._data[4], self._data[5])
-		elif key == 2: return Vector3(self._data[6], self._data[7], self._data[8])
+		if   key == 0: return Vector(self._data[0], self._data[1], self._data[2])
+		elif key == 1: return Vector(self._data[3], self._data[4], self._data[5])
+		elif key == 2: return Vector(self._data[6], self._data[7], self._data[8])
 		raise Exception("Index is out of bounds in Matrix3.__getitem__")
 
 	cpdef double getval(self, int i, int j): return self._data[INDEX(i,j)]
@@ -18,11 +18,11 @@ cdef class Matrix3:
 
 	cpdef Matrix3 copy(self): return Matrix3(self[0], self[1], self[2])
 
-	cpdef Vector3 row(self, int i): return self[i]
-	cpdef Vector3 col(self, int j):
-		if   j == 0: return Vector3(self._data[0], self._data[3], self._data[6])
-		elif j == 1: return Vector3(self._data[1], self._data[4], self._data[7])
-		elif j == 2: return Vector3(self._data[2], self._data[5], self._data[8])
+	cpdef Vector row(self, int i): return self[i]
+	cpdef Vector col(self, int j):
+		if   j == 0: return Vector(self._data[0], self._data[3], self._data[6])
+		elif j == 1: return Vector(self._data[1], self._data[4], self._data[7])
+		elif j == 2: return Vector(self._data[2], self._data[5], self._data[8])
 		raise Exception("Index is out of bounds in Matrix3.col")
 
 
@@ -76,7 +76,7 @@ cdef class Matrix3:
 	def __mul__(self, other):
 		cdef prod = Matrix3((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
 		cdef int i, j
-		cdef Vector3 col, row
+		cdef Vector col, row
 
 
 		for j from 0 <= j < 3:
@@ -94,13 +94,13 @@ cdef class Matrix3:
 	def __matmul__(self, other):
 		return other[0]*self.col(0) + other[1]*self.col(1) + other[2]*self.col(2)
 
-	cpdef Vector3 dot(self, Vector3 other): #M*other
-		cdef Vector3 val 
+	cpdef Vector dot(self, Vector other): #M*other
+		cdef Vector val 
 		val = other[0]*self.col(0) + other[1]*self.col(1) + other[2]*self.col(2)
 		return val
 
-	cpdef Vector3 leftdot(self, Vector3 other): #other.transpose * M
-		cdef Vector3 val
+	cpdef Vector leftdot(self, Vector other): #other.transpose * M
+		cdef Vector val
 		val = other[0]*self[0] + other[1]*self[1] + other[2]*self[2]
 		return val
 		

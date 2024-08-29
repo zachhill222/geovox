@@ -1,4 +1,4 @@
-from geovox.utilities.vector3 cimport Vector3
+from geovox.utilities.vector cimport Vector
 from geovox.utilities.box cimport Box
 from geovox.geometry.particles cimport Sphere, Prism, Ellipsoid, SuperEllipsoid
 from geovox.utilities.optimize cimport NelderMead
@@ -23,9 +23,9 @@ cdef class Node:
 	cdef Box bbox
 	cdef public int nvert #number of vertices contained in a single marker. probably shouldn't be public.
 	cpdef void divide(self)
-	cpdef Node getnode(self, Vector3 point)
+	cpdef Node getnode(self, Vector point)
 	cpdef void insertparticle(self, particle_t P)
-	cpdef bint contains(self, Vector3 point)
+	cpdef bint contains(self, Vector point)
 
 	cpdef list leaflist(self) #return a list of all leaves
 	cpdef void voxelmesh(self, str filename) #write to a .vtk file

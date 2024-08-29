@@ -1,5 +1,5 @@
 ############# import classes from utility ############
-from geovox.utilities.vector3 cimport Vector3
+from geovox.utilities.vector cimport Vector
 from geovox.utilities.box cimport Box
 from geovox.utilities.quaternion cimport Quaternion
 
@@ -7,41 +7,41 @@ from geovox.utilities.quaternion cimport Quaternion
 ############# BASE CLASS ################
 cdef class Shape3D:
 	cdef Box bbox #bounding box
-	cdef Vector3 center #center
+	cdef Vector center #center
 
 
 ############# PARTICLE CLASSES #########
 cdef class Sphere(Shape3D):
 	cdef double R, R2, R1
-	cpdef double levelval(self, Vector3 point)
-	cpdef Vector3 levelgrad(self, Vector3 point)
-	cpdef bint contains(self, Vector3 point)
+	cpdef double levelval(self, Vector point)
+	cpdef Vector levelgrad(self, Vector point)
+	cpdef bint contains(self, Vector point)
 	cdef inline Box getbbox(self):
-		return Box( Vector3(self.center.x-self.R, self.center.y-self.R, self.center.z-self.R), Vector3(self.center.x+self.R, self.center.y+self.R, self.center.z+self.R))
+		return Box( Vector(self.center.x-self.R, self.center.y-self.R, self.center.z-self.R), Vector(self.center.x+self.R, self.center.y+self.R, self.center.z+self.R))
 
 
 cdef class Prism(Shape3D):
-	cdef Vector3 R #radii (distance from center to faces)
+	cdef Vector R #radii (distance from center to faces)
 	cdef Quaternion Q #quaternion for rotation FROM global coordinates TO local coordinates
 	cdef Box localprism #local coordinates, Box(-R,R)
 	cdef Box getbbox(self) #get bbox after Q or center have been updated
-	cpdef double levelval(self, Vector3 point)
-	# cpdef Vector3 levelgrad(self, Vector3 point)
-	cpdef bint contains(self, Vector3 point)
-	cpdef Vector3 vertex(self, int n) #get n-th vertex (.vtk ordering in local coordinates and then translated to global)
-	cpdef Vector3 facecenter(self, int n) #get n-th facecenter (xlow, xhigh, ... in local coordinates and then translated to global)
+	cpdef double levelval(self, Vector point)
+	# cpdef Vector levelgrad(self, Vector point)
+	cpdef bint contains(self, Vector point)
+	cpdef Vector vertex(self, int n) #get n-th vertex (.vtk ordering in local coordinates and then translated to global)
+	cpdef Vector facecenter(self, int n) #get n-th facecenter (xlow, xhigh, ... in local coordinates and then translated to global)
 
 
 cdef class Ellipsoid(Prism):
-	cpdef double levelval(self, Vector3 point)
-	cpdef Vector3 levelgrad(self, Vector3 point)
-	cpdef bint contains(self, Vector3 point)
+	cpdef double levelval(self, Vector point)
+	cpdef Vector levelgrad(self, Vector point)
+	cpdef bint contains(self, Vector point)
 
 
 cdef class SuperEllipsoid(Prism):
 	cdef double C_SUPERELLIPSOID
 	cdef double[2] eps #shape parameters
 	cdef double e0, e1, e2 #powers
-	cpdef double levelval(self, Vector3 point)
-	cpdef Vector3 levelgrad(self, Vector3 point)
-	cpdef bint contains(self, Vector3 point)
+	cpdef double levelval(self, Vector point)
+	cpdef Vector levelgrad(self, Vector point)
+	cpdef bint contains(self, Vector point)

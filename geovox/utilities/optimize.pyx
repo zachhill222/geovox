@@ -17,7 +17,7 @@ cdef class NelderMead:
 		self.target  = target
 
 		#initialize simplex
-		self.simplex = [Vector3(0,0,0)]*4
+		self.simplex = [Vector(3)]*4
 
 		cdef int minvertex, n
 		cdef double tempfval
@@ -51,7 +51,7 @@ cdef class NelderMead:
 		return self.fvals[0]
 
 
-	cpdef double evalF(self, Vector3 point): #add penalty function to F
+	cpdef double evalF(self, Vector point): #add penalty function to F
 		cdef double val = self.F(point)
 
 		cdef double penalty = abs(self.bounds.center - point) - self.R2
@@ -64,7 +64,7 @@ cdef class NelderMead:
 	cpdef void ordersimplex(self):
 		cdef bint unordered = True
 		cdef int n_sweeps = 0
-		cdef Vector3 tempvert
+		cdef Vector tempvert
 		cdef double tempfval
 
 
@@ -89,7 +89,7 @@ cdef class NelderMead:
 		if unordered: print("SIMPLEX METHOD ORDER FAILED")
 
 	cpdef void takestep(self):
-		cdef Vector3 centroid, reflected, expanded, contracted
+		cdef Vector centroid, reflected, expanded, contracted
 		cdef double f_reflected, f_expanded, f_contracted
 		cdef bint shrink_flag = False
 

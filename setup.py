@@ -5,8 +5,8 @@ from Cython.Build import cythonize
 # define extensions
 extensions = [
     Extension(
-        name="geovox.utilities.vector3",
-        sources=["geovox/utilities/vector3.pyx"]
+        name="geovox.utilities.vector",
+        sources=["geovox/utilities/vector.pyx"]
     ),
     Extension(
         name="geovox.utilities.box",
@@ -17,8 +17,8 @@ extensions = [
         sources=["geovox/utilities/quaternion.pyx"]
     ),
     Extension(
-        name="geovox.utilities.matrix3",
-        sources=["geovox/utilities/matrix3.pyx"]
+        name="geovox.utilities.matrix",
+        sources=["geovox/utilities/matrix.pyx"]
     ),
     Extension(
         name="geovox.utilities.optimize",

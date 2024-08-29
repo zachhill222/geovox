@@ -7,11 +7,11 @@ cdef VtkVoxel VTK_VOXEL = VtkVoxel()
 
 ##################### class for 3D bounding boxes (similar to vtk voxel) #########################
 cdef class Box: #non-degenerate closed box, faces parallel to coordinate planes
-	# cdef Vector3 low, high
+	# cdef Vector low, high
 
-	def __init__(self, Vector3 low, Vector3 high): #low and high are any two opposite vertices of the box
-		self.low  = Vector3(min(low.x, high.x), min(low.y, high.y), min(low.z, high.z))
-		self.high = Vector3(max(low.x, high.x), max(low.y, high.y), max(low.z, high.z))
+	def __init__(self, Vector low, Vector high): #low and high are any two opposite vertices of the box
+		self.low  = Vector(min(low.x, high.x), min(low.y, high.y), min(low.z, high.z))
+		self.high = Vector(max(low.x, high.x), max(low.y, high.y), max(low.z, high.z))
 
 		if not self.low < self.high:
 			raise Exception("Box must have positive volume. Specify two opposite vertices.")
@@ -29,9 +29,9 @@ cdef class Box: #non-degenerate closed box, faces parallel to coordinate planes
 	def volume(self): return self.sidelength.prod
 
 	@low.setter
-	def low(self, Vector3 value):
-		cdef Vector3 templow = Vector3(0,0,0)
-		cdef Vector3 temphigh = Vector3(0,0,0)
+	def low(self, Vector value):
+		cdef Vector templow = Vector(0,0,0)
+		cdef Vector temphigh = Vector(0,0,0)
 
 		templow.x  = min(value.x, self.high.x)
 		temphigh.x = max(value.x, self.high.x)
@@ -49,9 +49,9 @@ cdef class Box: #non-degenerate closed box, faces parallel to coordinate planes
 			print("setting low= "+repr(value)+" would result in an invalid Box. low was not set.")
 
 	@high.setter
-	def high(self, Vector3 value):
-		cdef Vector3 templow = Vector3(0,0,0)
-		cdef Vector3 temphigh = Vector3(0,0,0)
+	def high(self, Vector value):
+		cdef Vector templow = Vector(0,0,0)
+		cdef Vector temphigh = Vector(0,0,0)
 
 		templow.x  = min(value.x, self.low.x)
 		temphigh.x = max(value.x, self.low.x)
@@ -69,10 +69,10 @@ cdef class Box: #non-degenerate closed box, faces parallel to coordinate planes
 			print("setting high= "+repr(value)+" would result in an invalid Box. high was not set.")
 
 
-	cpdef Vector3 vertex(self, int n): #get vertex in .vtk VOXEL ordering (different from hexahedron)
+	cpdef Vector vertex(self, int n): #get vertex in .vtk VOXEL ordering (different from hexahedron)
 		cdef IndexIJK ijk = VTK_VOXEL.ijk(n)
 
-		cdef Vector3 vert = self.low.copy()
+		cdef Vector vert = self.low.copy()
 		
 		if ijk[0]: vert.x = self.high.x
 		if ijk[1]: vert.y = self.high.y
@@ -80,23 +80,23 @@ cdef class Box: #non-degenerate closed box, faces parallel to coordinate planes
 
 		return vert
 
-	cpdef Vector3 facecenter(self, int n): #get n-th face center, n=0,1,...,5
+	cpdef Vector facecenter(self, int n): #get n-th face center, n=0,1,...,5
 		return self.center + 0.5*self.facenormal(n)*self.sidelength
 
-	cpdef Vector3 facenormal(self, int n): #get n-th outward unit vector, n=0,1,...,5
-		if   n==0: return Vector3(-1.0, 0.0, 0.0)
-		elif n==1: return Vector3( 0.0,-1.0, 0.0)
-		elif n==2: return Vector3( 0.0, 0.0,-1.0)
-		elif n==3: return Vector3( 1.0, 0.0, 0.0)
-		elif n==4: return Vector3( 0.0, 1.0, 0.0)
-		elif n==5: return Vector3( 0.0, 0.0, 1.0)
+	cpdef Vector facenormal(self, int n): #get n-th outward unit vector, n=0,1,...,5
+		if   n==0: return Vector(-1.0, 0.0, 0.0)
+		elif n==1: return Vector( 0.0,-1.0, 0.0)
+		elif n==2: return Vector( 0.0, 0.0,-1.0)
+		elif n==3: return Vector( 1.0, 0.0, 0.0)
+		elif n==4: return Vector( 0.0, 1.0, 0.0)
+		elif n==5: return Vector( 0.0, 0.0, 1.0)
 
 
 	# relation to other points/boxes
-	cpdef bint contains(self, Vector3 point):
+	cpdef bint contains(self, Vector point):
 		return self.low <= point and point <= self.high
 
-	cpdef bint strictcontains(self, Vector3 point):
+	cpdef bint strictcontains(self, Vector point):
 		return self.low < point and point < self.high
 
 	cpdef bint intersects(self, Box other):
@@ -108,26 +108,26 @@ cdef class Box: #non-degenerate closed box, faces parallel to coordinate planes
 
 
 	# shifting
-	def __add__(self, Vector3 other): #shift box by other
+	def __add__(self, Vector other): #shift box by other
 		return Box(self.low+other, self.high+other)
 
-	def __iadd__(self, Vector3 other):
+	def __iadd__(self, Vector other):
 		self.low+=other
 		self.high+=other
 		return self
 
-	def __sub__(self, Vector3 other): #shift box by -other
+	def __sub__(self, Vector other): #shift box by -other
 		return Box(self.low-other, self.high-other)
 
-	def __isub__(self, Vector3 other):
+	def __isub__(self, Vector other):
 		self.low-=other
 		self.high-=other
 		return self
 
 	# scaling
 	def __rmul__(self, double c): #scale from center
-		cdef Vector3 low = self.low - self.center
-		cdef Vector3 high = self.high - self.center
+		cdef Vector low = self.low - self.center
+		cdef Vector high = self.high - self.center
 		return Box(c*low+self.center, c*high+self.center)
 
 

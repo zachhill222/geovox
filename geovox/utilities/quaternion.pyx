@@ -6,9 +6,9 @@ from libc.math cimport sqrt, acos, cos, sin #double to double
 ######################## class for quaternions ######################
 cdef class Quaternion:
 	# cdef double q0 #scalar component
-	# cdef Vector3 qv #vector component
+	# cdef Vector qv #vector component
 
-	def __init__(self, double q0, Vector3 qv):
+	def __init__(self, double q0, Vector qv):
 		self.q0 = q0
 		self.qv = qv
 
@@ -39,12 +39,12 @@ cdef class Quaternion:
 		self.qv = C*self.qv
 		return self
 
-	cpdef Quaternion setrotation(self, double angle, Vector3 axis):
+	cpdef Quaternion setrotation(self, double angle, Vector axis):
 		self.qv = sin(0.5*angle)*axis.normalize()
 		self.q0 = cos(0.5*angle)
 		return self
 
-	cpdef Vector3 rotate(self, Vector3 point):
+	cpdef Vector rotate(self, Vector point):
 		cdef Quaternion V = Quaternion(0.0, point)
 		V = self*V*self.conj()
 		return V.qv
@@ -62,7 +62,7 @@ cdef class Quaternion:
 	# arithmetic
 	def __mul__(self, Quaternion other): #<Quaternion>*<Quaternion>
 		cdef double Q0 = self.q0*other.q0 - self.qv.dot(other.qv)
-		cdef Vector3 QV = self.q0*other.qv + other.q0*self.qv + self.qv.cross(other.qv)
+		cdef Vector QV = self.q0*other.qv + other.q0*self.qv + self.qv.cross(other.qv)
 		return Quaternion(Q0, QV)
 
 	def __rmul__(self, double c): #scalar multiplication: <double>*<Quaternion>

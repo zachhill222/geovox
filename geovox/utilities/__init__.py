@@ -1,5 +1,5 @@
-from .vector3 import Vector3
+from .vector import Vector
 from .box import Box
 from .quaternion import Quaternion
 from .optimize import NelderMead
-from .matrix3 import Matrix3
+from .matrix import Matrix3

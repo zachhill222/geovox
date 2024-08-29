@@ -1,18 +1,18 @@
-from geovox.utilities import Vector3
+from geovox.utilities import Vector
 from time import time
 from sys import getsizeof
 from numpy import pi as PI
 
-U = Vector3(1,2,-3)
+U = Vector(1,2,-3)
 u = U.copy()
 print("u= "+repr(u))
 
-V = Vector3(3,-5,-1)
+V = Vector(3,4,5)
 v = V.copy()
 print("v= "+repr(v))
 
 print("\nTESTING VECTOR OPERATIONS")
-print("|u|^2=", u.abs2)
+print("|u|^2=", u.abs2())
 print("|u|=", abs(u))
 print("-u=", -u)
 print("2*u=",2*u)
@@ -47,16 +47,16 @@ print("v/u=", v/u)
 print("\nTESTING IN-PLACE VECTOR OPERATIONS")
 u*=v
 print("u*=v: u <-", u)
-u=Vector3(U.x, U.y, U.z)
+u=Vector(U.x, U.y, U.z)
 
 u/=v
 print("u/=v: u <-", u)
-u=Vector3(U.x, U.y, U.z)
+u=Vector(U.x, U.y, U.z)
 
 print("\nTESTING COMPARISONS (POS/NEG CONES, AKA COMPONENT-WISE)")
-O = Vector3(0,0,0)
+O = Vector(0,0,0)
 print("O="+repr(O))
-x = Vector3(1,0,0)
+x = Vector(1,0,0)
 print("O<"+repr(x)+":", O<x)
 print("O<="+repr(x)+":", O<=x)
 print("O>"+repr(x)+":", O>x)
@@ -80,11 +80,15 @@ print("u.z=u.x-u.y -> u=",repr(u))
 print("u.z=",u.z)
 
 
-n = int(64e6)
+n = int(1e6)
 print(f"\nCREATING A LIST OF {n} Vector3 OBJECTS:")
 tic = time()
 vectorlist = []
 for i in range(n):
-	vectorlist.append(Vector3(PI,PI,PI))
+	vectorlist.append(Vector(5))
 toc = time()
 print(f"TIME= {toc-tic} SECONDS, MEMORY= {getsizeof(vectorlist)/(2**20)} MB")
+
+
+set(vectorlist)
+print("\nCONVERTED vectorlist TO set")

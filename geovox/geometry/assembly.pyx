@@ -96,7 +96,7 @@ cdef class Node: #node of octree
 				self.nvert = max(self.nvert, nvert_temp)
 
 
-	cpdef Node getnode(self, Vector3 point): #return first leaf node that contains the point. point should be interior, but not strictly necessary
+	cpdef Node getnode(self, Vector point): #return first leaf node that contains the point. point should be interior, but not strictly necessary
 		cdef Node node = Node(None, None, NONE_DEPTH)
 		# print(f"Checking node: {self}\n")
 		if self.bbox.contains(point):
@@ -108,7 +108,7 @@ cdef class Node: #node of octree
 			else: return self
 		return node
 
-	cpdef bint contains(self, Vector3 point): #determine if point is contained in any particle
+	cpdef bint contains(self, Vector point): #determine if point is contained in any particle
 		cdef node = self.getnode(point)
 		if node.depth == NONE_DEPTH: return False #point is out of bounds
 
