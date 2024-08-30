@@ -15,3 +15,6 @@ geovox.egg-info/
 
 # ignore test files for deletion
 *.deleteme
+
+# ignore output of test cases
+tests/outfiles/*

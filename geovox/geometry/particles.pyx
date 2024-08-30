@@ -26,6 +26,32 @@ cdef class Shape3D:
 	def __repr__(self):
 		return "Shape3D("+repr(self.center)+", "+ repr(self.bbox)+")"
 
+	def __iadd__(self, Vector other): #particle+= vector to shift
+		self.center += other
+		self.bbox   += other
+		return self
+
+	def __add__(self, Vector other):
+		P = self.copy()
+		P.center = self.center + other
+		return P.copy()
+
+	def __isub__(self, Vector other): #particle+= vector to shift
+		self.center -= other
+		self.bbox   -= other
+		return self
+
+	def __sub__(self, Vector other):
+		P = self.copy()
+		P.center = self.center - other
+		return P.copy()
+
+	def __imul__(self, Quaternion other): #rotate by quaternion (in global coordinates)
+		return self
+
+	def __mul__(self, Quaternion other):
+		return self
+
 
 ############ Sphere #################
 cdef class Sphere(Shape3D):
@@ -36,6 +62,11 @@ cdef class Sphere(Shape3D):
 		self.R      = R
 		self.R2     = R*R
 		self.R1     = 1.0/R
+
+	@property
+	def diam(self): return 2.0*self.R
+
+	cpdef Sphere copy(self): return Sphere(self.R, self.center)
 
 	cpdef double levelval(self, Vector point): #evaluate level set squared
 		return (self.R1*(point-self.center)).abs2()
@@ -87,6 +118,11 @@ cdef class Prism(Shape3D):
 		self.center = center
 		self.bbox = self.getbbox()
 
+	@property
+	def diam(self): return self.localprism.diam
+
+	cpdef Prism copy(self): return Prism(self.R, self.center, self.Q)
+
 	cdef Box getbbox(self):
 		# determine bounding box
 		cdef double maxR  = 2*abs(self.R)
@@ -109,6 +145,16 @@ cdef class Prism(Shape3D):
 		point = self.Q.rotate(point)
 		point/= self.R
 		return point.infNorm()
+
+	def __imul__(self, Quaternion other): #rotate by quaternion (in global coordinates)
+		self.Q *= other
+		self.bbox = self.getbbox()
+		return self
+
+	def __mul__(self, Quaternion other):
+		P = self.copy()
+		P.Q = P.Q*other
+		return P.copy()
 
 	# cpdef Vector levelgrad(self, Vector point): #gradient of the level function, not implemented
 
@@ -172,6 +218,8 @@ cdef class Ellipsoid(Prism):
 	def __init__(self, Vector R, Vector center, Quaternion Q):
 		super().__init__(R, center, Q)
 
+	cpdef Ellipsoid copy(self): return Ellipsoid(self.R, self.center, self.Q)
+
 	@property
 	def volume(self):
 		return C_SPHERE*self.R.x*self.R.y*self.R.z #volume of the bounding prism times pi/6
@@ -182,11 +230,12 @@ cdef class Ellipsoid(Prism):
 		point/= self.R
 		return point.abs2()
 
-	cdef Vector levelgrad(self, Vector point): #gradient of the level function
+	cpdef Vector levelgrad(self, Vector point): #gradient of the level function
 		point-= self.center
 		point = self.Q.rotate(point) #rotate into reference frame
 		point/= self.R #scale
 		point = 2.0*point #gradient is the sum of squares
+		point/= self.R #chain rule
 		return self.Q.conj().rotate(point) #rotate back into global reference frame
 
 	cpdef bint contains(self, Vector point): return self.levelval(point) <= 1.0
@@ -214,6 +263,8 @@ cdef class SuperEllipsoid(Prism):
 
 		self.C_SUPERELLIPSOID = self.eps[0]*self.eps[1] * beta(0.5*self.eps[0], 1.0+self.eps[0]) * beta(0.5*self.eps[1], 1.0+0.5*self.eps[1])
 
+	cpdef SuperEllipsoid copy(self): return SuperEllipsoid(self.R, self.eps[0], self.eps[1], self.center, self.Q)
+
 	@property
 	def volume(self):
 		return 2.0 * self.R.x*self.R.y*self.R.z * self.C_SUPERELLIPSOID
@@ -227,7 +278,7 @@ cdef class SuperEllipsoid(Prism):
 		point.z = fpow(fabs(point.z), self.e0)
 		return fpow((point.x+point.y), self.e2) + point.z
 
-	cdef Vector levelgrad(self, Vector point): #gradient of the level function
+	cpdef Vector levelgrad(self, Vector point): #gradient of the level function
 		point-= self.center
 		point = self.Q.rotate(point) #rotate into reference frame
 		point/= self.R #scale
@@ -237,6 +288,11 @@ cdef class SuperEllipsoid(Prism):
 		grad.z = self.e0 * fpow(point.z, self.e0-1.0) / self.R.z
 
 		return self.Q.conj().rotate(grad) #rotate back into global reference frame
+
+	# cdef Matrix levelhess(self, Vector point): #hessian of the level function
+	# 	cdef Matrix H = Matrix(3,3)
+
+
 
 	cpdef bint contains(self, Vector point): return self.levelval(point) <= 1.0
 	# cpdef bint contains(self, Vector point): return True

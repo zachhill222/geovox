@@ -5,11 +5,11 @@ cdef class Node: #node of octree
 		self.depth = depth
 		self.bbox = bbox
 		self.particle_list = []
+		self.particle_ind_list = []
 		self.nvert = -1
 
 		self.root = self #for storing global tree information
 		self.points = set() #if not calling divide(), this may need to be replaced with [self.bbox.vertex(n) for n in range(8)]
-		# self.pointindex = [] #if not calling divide(), this may need to be replaced with [n for n in range(8)] converted to int[8]
 
 
 	@property
@@ -19,97 +19,128 @@ cdef class Node: #node of octree
 
 	cpdef void divide(self):
 		cdef Box subbox
-		cdef int nvert_temp
+		cdef int p_child_nvert, p_n_child_added
 
-		cdef double minlevelval = 1.0
-		cdef int n, m, i, j
-		cdef Vector closestpoint
+		cdef double minlevelval, templevelval
+		cdef int n, m, i, j, p_ind, child_ind
+		cdef Vector closestpoint, vertex
 
 		if self.isdivided:			
 			for child in self.children: child.divide()
 		else:
-			if len(self.particle_list) == 0: return #no need to divide here
+			# first division of root node logic
+			if self.root is self: #add bounding box vertices, this should only be called on the very first divide() call on the root node
+				self.points.update([self.bbox.vertex(n) for n in range(8)])
+
+
+			# test if division is necessary
+			if len(self.particle_ind_list) == 0: return #no need to divide here
 			if self.nvert == 8: return #particles are convex, no need to divide here, all child regions would have nvert=8 as well
 
+
 			# create children
-			for n in range(8):
-				subbox= Box(self.bbox.vertex(n), self.bbox.center)
+			for child_ind in range(8):
+				subbox= Box(self.bbox.vertex(child_ind), self.bbox.center)
 				self.children.append(Node(subbox, self.depth+1))
 
-			# update particle list and nvert
-			for child in self.children:
-				child.nvert = 0
+				self.children[child_ind].nvert  = 0
+				self.children[child_ind].root   = self.root
+				self.children[child_ind].parent = self
 
-				for P in self.particle_list:
-					if child.bbox.intersects(P.bbox):
-						#compute vertex intersections
-						nvert_temp = 0
-						for n in range(8):
-							if P.contains(child.bbox.vertex(n)): nvert_temp += 1
-						child.nvert = max(child.nvert, nvert_temp)
+			# update populate child attributes particle list and nvert, decide which particles should be passed down
+			for child_ind in range(8):
+				child = self.children[child_ind]
 
-						if child.nvert > 0:
-							child.particle_list.append(P)
-						else:
-							closestpoint = _closest_point_neldermead(P, child.bbox)
-							if P.levelval(closestpoint) <= minlevelval:
-								child.particle_list.append(P)
-
-			# update root points and vertex index
-			for child in self.children:
-				child.root = self.root
+				# update point/vertex list in root
 				for n in range(8):
 					self.root.points.add(child.bbox.vertex(n))
+
+				# loop through particles to see which should be passed down to the child
+				for p_ind in range(len(self.particle_ind_list)):
+					P = self.root.particle_list[self.particle_ind_list[p_ind]]
+
+					if abs(child.bbox.center - P.center) <= 0.5*(child.bbox.diam + P.diam):
+
+						#compute vertex intersections
+						p_child_nvert = 0 #number of vertices of this child contained in this particle
+						minlevelval = 999999
+						for n in range(8):
+							templevelval = P.levelval(child.bbox.vertex(n))
+							minlevelval = min(minlevelval, templevelval)
+							if templevelval <= 1.0:
+								p_child_nvert += 1
+						child.nvert = max(child.nvert, p_child_nvert)
+						# print(minlevelval, p_child_nvert)
+
+						if p_child_nvert > 0:
+							child.particle_ind_list.append(self.root.particle_list.index(P))
+						elif child.bbox.diam >= P.diam:
+							child.particle_ind_list.append(self.root.particle_list.index(P))
+						else: #make a closer inspection in case the particle intersects a face but not a vertex
+							# closestpoint = _closest_point_neldermead(P, child.bbox)
+							closestpoint = _closest_point_gradient(P, child.bbox)
+							if P.levelval(closestpoint) <= 1.01:
+								child.particle_ind_list.append(self.root.particle_list.index(P))
+						# else: child.particle_ind_list.append(self.root.particle_list.index(P))
+				
 			
 			#change parameters from self for a non-leaf node
-			self.particle_list = []
+			self.particle_ind_list = []
 			self.nvert = -1 #only leaf nodes should have a valid marker
 			self.isdivided = True
 
 
+	# cpdef void gradate(self):
+	# 	cdef list _pointlist  = sorted(self.root.points)
+	# 	cdef list _leaflist
+	# 	cdef int point_ind, leaf_ind1, leaf_ind2, max_depth, min_depth
+	# 	for point_ind in range(len(_pointlist)):
+	# 		_leaflist = self.getleaveswithpoint(_pointlist[point_ind])
+	# 		for leaf_ind1 in range(len(_leaflist)-1):
+	# 			for leaf_ind2 in range(leaf_ind1+1, len(_leaflist)):
+	# 				if _leaflist[]
+
+
+
 	cpdef void insertparticle(self, particle_t P):
-		cdef int nvert_temp
-		
-		if self.isdivided:
-			for child in self.children: child.insertparticle(P)
-		else:
-			if self.bbox.intersects(P.bbox):
-				self.particle_list.append(P)
-				
-				nvert_temp = 0
-				for n in range(8):
-					nvert_temp += P.contains(self.bbox.vertex(n))
-				self.nvert = max(self.nvert, nvert_temp)
+		if self is self.root:
+			self.root.particle_list.append(P)
+			self.root.particle_ind_list.append(self.root.particle_list.index(P))
+
+	# cdef list getleaveswithpoint(self, Vector point): #get a list of leaves with the specified point
+	# 	cdef list _list = []
+	# 	cdef int child_ind
+
+	# 	if self.isdivided:
+	# 		for child_ind in range(8):
+	# 			_list += self.children[child_ind].getleaveswithpoint(point)
+	# 	elif self.bbox.contains(point):
+	# 		_list.append(self)
+	# 	return _list
+
+	# cdef list getneighbors(self, int n): #must be called on a leaf node
+	# 	cdef Vector facecenter = self.bbox.facecenter(n)
 
 
-	cpdef Node getnode(self, Vector point): #return first leaf node that contains the point. point should be interior, but not strictly necessary
-		cdef Node node = Node(None, None, NONE_DEPTH)
-		if self.bbox.contains(point):
-			if self.isdivided:
-				for n in range(8):
-					node = self.children[n].getnode(point)
-					if not (node.depth == NONE_DEPTH):
-						return node
-			else: return self
-		return node
+	# cpdef Node getnode(self, Vector point): #return first leaf node that contains the point. point should be interior, but not strictly necessary
+	# 	cdef Node node = Node(None, None, NONE_DEPTH)
+	# 	if self.bbox.contains(point):
+	# 		if self.isdivided:
+	# 			for n in range(8):
+	# 				node = self.children[n].getnode(point)
+	# 				if not (node.depth == NONE_DEPTH):
+	# 					return node
+	# 		else: return self
+	# 	return node
 
-	cpdef bint contains(self, Vector point): #determine if point is contained in any particle
-		cdef node = self.getnode(point)
-		if node.depth == NONE_DEPTH: return False #point is out of bounds
-
-		for P in node.particle_list:
-			if P.contains(point): return True
-		return False
-
-
-	@property
-	def children(self): return self.children
 
 	cpdef list leaflist(self):
-		_list = []
+		cdef list _list = []
+		cdef int child_ind
+
 		if self.isdivided:
-			for child in self.children:
-				_list += child.leaflist()
+			for child_ind in range(8):
+				_list += self.children[child_ind].leaflist()
 		else:
 			_list.append(self)
 		return _list
@@ -181,8 +212,10 @@ cdef class Node: #node of octree
 		string  = f"Node:\n\tdepth= {self.depth}"
 		string += f"\n\tbbox.low= {self.bbox.low}, bbox.high= {self.bbox.high}"
 		string += f"\n\tnvert= {self.nvert}"
-		string += f"\n\tnparticles= {len(self.particle_list)}"
 		string += f"\n\tleavesbelow= {len(self.leaflist())}"
+		string += f"\n\tnparticles= {len(self.particle_list)}"
+		for p_ind in range(len(self.root.particle_list)):
+			string += f"\n\t({p_ind})\t{repr(self.root.particle_list[p_ind])}"
 		return string
 
 

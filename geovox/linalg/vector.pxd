@@ -21,3 +21,11 @@ cdef class Vector:
 	cpdef void scaleby(self, double scalar)
 	cpdef Vector normalize(self) #normalize to a unit vector in 2-norm
 	cpdef void i_normalize(self) #in-place normalize
+
+	# data useful for meshing
+	cdef public list containedby #list of particles that contain this point. not included in hash
+
+
+################## useful functions #########################################
+cpdef Vector el_min(Vector v, Vector u) #element-wise minimum
+cpdef Vector el_max(Vector v, Vector u) #element-wise maximum

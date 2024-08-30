@@ -46,10 +46,11 @@ cdef class Vector: #arbitrary dimensions
 
 	def __init__(self, *args):
 		cdef unsigned int i
-		
 		if len(args) > 1: #data to fill
 			for i in range(len(args)):
 				self._data[i] = args[i]
+
+		self.containedby = []
 
 	#get, set, len, etc.
 	def __getitem__(self, unsigned int key): return self._data[key]
@@ -292,3 +293,21 @@ cdef class Vector: #arbitrary dimensions
 	def __hash__(self): return hash(self.__key())
 
 
+
+
+################## useful functions #########################################
+cpdef Vector el_min(Vector v, Vector u):
+	if not len(v) == len(u): raise Exception("Dimension mismatch")
+	cdef Vector result = Vector(len(v))
+	cdef unsigned int i
+	for i in range(len(v)):
+		result[i] = min(u[i], v[i])
+	return result
+
+cpdef Vector el_max(Vector v, Vector u):
+	if not len(v) == len(u): raise Exception("Dimension mismatch")
+	cdef Vector result = Vector(len(v))
+	cdef unsigned int i
+	for i in range(len(v)):
+		result[i] = max(u[i], v[i])
+	return result

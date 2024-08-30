@@ -9,3 +9,6 @@ cdef double _eval_fun(object P, Vector point, Box box)
 cdef Vector _closest_point_neldermead(object P, Box box) #roughly try to find the closest point in particle P to x using nelder mead
 
 
+# cdef Vector _closest_point_newton(object P, Box box)
+
+cdef Vector _closest_point_gradient(object P, Box box)

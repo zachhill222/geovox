@@ -13,3 +13,4 @@ cdef class Matrix: #class for dense matrices
 	cpdef Vector dot(self, Vector other)
 	cpdef void fill(self, double val)
 	cpdef void hilbert(self) #make hilbert matrix for testing
+	cpdef void eye(self)

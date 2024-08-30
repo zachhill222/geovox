@@ -3,7 +3,7 @@ cdef double _eval_fun(object P, Vector point, Box box):
 	val = P.levelval(point)
 
 	if not box.contains(point):
-		val += 10*((box.center-point)/box.sidelength).infNorm()
+		val += 100*((box.center-point)/box.sidelength).infNorm()
 
 	return val
 
@@ -18,7 +18,7 @@ cdef Vector _closest_point_neldermead(object P, Box box):
 
 	# set stopping criteria
 	cdef unsigned int maxiter
-	maxiter = 25
+	maxiter = 100
 	cdef double tol, R
 	R   = 0.5*abs(box.sidelength)
 	tol = 0.01*R #tolerance for the distance between best and worst point
@@ -39,6 +39,7 @@ cdef Vector _closest_point_neldermead(object P, Box box):
 	#initialize simplex
 	cdef list simplex
 	simplex = [Vector(3)]*4
+	cdef Box smallbox = 0.75*box
 	if   minvertex == 0: simplex = [box.vertex(0), box.vertex(1), box.vertex(2), box.vertex(4)]
 	elif minvertex == 1: simplex = [box.vertex(1), box.vertex(0), box.vertex(3), box.vertex(5)]
 	elif minvertex == 2: simplex = [box.vertex(2), box.vertex(0), box.vertex(3), box.vertex(6)]
@@ -47,6 +48,15 @@ cdef Vector _closest_point_neldermead(object P, Box box):
 	elif minvertex == 5: simplex = [box.vertex(5), box.vertex(1), box.vertex(4), box.vertex(7)]
 	elif minvertex == 6: simplex = [box.vertex(6), box.vertex(2), box.vertex(4), box.vertex(7)]
 	elif minvertex == 7: simplex = [box.vertex(7), box.vertex(3), box.vertex(5), box.vertex(6)]
+
+	# if   minvertex == 0: simplex = [box.vertex(0), box.vertex(1), box.center, box.vertex(4)]
+	# elif minvertex == 1: simplex = [box.vertex(1), box.vertex(0), box.center, box.vertex(5)]
+	# elif minvertex == 2: simplex = [box.vertex(2), box.vertex(0), box.center, box.vertex(6)]
+	# elif minvertex == 3: simplex = [box.vertex(3), box.vertex(1), box.center, box.vertex(7)]
+	# elif minvertex == 4: simplex = [box.vertex(4), box.vertex(0), box.center, box.vertex(6)]
+	# elif minvertex == 5: simplex = [box.vertex(5), box.vertex(1), box.center, box.vertex(7)]
+	# elif minvertex == 6: simplex = [box.vertex(6), box.vertex(2), box.center, box.vertex(7)]
+	# elif minvertex == 7: simplex = [box.vertex(7), box.vertex(3), box.center, box.vertex(6)]
 
 
 	#initialize function values
@@ -102,7 +112,6 @@ cdef Vector _closest_point_neldermead(object P, Box box):
 		
 		# compute refleced and ensure feasible
 		reflected = centroid + alpha*(centroid-simplex[3])
-		# reflected = ensurebounds(reflected, centroid)
 		f_reflected = _eval_fun(P, reflected, box)
 
 		# main logic
@@ -113,7 +122,6 @@ cdef Vector _closest_point_neldermead(object P, Box box):
 
 		elif f_reflected < fvals[0]:
 			expanded = centroid + gamma*(reflected - centroid)
-			# expanded = ensurebounds(expanded, centroid)
 			f_expanded = _eval_fun(P, expanded, box)
 
 			if f_expanded < f_reflected:
@@ -127,7 +135,6 @@ cdef Vector _closest_point_neldermead(object P, Box box):
 		else:
 			if f_reflected < fvals[3]:
 				contracted = centroid + rho*(reflected - centroid)
-				# contracted = ensurebounds(contracted, centroid)
 				f_contracted = _eval_fun(P, contracted, box)
 
 				if f_contracted < f_reflected:
@@ -138,7 +145,7 @@ cdef Vector _closest_point_neldermead(object P, Box box):
 				else:
 					shrink_flag = True
 			else:
-				contracted = centroid + rho*(simplex[3]-centroid) #always feasible
+				contracted = centroid + rho*(simplex[3]-centroid)
 				f_contracted = _eval_fun(P, contracted, box)
 				if f_contracted < fvals[3]:
 					fvals[3] = f_contracted
@@ -151,10 +158,124 @@ cdef Vector _closest_point_neldermead(object P, Box box):
 		if shrink_flag:
 			# print("shrinking")
 			for n in range(1,4):
-				simplex[n] = simplex[0] + sigma*(simplex[n] - simplex[0]) #always feasible if 0<sigma<1
+				simplex[n] = simplex[0] + sigma*(simplex[n] - simplex[0])
 				fvals[n] = _eval_fun(P, simplex[n], box)
 
 
 	return simplex[0]
+
+
+
+
+
+
+# cdef Vector _closest_point_newton(object P, Box box):
+# 	# set stopping criteria
+# 	cdef unsigned int maxiter = 5
+# 	cdef double stopfval = 1.0
+# 	cdef unsigned int i
+
+# 	# starting guess
+# 	cdef Vector center_to_center = (P.center - box.center).i_normalize()
+# 	cdef Vector X = box.center + (0.5*box.diam)*center_to_center
+
+# 	cdef Vector XL = Vector(4)
+# 	for i in range(3):
+# 		XL[i] = X[i]
+# 	XL[3] = -1.0 #Lambda
+
+# 	# main iteration
+# 	cdef double fval
+# 	cdef Vector gradF, gradG, step
+# 	cdef Vector gradXL = Vector(4)
+# 	cdef Matrix hessF, hessG
+# 	cdef Matrix Jac = Matrix(4,4).fill(0.0)
+
+# 	hessG = 2.0*Matrix(3,3).eye()
+# 	print(hessG)
+
+
+# 	cdef int iteration, n, m
+# 	for iteration in range(maxiter):
+# 		#evaluate function
+# 		for i in range(3):
+# 			X[i] = XL[i]
+# 		fval = P.levelval(X)
+
+# 		if fval <= stopfval:
+# 			break
+
+# 		#set up iteration
+# 		gradF = P.levelgrad(X)
+# 		gradG = 2.0*(X-box.center)
+
+# 		hessF = XL[3]*hessG - P.levelhess(X)
+
+# 		gradXL[3] = (X-box.center).abs2() - 1.0
+# 		for n in range(3):
+# 			gradXL[n] = XL[3]*gradG[n] - gradF[n]
+
+# 			Jac[n,3] = gradG[n]
+# 			Jac[3,n] = gradG[n]
+# 			for m in range(3):
+# 				Jac[n,m] = hessF[n,m]
+
+
+# 		step = gaussSeidel(Jac, gradXL, XL, 10)
+# 		XL  -= step
+
+# 	return Vector(XL[0], XL[1], XL[2])
+
+
+
+
+
+cdef Vector _closest_point_gradient(object P, Box box):
+	# set stopping criteria
+	cdef int maxiter = 10
+	cdef double stopfval = 1.0
+
+	# starting guess
+	cdef Vector X = box.center
+
+	cdef double C = 1.0/((0.5*box.diam)**2)
+
+	cdef Vector gradF, gradP, searchDir, trial
+	cdef double t0, t1, t_best, curval, nextval
+
+	cdef int iteration, j
+	for iteration in range(maxiter):
+		print(f"iteration {iteration}: levelval= {P.levelval(X)}")
+		if P.levelval(X) <= stopfval: break
+
+		#set up iteration
+		gradF = P.levelgrad(X)
+		gradP = (2.0*C*(abs(X-box.center))) * X
+
+		searchDir = -(gradF+gradP).normalize()
+
+		#line search
+		t0 = 0
+		t1 = 0.5*box.diam
+		t_best = t0
+		for j in range(10):
+			curval  = P.levelval(X+t0*searchDir) + C*((X+t0*searchDir-box.center).abs2())
+			nextval = P.levelval(X+t1*searchDir) + C*((X+t1*searchDir-box.center).abs2())
+
+			print("\t",curval, "\t", nextval)
+
+			if nextval < curval:
+				t_best = t1
+				t0 = t1
+				t1 = 1.25*t1
+			else:
+				t1 = 0.5*t1
+
+		X = X + t_best*searchDir
+
+	return X
+
+
+
 
 

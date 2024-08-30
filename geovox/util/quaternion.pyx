@@ -65,6 +65,13 @@ cdef class Quaternion:
 		cdef Vector QV = self.q0*other.qv + other.q0*self.qv + self.qv.cross(other.qv)
 		return Quaternion(Q0, QV)
 
+	def __imul__(self, Quaternion other):
+		cdef double Q0 = self.q0*other.q0 - self.qv.dot(other.qv)
+		self.qv = self.q0*other.qv + other.q0*self.qv + self.qv.cross(other.qv)
+		self.q0 = Q0
+		return self
+
+
 	def __rmul__(self, double c): #scalar multiplication: <double>*<Quaternion>
 		return Quaternion(c*self.q0, c*self.qv)
 

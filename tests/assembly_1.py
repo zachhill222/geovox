@@ -14,30 +14,20 @@ Q.setrotation(1, Vector(1,1,1))
 
 # P   = Sphere(4/3, Vector(0,0,0))
 # P   = Prism(Vector(1,0.5,0.25), Vector(0,0,0), Q)
-# P   = Ellipsoid(Vector(1,0.5,0.125), Vector(0,0,0), Q)
-P   = SuperEllipsoid(Vector(1,0.5,1), 1.0, 2.0, Vector(0,0,0), Q)
+P   = Ellipsoid(Vector(1,0.5,0.125), Vector(0,0,0), Q)
+# P   = SuperEllipsoid(Vector(1,0.5,1), 1.0, 2.0, Vector(0,0,0), Q)
 
 
 
 tree = Node(box, 0) #add support for adding boxes
-tree.insertparticle(P)
-tree.insertparticle(Sphere(0.7, Vector(-0.75,-0.75,-1)))
-tree.insertparticle(Prism(Vector(1,0.5,0.5), Vector(1.5,1.5,1.5), Q)) #not sure why this dissapears sometimes
-tree.insertparticle(SuperEllipsoid(Vector(1,0.5,0.3), 3.0, 2.0, Vector(1.5,-2,-2), Quaternion(1, Vector(0,0,0))))
+tree.insertparticle(P-Vector(1,-0.5,1))
+# tree.insertparticle(Sphere(0.7, Vector(-0.75,-0.75,-1)))
+# tree.insertparticle(Prism(Vector(1,0.5,0.5), Vector(1.4,1.5,1.5), Q)) #not sure why this dissapears sometimes
+tree.insertparticle(P*Q.conj()+Vector(1,-0.5,1))
 
-depth = 7
-print(f"Constructing octree to depth= {depth}: ", end="")
-tic = time()
+
+depth = 6
 for n in range(depth):
+	print(f"depth= {n}")
 	tree.divide()
-toc = time()
-print(f"{toc-tic} seconds, {getsizeof(tree)/(2**20)} MB")
-
-print(tree)
-
-
-print(f"Creating VTK voxel mesh: ", end="")
-tic = time()
-tree.voxelmesh("./tests/outfiles/assembly_1.vtk")
-toc = time()
-print(f"{toc-tic} seconds")
+	tree.voxelmesh(f"./tests/outfiles/assembly_depth_{n}.vtk")

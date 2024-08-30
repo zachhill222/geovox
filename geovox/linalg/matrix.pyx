@@ -80,6 +80,13 @@ cdef class Matrix:
 			for i in range(self._nrows):
 				self[i,j] = 1.0/(i+j+1.0)
 
+	cpdef void eye(self):
+		self.fill(0.0)
+		cdef unsigned int i
+		for i in range(min(self._ncols, self._nrows)):
+			self[i,i] = 1.0
+		
+
 	def __str__(self):
 		string = ["[\n"]
 		if self._nrows <= 4:
