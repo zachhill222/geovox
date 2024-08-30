@@ -1,20 +1,21 @@
-from geovox.utilities import Box, Vector3
+from geovox.util import Box
+from geovox.linalg import Vector
 
 
-low1 = Vector3(-1,-2,-3)
-high1 = Vector3(1,2,3)
+low1 = Vector(-1,-2,-3)
+high1 = Vector(1,2,3)
 box1 = Box(low1, high1)
 print(f"box1= {repr(box1)}")
 print(f"box1.sidelength= {repr(box1.sidelength)}")
 print(f"box1.volume= {box1.volume}")
 
-low2 = Vector3(0,0,3)
-high2 = Vector3(3,3,0)
+low2 = Vector(0,0,3)
+high2 = Vector(3,3,0)
 box2 = Box(low2, high2)
 print(f"box2= Box({repr(low2)}), {repr(high2)}) -> box2= {repr(box2)}")
 
-low3 = Vector3(3,3,3)
-high3 = Vector3(6,6,6)
+low3 = Vector(3,3,3)
+high3 = Vector(6,6,6)
 box3 = Box(low3, high3)
 print("box3=",repr(box3))
 
@@ -30,7 +31,7 @@ print("box1.intersects(box3)=", box1.intersects(box3))
 
 
 print("\nTESTING CONTAINS AND VERTEX: PATTERN SHOULD BE True, False NEAR EACH VERTEX")
-box = Box(Vector3(-2,-2,-2), Vector3(2,2,2))
+box = Box(Vector(-2,-2,-2), Vector(2,2,2))
 print(f"box= {repr(box)}")
 print(f"box.center= {box.center}")
 for n in range(8):
@@ -43,43 +44,43 @@ for n in range(8):
 
 
 print("\nTESTING ASSINGMENT OF low: (FIX high, ASSIGN NEW OPPOSITE VERTEX)")
-box = Box(Vector3(1,1,1), Vector3(2,2,2))
+box = Box(Vector(1,1,1), Vector(2,2,2))
 print(f"box= {repr(box)}")
 
-newlow = Vector3(0,0,0)
+newlow = Vector(0,0,0)
 box.low = newlow
 print(f"box.low= {repr(newlow)}: box= {repr(box)}")
 
-newlow = Vector3(0,1,3)
+newlow = Vector(0,1,3)
 box.low = newlow
 print(f"box.low= {repr(newlow)}: box= {repr(box)}")
 
-newlow = Vector3(3,3,3)
+newlow = Vector(3,3,3)
 box.low = newlow
 print(f"box.low= {repr(newlow)}: box= {repr(box)}")
 
 
 print("\nTESTING ASSINGMENT OF high: (FIX low, ASSIGN NEW OPPOSITE VERTEX)")
-box = Box(Vector3(1,1,1), Vector3(2,2,2))
+box = Box(Vector(1,1,1), Vector(2,2,2))
 print(f"box= {repr(box)}")
 
-newhigh = Vector3(3,3,3)
+newhigh = Vector(3,3,3)
 box.high = newhigh
 print(f"box.high= {repr(newhigh)}: box= {repr(box)}")
 
-newhigh = Vector3(0,4,-1)
+newhigh = Vector(0,4,-1)
 box.high = newhigh
 print(f"box.high= {repr(newhigh)}: box= {repr(box)}")
 
-newhigh = Vector3(0,3,3)
+newhigh = Vector(0,3,3)
 box.high = newhigh
 print(f"box.high= {repr(newhigh)}: box= {repr(box)}")
 
 
 print("\nTESTING SHIFTING BY A VECTOR:")
-box = Box(Vector3(0,1,2), Vector3(3,4,5))
+box = Box(Vector(0,1,2), Vector(3,4,5))
 print(f"box= {repr(box)}")
-shift = Vector3(1,2,-3)
+shift = Vector(1,2,-3)
 print(f"shift= {repr(shift)}")
 
 print(f"box+shift= {repr(box+shift)}")
@@ -92,7 +93,7 @@ print(f"box-=shift -> box= {repr(box)}")
 
 
 print("\nTESTING FACE AND FACENORMAL:")
-box = Box(Vector3(0,0,0), Vector3(1,1,1))
+box = Box(Vector(0,0,0), Vector(1,1,1))
 print(f"box= {repr(box)}")
 print(f"box.sidelength= {repr(box.sidelength)}")
 
@@ -101,14 +102,14 @@ for n in range(6):
 
 
 print("\nTESTING VERTICES:")
-box = Box(Vector3(0,0,0), Vector3(1,1,1))
+box = Box(Vector(0,0,0), Vector(1,1,1))
 print(f"box= {repr(box)}")
 for n in range(8):
 	print(f"box.vertex(n)= {repr(box.vertex(n))}")
 
 
 print("\nTESTING SCALING:")
-box = Box(Vector3(1,2,3), Vector3(4,5,6))
+box = Box(Vector(1,2,3), Vector(4,5,6))
 print(f"box= {repr(box)}")
 box = 1.1*box
 print(f"box= 1.1*box -> box= {repr(box)}")

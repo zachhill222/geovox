@@ -30,12 +30,8 @@ cdef double reduce_sum(double* DATA, unsigned int LEN): #sum first LEN elements 
 
 ##### Vector with fixed, arbitrary length #############
 cdef class Vector: #arbitrary dimensions
-	# def __cinit__(self, unsigned int _len):
-	def __cinit__(self, *args, **kwargs):
-		#set length
-		if "_len" in kwargs: #length is explicitly set
-			self._len = kwargs["_len"]
-		elif len(args) == 1: #only 1 value is passed, use it as _len
+	def __cinit__(self, *args):
+		if len(args) == 1: #only 1 value is passed, use it as _len
 			self._len = args[0]
 		elif len(args) > 1: #lots of values were passed, use them as the _data and set _len=len(_data)
 			self._len = len(args)
@@ -48,7 +44,7 @@ cdef class Vector: #arbitrary dimensions
 		if self._data is not NULL:
 			free(self._data)
 
-	def __init__(self, *args, **kwargs):
+	def __init__(self, *args):
 		cdef unsigned int i
 		
 		if len(args) > 1: #data to fill
@@ -193,6 +189,9 @@ cdef class Vector: #arbitrary dimensions
 			val = max(val, fabs(self._data[i]))
 
 		return val
+
+	cpdef double sum(self):
+		return reduce_sum(&self._data[0], self._len)
 
 	cpdef Vector cross(self, Vector other): #return self X other (cross product)
 		if not (self._len==3 and other._len==3): raise Exception("Cross product is only for Vectors with _len=3")

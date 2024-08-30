@@ -1,11 +1,12 @@
-from geovox.utilities import NelderMead
-from geovox.utilities import Box, Vector3
+from geovox.util import NelderMead
+from geovox.util import Box
+from geovox.linalg import Vector
 
 #define bounds
-bounds = Box(Vector3(-1,-1,-1), Vector3(1,1,1))
+bounds = Box(Vector(-1,-1,-1), Vector(1,1,1))
 
 #define objective function
-Y = Vector3(10,0,0)
+Y = Vector(10,0,0)
 F = lambda X: abs(X-Y)
 
 #solve

@@ -1,10 +1,11 @@
-from geovox.utilities import Vector3, Quaternion
+from geovox.util import Quaternion
+from geovox.linalg import Vector
 from numpy import sin, cos
 from numpy import pi as PI
 
 
-U = Quaternion(1, Vector3(2,3,4))
-Q = Quaternion(2, Vector3(-2,3,-4))
+U = Quaternion(1, Vector(2,3,4))
+Q = Quaternion(2, Vector(-2,3,-4))
 
 print(f"U= {repr(U)}")
 print(f"Q= {repr(Q)}")
@@ -42,7 +43,7 @@ print(f"U.abs2= {U.abs2}")
 
 print("\nASSIGNMENT:")
 q0 = 3
-qv = Vector3(1,2,3)
+qv = Vector(1,2,3)
 
 print(f"Q= {repr(Q)}")
 Q.q0 = q0
@@ -53,8 +54,8 @@ print(f"Q.qv= {qv} -> Q= {repr(Q)}")
 
 print("\nROTATION")
 theta = PI/4
-axis  = Vector3(0,0,3)
-point = Vector3(1,0,1)
+axis  = Vector(0,0,3)
+point = Vector(1,0,1)
 Q.setrotation(theta, axis)
 print(f"Q.setrotation({theta}, {repr(axis)})= {repr(Q)}")
 print(f"Q.angle= {Q.angle}= PI/{PI/Q.angle}")

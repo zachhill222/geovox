@@ -5,24 +5,28 @@ from Cython.Build import cythonize
 # define extensions
 extensions = [
     Extension(
-        name="geovox.utilities.vector",
-        sources=["geovox/utilities/vector.pyx"]
+        name="geovox.linalg.vector",
+        sources=["geovox/linalg/vector.pyx"]
     ),
     Extension(
-        name="geovox.utilities.box",
-        sources=["geovox/utilities/box.pyx"]
+        name="geovox.linalg.matrix",
+        sources=["geovox/linalg/matrix.pyx"]
     ),
     Extension(
-        name="geovox.utilities.quaternion",
-        sources=["geovox/utilities/quaternion.pyx"]
+        name="geovox.linalg.solvers",
+        sources=["geovox/linalg/solvers.pyx"]
     ),
     Extension(
-        name="geovox.utilities.matrix",
-        sources=["geovox/utilities/matrix.pyx"]
+        name="geovox.util.box",
+        sources=["geovox/util/box.pyx"]
     ),
     Extension(
-        name="geovox.utilities.optimize",
-        sources=["geovox/utilities/optimize.pyx"]
+        name="geovox.util.quaternion",
+        sources=["geovox/util/quaternion.pyx"]
+    ),
+    Extension(
+        name="geovox.util.optimize",
+        sources=["geovox/util/optimize.pyx"]
     ),
     Extension(
         name="geovox.geometry.particles",
@@ -41,6 +45,6 @@ extensions = [
 setup(
     name="geovox",
     version="0.1",
-    packages=["geovox", "geovox.utilities", "geovox.geometry"],
+    packages=["geovox", "geovox.util", "geovox.geometry", "geovox.linalg"],
     ext_modules=cythonize(extensions)
 )

@@ -1,4 +1,4 @@
-from geovox.utilities import Vector
+from geovox.linalg import Vector
 from time import time
 from sys import getsizeof
 from numpy import pi as PI

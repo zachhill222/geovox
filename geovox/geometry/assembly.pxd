@@ -1,17 +1,9 @@
-from geovox.utilities.vector cimport Vector
-from geovox.utilities.box cimport Box
-from geovox.geometry.particles cimport Sphere, Prism, Ellipsoid, SuperEllipsoid
-from geovox.utilities.optimize cimport NelderMead
+from geovox.linalg.vector cimport Vector
+from geovox.util.box cimport Box
+from geovox.geometry.particles cimport particle_t
+from geovox.util.optimize cimport _closest_point_neldermead
 
 cdef int NONE_DEPTH = -999
-
-ctypedef fused particle_t:
-	Sphere
-	Prism
-	Ellipsoid
-	SuperEllipsoid
-
-
 
 cdef class Node:
 	cdef bint isdivided

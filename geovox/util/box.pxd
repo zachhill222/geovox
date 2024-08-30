@@ -1,4 +1,4 @@
-from geovox.utilities.vector cimport Vector
+from geovox.linalg.vector cimport Vector
 
 ################# class for 3D bounding boxes #############################
 cdef class Box: #closed box

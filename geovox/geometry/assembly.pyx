@@ -21,27 +21,18 @@ cdef class Node: #node of octree
 		cdef Box subbox
 		cdef int nvert_temp
 
-		#optimization settings
-		cdef double minlevelval
-		cdef double facelevelval, facelevelval_temp
+		cdef double minlevelval = 1.0
 		cdef int n, m, i, j
-		cdef int n_grid
-		cdef bint stopevals
-		cdef double theta1, theta2
-		cdef NelderMead optimizer
+		cdef Vector closestpoint
 
 		if self.isdivided:			
 			for child in self.children: child.divide()
 		else:
 			if len(self.particle_list) == 0: return #no need to divide here
 			if self.nvert == 8: return #particles are convex, no need to divide here, all child regions would have nvert=8 as well
-			
-			#parameters for checking dubious voxels
-			# minlevelval = 1.0
-			# n_grid = max(10-self.depth, 2)
 
 			# create children
-			for n from 0 <= n < 8:
+			for n in range(8):
 				subbox= Box(self.bbox.vertex(n), self.bbox.center)
 				self.children.append(Node(subbox, self.depth+1))
 
@@ -53,27 +44,22 @@ cdef class Node: #node of octree
 					if child.bbox.intersects(P.bbox):
 						#compute vertex intersections
 						nvert_temp = 0
-						for n from 0 <= n < 8:
+						for n in range(8):
 							if P.contains(child.bbox.vertex(n)): nvert_temp += 1
 						child.nvert = max(child.nvert, nvert_temp)
 
 						if child.nvert > 0:
 							child.particle_list.append(P)
 						else:
-							minlevelval = 1.01# + 0.001*abs(child.bbox.sidelength)
-							optimizer = NelderMead(P.levelval, child.bbox, minlevelval)
-							optimizer.maxiter = 100
-							optimizer.penalty_weight = 2**self.depth
-							# print("NelderMead")
-							if optimizer.minimize() <= minlevelval:
+							closestpoint = _closest_point_neldermead(P, child.bbox)
+							if P.levelval(closestpoint) <= minlevelval:
 								child.particle_list.append(P)
 
 			# update root points and vertex index
 			for child in self.children:
 				child.root = self.root
-				for n from 0 <= n < 8:
+				for n in range(8):
 					self.root.points.add(child.bbox.vertex(n))
-					# self.root.points.update([child.bbox.vertex(n) for n in range(8)])
 			
 			#change parameters from self for a non-leaf node
 			self.particle_list = []
@@ -91,17 +77,16 @@ cdef class Node: #node of octree
 				self.particle_list.append(P)
 				
 				nvert_temp = 0
-				for n from 0 <= n < 8:
+				for n in range(8):
 					nvert_temp += P.contains(self.bbox.vertex(n))
 				self.nvert = max(self.nvert, nvert_temp)
 
 
 	cpdef Node getnode(self, Vector point): #return first leaf node that contains the point. point should be interior, but not strictly necessary
 		cdef Node node = Node(None, None, NONE_DEPTH)
-		# print(f"Checking node: {self}\n")
 		if self.bbox.contains(point):
 			if self.isdivided:
-				for n from 0 <= n < 8:
+				for n in range(8):
 					node = self.children[n].getnode(point)
 					if not (node.depth == NONE_DEPTH):
 						return node

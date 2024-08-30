@@ -1,7 +1,7 @@
 .PHONY: build install clean uninstall
 
 build:
-	python3 ./setup.py build_ext --inplace
+	python3 ./setup.py build_ext --inplace -j4
 
 install:
 	python3 -m pip install .

@@ -40,7 +40,7 @@ cdef class Sphere(Shape3D):
 	cpdef double levelval(self, Vector point): #evaluate level set squared
 		return (self.R1*(point-self.center)).abs2()
 
-	cpdef Vector levelgrad(self, Vector point): #gradient of the level function
+	cdef Vector levelgrad(self, Vector point): #gradient of the level function
 		return 2.0*(point - self.center)
 
 
@@ -182,7 +182,7 @@ cdef class Ellipsoid(Prism):
 		point/= self.R
 		return point.abs2()
 
-	cpdef Vector levelgrad(self, Vector point): #gradient of the level function
+	cdef Vector levelgrad(self, Vector point): #gradient of the level function
 		point-= self.center
 		point = self.Q.rotate(point) #rotate into reference frame
 		point/= self.R #scale
@@ -227,7 +227,7 @@ cdef class SuperEllipsoid(Prism):
 		point.z = fpow(fabs(point.z), self.e0)
 		return fpow((point.x+point.y), self.e2) + point.z
 
-	cpdef Vector levelgrad(self, Vector point): #gradient of the level function
+	cdef Vector levelgrad(self, Vector point): #gradient of the level function
 		point-= self.center
 		point = self.Q.rotate(point) #rotate into reference frame
 		point/= self.R #scale
@@ -254,6 +254,7 @@ cdef class SuperEllipsoid(Prism):
 		return string
 
 
+# cdef Vector findclosest(particle_t P, Vector x,):
 
 
 
