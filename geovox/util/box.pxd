@@ -9,5 +9,5 @@ cdef class Box: #closed box
 	cpdef bint intersects(self, Box other)
 	cpdef Vector facecenter(self, int n) #get n-th face center, n=0,1,...,5
 	cpdef Vector facenormal(self, int n) #get n-th outward unit vector, n=0,1,...,5
-
+	cpdef Box copy(self)
 

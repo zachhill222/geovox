@@ -54,6 +54,9 @@ cdef class Shape3D:
 
 
 ############ Sphere #################
+cdef double SphereLevelFun(double R, Vector center, Vector point):
+	return (point-center).abs2/(R*R)
+
 cdef class Sphere(Shape3D):
 	def __init__(self, double R, Vector center):
 		cdef Vector high = Vector(center.x+R, center.y+R, center.z+R)
@@ -66,13 +69,13 @@ cdef class Sphere(Shape3D):
 	@property
 	def diam(self): return 2.0*self.R
 
+	@property
+	def levelval(self): return lambda point : SphereLevelFun(self.R, self.center, point)
+
 	cpdef Sphere copy(self): return Sphere(self.R, self.center)
 
-	cpdef double levelval(self, Vector point): #evaluate level set squared
-		return (self.R1*(point-self.center)).abs2()
-
-	cdef Vector levelgrad(self, Vector point): #gradient of the level function
-		return 2.0*(point - self.center)
+	# cpdef double levelval(self, Vector point): #evaluate level set squared
+	# 	return (self.R1*(point-self.center)).abs2()
 
 
 	cpdef bint contains(self, Vector point): return self.levelval(point) <= 1.0
@@ -110,6 +113,10 @@ cdef class Sphere(Shape3D):
 
 
 ############ Prism #################
+cdef double PrismLevelVal(Vector R, Vector center, Quaternion Q, Vector point):
+	point = Q.rotate(point-center)/R
+	return point.infNorm()
+
 cdef class Prism(Shape3D):
 	def __init__(self, Vector R, Vector center, Quaternion Q):
 		self.R = R
@@ -140,11 +147,8 @@ cdef class Prism(Shape3D):
 		box = Box(low, high)
 		return box
 
-	cpdef double levelval(self, Vector point): #evaluate level set squared
-		point-= self.center
-		point = self.Q.rotate(point)
-		point/= self.R
-		return point.infNorm()
+	@property
+	def levelval(self): return lambda point: PrismLevelVal(self.R, self.center, self.Q, point)
 
 	def __imul__(self, Quaternion other): #rotate by quaternion (in global coordinates)
 		self.Q *= other
@@ -155,8 +159,6 @@ cdef class Prism(Shape3D):
 		P = self.copy()
 		P.Q = P.Q*other
 		return P.copy()
-
-	# cpdef Vector levelgrad(self, Vector point): #gradient of the level function, not implemented
 
 	cpdef bint contains(self, Vector point): return self.levelval(point) <= 1.0
 
@@ -205,15 +207,12 @@ cdef class Prism(Shape3D):
 	def __repr__(self):
 		return f"Prism({repr(self.R)}, {repr(self.center)}, {repr(self.Q)})"
 
-	def __str__(self):
-		string = "Prism:\n"
-		string+= f"\tR= {repr(self.R)}\n"
-		string+= f"\tcenter= {repr(self.center)}\n"
-		string+= f"\tQ= {repr(self.Q)}\n"
-		return string
-
 
 ########### Ellipsoid ###########
+cdef double EllipsoidLevelVal(Vector R, Vector center, Quaternion Q, Vector point):
+	point = Q.rotate(point-center)/R
+	return point.abs()
+
 cdef class Ellipsoid(Prism):
 	def __init__(self, Vector R, Vector center, Quaternion Q):
 		super().__init__(R, center, Q)
@@ -224,34 +223,20 @@ cdef class Ellipsoid(Prism):
 	def volume(self):
 		return C_SPHERE*self.R.x*self.R.y*self.R.z #volume of the bounding prism times pi/6
 
-	cpdef double levelval(self, Vector point): #evaluate level set squared
-		point-= self.center
-		point = self.Q.rotate(point)
-		point/= self.R
-		return point.abs2()
-
-	cpdef Vector levelgrad(self, Vector point): #gradient of the level function
-		point-= self.center
-		point = self.Q.rotate(point) #rotate into reference frame
-		point/= self.R #scale
-		point = 2.0*point #gradient is the sum of squares
-		point/= self.R #chain rule
-		return self.Q.conj().rotate(point) #rotate back into global reference frame
-
 	cpdef bint contains(self, Vector point): return self.levelval(point) <= 1.0
 
 	def __repr__(self):
 		return f"Ellipsoid({repr(self.R)}, {repr(self.center)}, {repr(self.Q)})"
 
-	def __str__(self):
-		string = "Ellipsoid:\n"
-		string+= f"\tR= {repr(self.R)}\n"
-		string+= f"\tcenter= {repr(self.center)}\n"
-		string+= f"\tQ= {repr(self.Q)}\n"
-		return string
-
 
 ############ Super Ellipsoid ##########
+cdef SuperEllipsoidLevelVal(Vector R, double e0, double e1, double e2, Vector center, Quaternion Q, Vector point):
+	point = Q.rotate(point-center)/R
+	point[0] = fpow(fabs(point[0]), e1)
+	point[1] = fpow(fabs(point[1]), e1)
+	point[2] = fpow(fabs(point[2]), e0)
+	return fpow((point[0]+point[1]), e2) + point[3]
+
 cdef class SuperEllipsoid(Prism):
 	def __init__(self, Vector R, double eps1, double eps2, Vector center, Quaternion Q):
 		super().__init__(R, center, Q)
@@ -269,29 +254,15 @@ cdef class SuperEllipsoid(Prism):
 	def volume(self):
 		return 2.0 * self.R.x*self.R.y*self.R.z * self.C_SUPERELLIPSOID
 
-	cpdef double levelval(self, Vector point): #evaluate level set (squared)
-		point-= self.center
-		point = self.Q.rotate(point)
-		point/= self.R
-		point.x = fpow(fabs(point.x), self.e1)
-		point.y = fpow(fabs(point.y), self.e1)
-		point.z = fpow(fabs(point.z), self.e0)
-		return fpow((point.x+point.y), self.e2) + point.z
-
-	cpdef Vector levelgrad(self, Vector point): #gradient of the level function
-		point-= self.center
-		point = self.Q.rotate(point) #rotate into reference frame
-		point/= self.R #scale
-		cdef Vector grad = Vector(0.0,0.0,0.0)
-		grad.x = self.e1 * fpow( fpow(point.x, self.e1)+fpow(point.y, self.e1), self.e2 ) * fpow(point.x, self.e1-1.0) / self.R.x
-		grad.y = self.e1 * fpow( fpow(point.x, self.e1)+fpow(point.y, self.e1), self.e2 ) * fpow(point.y, self.e1-1.0) / self.R.y
-		grad.z = self.e0 * fpow(point.z, self.e0-1.0) / self.R.z
-
-		return self.Q.conj().rotate(grad) #rotate back into global reference frame
-
-	# cdef Matrix levelhess(self, Vector point): #hessian of the level function
-	# 	cdef Matrix H = Matrix(3,3)
-
+	@property
+	def levelval(self): return lambda point: SuperEllipsoidLevelVal(self.R, self.e0, self.e1, self.e2, self.center, self.Q, point)
+	
+	# cdef double levelval(self, Vector point):
+	# 	point = self.Q.rotate(point-self.center)/self.R
+	# 	point[0] = fpow(fabs(point[0]), self.e1)
+	# 	point[1] = fpow(fabs(point[1]), self.e1)
+	# 	point[2] = fpow(fabs(point[2]), self.e1)
+	# 	return fpow((point[0]+point[1]), self.e2) + point[3]
 
 
 	cpdef bint contains(self, Vector point): return self.levelval(point) <= 1.0
@@ -300,31 +271,5 @@ cdef class SuperEllipsoid(Prism):
 	def __repr__(self):
 		return f"SuperEllipsoid({repr(self.R)}, double {self.eps[0]}, double {self.eps[1]}, {repr(self.center)}, {repr(self.Q)})"
 
-	def __str__(self):
-		string = "SuperEllipsoid:\n"
-		string+= f"\tR= {repr(self.R)}\n"
-		string+= f"\tcenter= {repr(self.center)}\n"
-		string+= f"\tQ= {repr(self.Q)}\n"
-		string+= f"\teps1= {self.eps[0]}\n"
-		string+= f"\teps2= {self.eps[1]}\n"
-		return string
 
 
-# cdef Vector findclosest(particle_t P, Vector x,):
-
-
-
-
-
-
-
-
-
-
-		
-
-
-
-
-
-	

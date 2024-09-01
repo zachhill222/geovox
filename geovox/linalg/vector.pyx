@@ -54,7 +54,7 @@ cdef class Vector: #arbitrary dimensions
 
 	#get, set, len, etc.
 	def __getitem__(self, unsigned int key): return self._data[key]
-	def __setitem__(self, unsigned int key, double value): self._data[key] = value
+	def __setitem__(self, unsigned int key, double value):	self._data[key] = value
 	def __len__(self): return self._len
 
 	@property
@@ -225,11 +225,7 @@ cdef class Vector: #arbitrary dimensions
 	def __eq__(self, Vector other):
 		if not self._len == other._len: raise Exception("Vector dimension mismatch.")
 
-		cdef unsigned int i
-		for i in range(self._len):
-			if not self._data[i] == other[i]: return False
-
-		return True
+		return (self-other).infNorm() == 0
 
 
 	def __lt__(self, Vector other):

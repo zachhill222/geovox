@@ -10,12 +10,15 @@ from geovox.linalg.vector cimport el_min, el_max
 cdef class Box: #non-degenerate closed box, faces parallel to coordinate planes
 	# cdef Vector low, high
 
-	def __init__(self, Vector low, Vector high): #low and high are any two opposite vertices of the box
+	def __init__(self, Vector low = Vector(-1.0,-1.0,-1.0), Vector high = Vector(1.0,1.0,1.0)): #low and high are any two opposite vertices of the box
 		self.low  = el_min(low, high)
 		self.high = el_max(low, high)
 
 		if not self.low < self.high:
 			raise Exception("Box must have positive volume. Specify two opposite vertices.")
+
+	cpdef Box copy(self): return Box(self.low, self.high)
+
 
 	# allow reading/writing of low and high from python
 	@property
