@@ -2,6 +2,7 @@
 .venv/
 .workDebVenv/
 .macDebVenv/
+.deskUbuVenv/
 
 # ignore compiled library and similar
 *.so
