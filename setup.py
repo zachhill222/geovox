@@ -6,39 +6,57 @@ from Cython.Build import cythonize
 extensions = [
     Extension(
         name="geovox.linalg.vector",
-        sources=["geovox/linalg/vector.pyx"]
+        sources=["geovox/linalg/vector.pyx", "c_geovox/src/point.cpp"],
+        language="c++",
+        include_dirs=["c_geovox/include"]
     ),
     Extension(
         name="geovox.linalg.matrix",
-        sources=["geovox/linalg/matrix.pyx"]
+        sources=["geovox/linalg/matrix.pyx"],
+        language="c++",
+        include_dirs=["c_geovox/include"]
     ),
     Extension(
         name="geovox.linalg.solvers",
-        sources=["geovox/linalg/solvers.pyx"]
+        sources=["geovox/linalg/solvers.pyx"],
+        language="c++",
+        include_dirs=["c_geovox/include"]
     ),
     Extension(
         name="geovox.util.box",
-        sources=["geovox/util/box.pyx"]
+        sources=["geovox/util/box.pyx"],
+        language="c++",
+        include_dirs=["c_geovox/include"]
     ),
     Extension(
         name="geovox.util.quaternion",
-        sources=["geovox/util/quaternion.pyx"]
+        sources=["geovox/util/quaternion.pyx"],
+        language="c++",
+        include_dirs=["c_geovox/include"]
     ),
     Extension(
         name="geovox.util.optimize",
-        sources=["geovox/util/optimize.pyx"]
+        sources=["geovox/util/optimize.pyx"],
+        language="c++",
+        include_dirs=["c_geovox/include"]
     ),
     Extension(
         name="geovox.geometry.particles",
-        sources=["geovox/geometry/particles.pyx"]
+        sources=["geovox/geometry/particles.pyx"],
+        language="c++",
+        include_dirs=["c_geovox/include"]
     ),
     Extension(
         name="geovox.geometry.assembly",
-        sources=["geovox/geometry/assembly.pyx"]
+        sources=["geovox/geometry/assembly.pyx"],
+        language="c++",
+        include_dirs=["c_geovox/include"]
     ),
     Extension(
         name="geovox.vtkutil",
-        sources=["geovox/vtkutil.pyx"]
+        sources=["geovox/vtkutil.pyx"],
+        language="c++",
+        include_dirs=["c_geovox/include"]
     )
 ]
 

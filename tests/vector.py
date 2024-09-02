@@ -12,7 +12,7 @@ v = V.copy()
 print("v= "+repr(v))
 
 print("\nTESTING VECTOR OPERATIONS")
-print("|u|^2=", u.abs2())
+print("|u|^2=", u.norm2())
 print("|u|=", abs(u))
 print("-u=", -u)
 print("2*u=",2*u)

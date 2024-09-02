@@ -55,7 +55,7 @@ cdef class Shape3D:
 
 ############ Sphere #################
 cdef double SphereLevelFun(double R, Vector center, Vector point):
-	return (point-center).abs2/(R*R)
+	return (point-center).norm2()/(R*R)
 
 cdef class Sphere(Shape3D):
 	def __init__(self, double R, Vector center):
