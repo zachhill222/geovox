@@ -12,6 +12,7 @@ reinstall: uninstall install
 clean:
 	$(RM) -r build dist *.egg-info
 	find ./geovox -name "*.c" -type f -delete
+	find ./geovox -name "*.cpp" -type f -delete
 	find ./geovox -name "*.so" -type f -delete
 	find . -name __pycache__ -exec rm -r {} +
 

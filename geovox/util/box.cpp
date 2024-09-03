@@ -3,7 +3,12 @@
 /* BEGIN: Cython Metadata
 {
     "distutils": {
-        "depends": [],
+        "depends": [
+            "c_geovox/include/point.hpp"
+        ],
+        "include_dirs": [
+            "c_geovox/include"
+        ],
         "language": "c++",
         "name": "geovox.util.box",
         "sources": [

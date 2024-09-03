@@ -5,8 +5,10 @@
 .deskUbuVenv/
 
 # ignore compiled library and similar
-*.so
-*.c
+geovox/*.so
+geovox/*.c
+geovox/*.cpp
+*.o
 **/__pycache__/
 build/
 geovox.egg-info/
