@@ -11,7 +11,9 @@ geovox/*.cpp
 *.o
 **/__pycache__/
 build/
+dist/
 geovox.egg-info/
+c_geovox/build
 
 # ignore .vtk files from examples
 *.vtk
