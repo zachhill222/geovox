@@ -53,7 +53,7 @@ namespace GeoVox::util{
 			_low = _newlow;
 			_high = _newhigh;
 		}else{
-			std::out_of_range("Box: can't move _low to newlow")
+			std::out_of_range("Box: can't move _low to newlow");
 		}
 	}
 
@@ -64,26 +64,26 @@ namespace GeoVox::util{
 			_low = _newlow;
 			_high = _newhigh;
 		}else{
-			std::out_of_range("Box: can't move _high to newhigh")
+			std::out_of_range("Box: can't move _high to newhigh");
 		}
 	}
 
 	Point Box::hexvertex(const int idx) const {
 		switch (idx){
 		case 2:
-			return this[3];
+			return operator[](3);
 			break;
 		case 3:
-			return this[2];
-		case 6;
-			return this[7];
+			return operator[](2);
+		case 6:
+			return operator[](7);
 			break;
-		case 7;
-			return this[6];
-			break
+		case 7:
+			return operator[](6);
+			break;
 		default:
-			return this[idx];
-			break
+			return operator[](idx);
+			break;
 		}
 		return -1;
 	}

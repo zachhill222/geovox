@@ -18,6 +18,14 @@ namespace GeoVox::util
 	//////////////////////////////////////////////////////////////////
 	////////////////// ARITHMETIC METHODS ////////////////////////////
 	//////////////////////////////////////////////////////////////////
+	Point Point::operator-() const {
+		Point result = Point(_len);
+		for (int i=0; i<_len; i++){
+			result[i] = -_data[i];
+		}
+		return result;
+	}
+	
 	//additions
 	Point* Point::operator+=(const Point& other){
 		for (int i=0; i<_len; i++){
