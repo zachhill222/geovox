@@ -4,5 +4,5 @@
 #include "util/box.hpp"
 #include "util/quaternion.hpp"
 #include "util/plane.hpp"
-#include "util/simplex.hpp"
+#include "util/matrix.hpp"
 #endif

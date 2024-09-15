@@ -18,7 +18,7 @@ namespace GeoVox::util
 	////////////////// ARITHMETIC METHODS ////////////////////////////
 	//////////////////////////////////////////////////////////////////
 	Point Point::operator-() const {
-		Point result = Point(_len);
+		Point result = Point();
 		for (int i=0; i<_len; i++){
 			result[i] = -_data[i];
 		}
@@ -34,7 +34,7 @@ namespace GeoVox::util
 	}
 
 	Point Point::operator+(const Point& other) const{
-		Point result = Point(_len);
+		Point result = Point();
 		for (int i=0; i<_len; i++){
 			result[i] = _data[i] + other[i];
 		}
@@ -50,7 +50,7 @@ namespace GeoVox::util
 	}
 
 	Point Point::operator-(const Point& other) const{
-		Point result = Point(_len);
+		Point result = Point();
 		for (int i=0; i<_len; i++){
 			result[i] = _data[i] - other[i];
 		}
@@ -66,7 +66,7 @@ namespace GeoVox::util
 	}
 
 	Point Point::operator*(const Point& other) const{
-		Point result = Point(_len);
+		Point result = Point();
 		for (int i=0; i<_len; i++){
 			result[i] = _data[i] * other[i];
 		}
@@ -82,7 +82,7 @@ namespace GeoVox::util
 	}
 
 	Point Point::operator/(const Point& other) const{
-		Point result = Point(_len);
+		Point result = Point();
 		for (int i=0; i<_len; i++){
 			result[i] = _data[i] / other[i];
 		}
@@ -98,7 +98,7 @@ namespace GeoVox::util
 	}
 
 	Point Point::operator*(const double& scalar) const{
-		Point result = Point(_len);
+		Point result = Point();
 		for (int i=0; i<_len; i++){
 			result[i] = _data[i]*scalar;
 		}
@@ -115,7 +115,7 @@ namespace GeoVox::util
 
 	Point Point::operator/(const double& scalar) const{
 		double reciprocal = 1.0/scalar;
-		Point result = Point(_len);
+		Point result = Point();
 		for (int i=0; i<_len; i++){
 			result[i] = _data[i]*reciprocal;
 		}
@@ -326,7 +326,7 @@ namespace GeoVox::util
 	}
 
 	Point Point::cross(const Point& other) const{ //cross product, only if _len==3, but will return the cross product of the first 3 entries.
-		Point result = Point(3);
+		Point result = Point();
 		result[0] = _data[1]*other[2] - _data[2]*other[1];
 		result[1] = _data[2]*other[0] - _data[0]*other[2];
 		result[2] = _data[0]*other[1] - _data[1]*other[0];
@@ -338,14 +338,14 @@ namespace GeoVox::util
 	////////////// NON MEMBER FUNCTIONS IN namespace GeoVox:util
 
 	Point el_max(const Point& point1, const Point& point2){ //element-wise maximum
-		Point result = Point(point1.len());
+		Point result = Point();
 		for (int i=0; i<point1.len(); i++){
 			result[i] = std::max(point1[i], point2[i]);
 		}
 		return result;
 	}
 	Point el_min(const Point& point1, const Point& point2){ //element-wise minimum
-		Point result = Point(point1.len());
+		Point result = Point();
 		for (int i=0; i<point1.len(); i++){
 			result[i] = std::min(point1[i], point2[i]);
 		}

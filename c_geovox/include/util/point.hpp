@@ -12,25 +12,18 @@ namespace GeoVox::util{
 		//////////////////////////////////////////////////////////////////
 		////////////////// CONSTRUCTOR AND DESTRUCTOR ////////////////////
 		//////////////////////////////////////////////////////////////////
-		Point(): _len(3) {
-			_data = new double[_len];
+		Point(){
 			_data[0] = 0.0;
 			_data[1] = 0.0;
 			_data[2] = 0.0;
 		}
 
-		Point(const int len): _len(len) {
-			_data = new double[_len];
-		}
-
-		Point(const double x, const double y): _len(2){
-			_data = new double[_len];
+		Point(const double x, const double y){
 			_data[0] = x;
 			_data[1] = y;
 		}
 
-		Point(const double x, const double y, const double z): _len(3){
-			_data = new double[_len];
+		Point(const double x, const double y, const double z){
 			_data[0] = x;
 			_data[1] = y;
 			_data[2] = z;
@@ -38,18 +31,16 @@ namespace GeoVox::util{
 
 		//copy constructor
 		Point(const Point& other) {
-			_len = other.len();
-			_data = new double[_len];
-			for (int i=0; i<_len; i++){
-				_data[i] = other[i];
-			}
+			_data[0] = other[0];
+			_data[1] = other[1];
+			_data[2] = other[2];
 		}
 
-		~Point(){
-			if (_data) {
-				delete[] _data;
-			}
-		}
+		// ~Point(){
+		// 	if (_data) {
+		// 		delete[] _data;
+		// 	}
+		// }
 
 		
 		//////////////////////////////////////////////////////////////////
@@ -137,12 +128,12 @@ namespace GeoVox::util{
 		Point cross(const Point& other) const; //cross product, only if _len==3, but no error check
 
 
-	// private:
-		double* _data;
-		int _len;
+	private:
+		double _data[3];
+		static const int _len = 3;
 
 	};
-
+	
 
 	//IMPLEMNT POINT-POINT OPERATORS IN GeoVox::utils NAMESPACE
 	Point el_max(const Point& point1, const Point& point2); //element-wise maximum

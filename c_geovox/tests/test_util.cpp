@@ -22,8 +22,19 @@ int test_point(){
 
 	util::Plane plane = util::Plane(u,v);
 	plane.print(std::cout);
-	
+
 	plane.project(util::Point(4,5,6));
+
+	util::Matrix3 mat = util::Matrix3();
+	mat.setcol(0,u);
+	mat.setcol(1,v);
+	mat.setcol(2,u.cross(v));
+
+	mat.print(std::cout);
+	mat.inv().print(std::cout);
+	(mat*mat.inv()).print(std::cout);
+
+
 	return 1;
 }
 
