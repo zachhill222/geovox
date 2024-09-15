@@ -1,7 +1,15 @@
-#include "quaternion.hpp"
+#include "util/quaternion.hpp"
 
 namespace GeoVox::util{
+	double Quaternion::operator[](int idx) const{
+		if (idx==0){
+			return _q0;
+		}
+		return _qv[idx-1];
+	}
+
 	double Quaternion::q0() const {return _q0;}
+
 	Point Quaternion::qv() const {return _qv;}
 
 	Quaternion Quaternion::conj() const{
@@ -60,7 +68,7 @@ namespace GeoVox::util{
 	}
 	Quaternion Quaternion::operator*(const Quaternion& other) const{
 		double Q0 = _q0*other.q0() - _qv.dot(other.qv());
-		Point QV = _q0*other.qv() + other.q0()*_qv + _qv.cross(other.qv());
+		Point  QV = _q0*other.qv() + other.q0()*_qv + _qv.cross(other.qv());
 		return Quaternion(Q0, QV);
 	}
 	Quaternion* Quaternion::operator/=(const Quaternion& other){

@@ -1,6 +1,9 @@
-#pragma once
-#include "point.hpp"
-#include<stdexcept>
+#ifndef BOX_H
+#define BOX_H
+
+#include "util/point.hpp"
+#include <stdexcept>
+
 
 
 namespace GeoVox::util{
@@ -68,3 +71,12 @@ namespace GeoVox::util{
 		Point _high;
 	};
 }
+
+
+
+
+#endif
+
+
+
+

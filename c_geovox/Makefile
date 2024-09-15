@@ -1,29 +1,47 @@
-INC_DIR   := include
-BUILD_DIR := build
+INC_DIR    := include
+BUILD_DIR  := lib
+SRC_DIR    := src
 
-SOURCES   := $(wildcard src/*.cpp)
-OBJECTS   := $(SOURCES:.cpp=.o)
+#util module
+UTIL_SOURCES := $(wildcard src/util/*.cpp)
+UTIL_OBJECTS := $(UTIL_SOURCES:.cpp=.o)
 
+#geometry module
+GEO_SOURCES := $(wildcard src/geometry/*.cpp)
+GEO_OBJECTS := $(GEO_SOURCES:.cpp=.o)
 
 CC        := g++
 CFLAGS    := -O2 -Wall
-LDFLAGS   :=
-LIBS      := 
 
 TARGET    := $(BUILD_DIR)/libcgeovox.a
 
 
-# build library
-$(TARGET): $(OBJECTS) | $(BUILD_DIR)
+
+
+
+##############################################
+######### BUILD LIBRARY ######################
+##############################################
+$(TARGET): $(UTIL_OBJECTS) $(GEO_OBJECTS) | $(BUILD_DIR)
 	ar rcs $@ $^
 	ranlib $@
-	cp -rfu $(INC_DIR) $(BUILD_DIR)/include
 
-# build objects
+
+
+
+
+##############################################
+######### BUILD OBJECTS ######################
+##############################################
 .cpp.o:
-	$(CC) $(CFLAGS) $(LDFLAGS) -I$(INC_DIR) -c $< -o $@ 
+	$(CC) $(CFLAGS) -I$(INC_DIR) -c $< -o $@
 
-# create directories for build and objects if they don't exist
+
+
+
+##############################################
+######### DIRECTORY AND CLEANUP ##############
+##############################################
 $(BUILD_DIR):
 	mkdir -p $@
 
@@ -31,9 +49,9 @@ $(BUILD_DIR):
 .PHONY: clean
 clean:
 	rm -rf $(BUILD_DIR)
-	rm *.o
+	find . -name "*.o" -type f -delete
 
 .PHONY: print
 print:
-	@echo SOURCES:= $(SOURCES)
-	@echo OBJECTS:= $(OBJECTS)
+	@echo UTIL_SOURCES:= $(UTIL_SOURCES)
+	@echo UTIL_OBJECTS:= $(UTIL_OBJECTS)

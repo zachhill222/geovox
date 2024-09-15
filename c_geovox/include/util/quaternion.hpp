@@ -1,17 +1,20 @@
-#pragma once
-#include "box.hpp"
-#include "point.hpp"
+#ifndef QUATERNION_H
+#define QUATERNION_H
+
+#include "util/box.hpp"
+#include "util/point.hpp"
 #include <cmath>
 
 namespace GeoVox::util{
 	class Quaternion{
+	public:
 		//// INITIALIZERS
 		Quaternion(): _q0(1), _qv(Point(0,0,0)) {}
 		Quaternion(const double q0, const double q1, const double q2, const double q3): _q0(q0), _qv(Point(q1,q2,q3)) {}
 		Quaternion(const double q0, const Point qv): _q0(q0), _qv(Point(qv[0], qv[1], qv[2])) {}
 
-	public:
 		//// ATTRIBUTES
+		double operator[](int idx) const;
 		double q0() const;
 		Point qv() const;
 
@@ -40,3 +43,6 @@ namespace GeoVox::util{
 		Point _qv;
 	};
 }
+
+
+#endif

@@ -6,7 +6,7 @@ from geovox.util.optimize cimport _closest_point_neldermead, _best_point
 
 
 cdef int NONE_DEPTH = -9999
-# cdef void _divide(Node N)
+cdef void _divide(Node N)
 
 
 cdef class Node:
@@ -20,10 +20,11 @@ cdef class Node:
 	cdef Box bbox
 	cdef public int nvert  #number of vertices contained in a single marker. probably shouldn't be public.
 
-	# cpdef void cdivide(self)
+	cpdef void cdivide(self)
 	cpdef void divide(self)
 	cpdef int sumnvert(self) #set each parent node nvert to be the sum of the children
 	cpdef Node getnode(self, Vector point) #get first leaf that contains the point
+	cpdef bint inparticle(self, Vector point)
 
 	cpdef list leaflist(self) #return a list of all leaves
 	cpdef void to_vtk(self, str filename) #write to a .vtk file
@@ -32,6 +33,12 @@ cdef class Node:
 
 
 cdef class Assembly(Node):
+	cdef public Box subsamplebox
+	cdef public Vector subsampleres
+
 	cpdef Box getbbox(self)
 	cpdef void process(self)
 	cpdef void read(self, str filename, str pType = *)
+	cpdef void to_dat(self, str filename)
+
+cpdef void dat_to_vtk(Box bbox, str infile, str outfile)

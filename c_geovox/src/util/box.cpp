@@ -1,4 +1,4 @@
-#include "box.hpp"
+#include "util/box.hpp"
 
 namespace GeoVox::util{
 
@@ -39,11 +39,10 @@ namespace GeoVox::util{
 			break;
 		case 7:
 			return GeoVox::util::Point(_high[0], _high[1], _high[2]);
-			break;
-		default:
-			std::out_of_range("Box: vertex index must be from 0 to 7");
+			break;	
 		}
-		return -1;
+		std::out_of_range("Box: vertex index must be from 0 to 7");
+		return Point();
 	}
 
 	void Box::setlow(const Point& newlow){
@@ -85,7 +84,8 @@ namespace GeoVox::util{
 			return operator[](idx);
 			break;
 		}
-		return -1;
+		std::out_of_range("Box: vertex index must be from 0 to 7");
+		return Point();
 	}
 
 	bool Box::contains(const Point& point) const{

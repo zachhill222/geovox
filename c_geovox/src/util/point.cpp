@@ -1,5 +1,4 @@
-#include "point.hpp"
-#include <cmath>
+#include "util/point.hpp"
 
 namespace GeoVox::util
 {
@@ -121,6 +120,22 @@ namespace GeoVox::util
 			result[i] = _data[i]*reciprocal;
 		}
 		return result;
+	}
+
+	Point& Point::operator=(const Point& other){
+		if (this == &other){
+			return *this;
+		}
+
+		if (_len != other.len()){
+			std::out_of_range("Vectors must be the same size");
+		}
+
+		for (int i=0; i<_len; i++){
+			_data[i] = other[i];
+		}
+
+		return *this;
 	}
 
 	//////////////////////////////////////////////////////////////////
@@ -252,8 +267,15 @@ namespace GeoVox::util
 
 	Point Point::normalize() const{
 		double val = this->norm();
-		Point result = operator/(val);
+		Point result = this->operator/(val);
 		return result;
+	}
+
+	void Point::print(std::ostream &stream) const{
+		for (int i=0; i<_len; i++){
+			stream << _data[i] << " ";
+		}
+		stream << "\n";
 	}
 
 
@@ -297,7 +319,7 @@ namespace GeoVox::util
 	//////////////////////////////////////////////////////////////////
 	double Point::dot(const Point& other) const{ //dot product
 		double result = _data[0]*other[0];
-		for (int i=0; i<_len; i++){
+		for (int i=1; i<_len; i++){
 			result += _data[i]*other[i];
 		}
 		return result;

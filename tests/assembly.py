@@ -1,4 +1,4 @@
-from geovox.geometry import Assembly
+from geovox.geometry import Assembly, dat_to_vtk
 from geovox.util import Box
 from geovox.linalg import Vector
 
@@ -6,16 +6,38 @@ from time import time
 from sys import getsizeof
 
 Assem = Assembly()
-Assem.read("./tests/sample_particles/particles_1000.txt")
+Assem.read("./tests/sample_particles/particles_50.txt")
 Assem.maxdepth = 8
+
+Assem.subsamplebox = Assem.bbox
 
 
 for n in range(Assem.maxdepth):
 	tic = time()
+	print(f"({n}) dividing")
 	Assem.cdivide()
 
-	Assem.to_vtk(f"./tests/outfiles/assemblytest_nparticles_{len(Assem.particle_list)}_depth_{Assem.totaldepth}.vtk")
+	Assem.subsampleres = Vector(2**n, 2**n, 2**n)
+	mesh_voxel_vtk = f"./tests/outfiles/assemblytest_nparticles_{len(Assem.particle_list)}_depth_{Assem.totaldepth}.vtk"
+	geo_centroid_file = f"./tests/outfiles/assemblytest_nparticles_{len(Assem.particle_list)}_{int(Assem.subsampleres[0])}_{int(Assem.subsampleres[1])}_{int(Assem.subsampleres[2])}_Geometry.dat"
+	vtk_centroid_file = f"./tests/outfiles/assemblytest_nparticles_{len(Assem.particle_list)}_Geometry_{Assem.totaldepth}.vtk"
+
 	print(f"depth= {Assem.totaldepth}: {len(Assem.leaflist())} leaves, {len(Assem.points)} vertices, {time()-tic} seconds, {getsizeof(Assem)/(2**10)} KB")
+
+	print("saving to .vtk")
+	Assem.to_vtk(mesh_voxel_vtk)
+
+	print("saving subsample to .dat")
+	Assem.to_dat(geo_centroid_file)
+
+	print("reading .dat to .vtk")
+	dat_to_vtk(Assem.subsamplebox, geo_centroid_file, vtk_centroid_file)
+	
+
+
+
+
+
 
 #passing P to NelderMead
 # depth= 1: 8 leaves, 27 vertices, 0.10639023780822754 seconds, 0.125 KB

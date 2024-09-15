@@ -1,123 +1,85 @@
 cimport cython
-from libc.stdlib cimport malloc, free
+# from libc.stdlib cimport malloc, free
 
-from libc.stdlib cimport atof #string (bits) to double
-from cython.parallel cimport prange
-
-
-
-# @cython.wraparound(False)
-# @cython.boundscheck(False)
-# cdef void _divide(Node N):
-# 	cdef Box subbox
-# 	# cdef int p_child_nvert
-# 	cdef int n_particles = len(N.particle_ind_list)
-
-# 	cdef double minlevelval, templevelval
-# 	cdef int n, p_ind, child_ind
-# 	cdef Vector closestpoint
-
-# 	# MARKERS FOR PRANGE AND NOGIL
-# 	cdef bint* child_inheritance_marker 
-# 	cdef int* child_particle_nvert
-# 	cdef double* child_particle_distance
-
-# 	cdef tuple P_levelevals
-
-# 	if N.isdivided:
-# 		for child_ind in range(8):	
-# 			_divide(N.children[child_ind])
-# 	else:
-# 		# first division of root node logic
-# 		if N.root is N: #add bounding box vertices, this should only be called on the very first divide() call on the root node
-# 			N.points.update([N.bbox.vertex(n) for n in range(8)])
+from libc.stdlib cimport atof, atoi #string (bits) to double
+from libc.math cimport log2
 
 
-# 		# test if division is necessary
-# 		if len(N.particle_ind_list) == 0: return #no need to divide here
-# 		if N.nvert == 8: return #particles are convex, no need to divide here, all child regions would have nvert=8 as well
-# 		if N.depth+1 > N.root.maxdepth: return #too deep
 
-# 		# create children
-# 		for child_ind in range(8):
-# 			subbox = Box(N.bbox.vertex(child_ind), N.bbox.center)
-# 			N.children.append(Node(subbox, N.depth+1))
+@cython.wraparound(False)
+@cython.boundscheck(False)
+cdef void _divide(Node N):
+	cdef Box subbox
+	cdef int p_child_nvert
+	cdef int n_particles = len(N.particle_ind_list)
 
-# 			N.children[child_ind].nvert  = 0
-# 			N.children[child_ind].root   = N.root
-# 			N.children[child_ind].parent = N
+	cdef double minlevelval, templevelval
+	cdef int n, p_ind, child_ind
+	cdef Vector closestpoint
 
-# 		##########################################
-# 		# MALLOCS MUST BE FREED
-# 		child_inheritance_marker = <bint*> malloc( n_particles * sizeof(bint))
-# 		child_particle_nvert = <int*> malloc( n_particles * sizeof(int))
-# 		child_particle_distance = <double*> malloc( n_particles * sizeof(double))
-# 		########################################
+	if N.isdivided:
+		for child_ind in range(8):	
+			_divide(N.children[child_ind])
+	else:
+		# first division of root node logic
+		if N.root is N: #add bounding box vertices, this should only be called on the very first divide() call on the root node
+			N.points.update([N.bbox.vertex(n) for n in range(8)])
 
-# 		# P_levelevals = tuple([N.root.particle_list[N.particle_ind_list[p_ind]].levelval for p_ind in range(n_particles)])
 
-# 		# update populate child attributes particle list and nvert, decide which particles should be passed down
-# 		for child_ind in range(8):
-# 			child = N.children[child_ind]
+		# test if division is necessary
+		if len(N.particle_ind_list) == 0: return #no need to divide here
+		if N.nvert == 8: return #particles are convex, no need to divide here, all child regions would have nvert=8 as well
+		if N.depth+1 > N.root.maxdepth: return #too deep
 
-# 			# update point/vertex list in root
-# 			for n in range(8):
-# 				N.root.points.add(child.bbox.vertex(n))
+		# create children
+		for child_ind in range(8):
+			subbox = Box(N.bbox.vertex(child_ind), N.bbox.center)
+			N.children.append(Node(subbox, N.depth+1))
 
-# 			# loop through particles to see which should be passed down to the child
-# 			for p_ind in prange(n_particles, nogil=True):
-# 				child_inheritance_marker[p_ind] = False
-# 				child_particle_nvert[p_ind] = 0
+			N.children[child_ind].nvert  = 0
+			N.children[child_ind].root   = N.root
+			N.children[child_ind].parent = N
 
-# 				# for 
-# 				# 
 
-# 				with gil:
-# 					P = N.root.particle_list[N.particle_ind_list[p_ind]]
-# 					F = P.levelval
-# 					if abs(child.bbox.center - N.root.particle_list[N.particle_ind_list[p_ind]].center) <= 0.5*(child.bbox.diam + N.root.particle_list[N.particle_ind_list[p_ind]].diam):
-# 						with nogil:
-# 							#compute vertex intersections
-							
-# 							for n in range(8):
-# 								templevelval = P.levelval(Vector(0,0,0))
-# 								templevelval = P.levelval[p_ind](child.bbox.vertex(n))
-# 								# minlevelval = min(minlevelval, templevelval)
-# 								if templevelval <= 1.0:
-# 									child_particle_nvert[p_ind] += 1
-# 							# child.nvert = max(child.nvert, p_child_nvert)
-# 							# print(minlevelval, p_child_nvert)
+		# P_levelevals = tuple([N.root.particle_list[N.particle_ind_list[p_ind]].levelval for p_ind in range(n_particles)])
 
-# 							if child_particle_nvert[p_ind] > 0:
-# 								# child.particle_ind_list.append(N.root.particle_list.index(N.root.particle_list[N.particle_ind_list[p_ind]]))
-# 								child_inheritance_marker[p_ind] = True
-# 							elif child.bbox.diam >= N.root.particle_list[N.particle_ind_list[p_ind]].diam:
-# 								child_inheritance_marker[p_ind] = True
-# 								# child.particle_ind_list.append(N.root.particle_list.index(N.root.particle_list[N.particle_ind_list[p_ind]]))
-# 							else: #make a closer inspection in case the particle intersects a face but not a vertex
-# 								if _closest_point_neldermead(N.root.particle_list[N.particle_ind_list[p_ind]].levelval, child.bbox, verbose=0) <= 1.0:
-# 									child_inheritance_marker[p_ind] = True
-# 									# child.particle_ind_list.append(N.root.particle_list.index(N.root.particle_list[N.particle_ind_list[p_ind]]))
+		# update populate child attributes particle list and nvert, decide which particles should be passed down
+		for child_ind in range(8):
+			child = N.children[child_ind]
+
+			# update point/vertex list in root
+			for n in range(8):
+				N.root.points.add(child.bbox.vertex(n))
+
+			# loop through particles to see which should be passed down to the child
+			for p_ind in range(n_particles):
+				P = N.root.particle_list[N.particle_ind_list[p_ind]]
+
+				if abs(child.bbox.center - N.root.particle_list[N.particle_ind_list[p_ind]].center) <= 0.5*(child.bbox.diam + N.root.particle_list[N.particle_ind_list[p_ind]].diam):
+					#compute vertex intersections
+					
+					for n in range(8):
+						templevelval = P.levelval(child.bbox.vertex(n))
+						if templevelval <= 1.0:
+							p_child_nvert += 1
+					child.nvert = max(child.nvert, p_child_nvert)
+
+					if child.nvert > 0:
+						child.particle_ind_list.append(N.root.particle_list.index(P))
+					elif child.bbox.diam >= P.diam:
+						child.particle_ind_list.append(N.root.particle_list.index(P))
+					else: #make a closer inspection in case the particle intersects a face but not a vertex
+						if _closest_point_neldermead(P.levelval, child.bbox, verbose=0) <= 1.0:
+							child.particle_ind_list.append(N.root.particle_list.index(P))
 			
-# 			for p_ind in range(n_particles):
-# 				child.nvert = max(child.nvert, child_particle_nvert[p_ind])
-# 				if child_inheritance_marker[p_ind]:
-# 					P = N.root.particle_list[N.particle_ind_list[p_ind]]
-# 					child.particle_ind_list.append(N.root.particle_list.index(P))
 
 
-# 		#########################
-# 		# MALLOCS ARE FREE!
-# 		free(child_inheritance_marker)
-# 		free(child_particle_nvert)
-# 		free(child_particle_distance)
-# 		##########################
 		
-# 		#change parameters from N for a non-leaf node
-# 		N.particle_ind_list = []
-# 		N.nvert = -1 #only leaf nodes should have a valid marker
-# 		N.isdivided = True
-# 		N.root.totaldepth = max(N.root.totaldepth, N.depth+1)
+		#change parameters from N for a non-leaf node
+		N.particle_ind_list = []
+		N.nvert = -1 #only leaf nodes should have a valid marker
+		N.isdivided = True
+		N.root.totaldepth = max(N.root.totaldepth, N.depth+1)
 
 
 
@@ -163,7 +125,7 @@ cdef class Node: #node of octree
 	@property
 	def bbox(self): return self.bbox
 
-	# cpdef void cdivide(self): _divide(self)
+	cpdef void cdivide(self): _divide(self)
 
 	cpdef void divide(self):
 		cdef Box subbox
@@ -252,7 +214,7 @@ cdef class Node: #node of octree
 
 
 	cpdef Node getnode(self, Vector point): #return first leaf node that contains the point. point should be interior, but not strictly necessary
-		cdef Node node = Node(None, None, NONE_DEPTH)
+		cdef Node node = Node(None, NONE_DEPTH)
 		if self.bbox.contains(point):
 			if self.isdivided:
 				for n in range(8):
@@ -261,6 +223,15 @@ cdef class Node: #node of octree
 						return node
 			else: return self
 		return node
+
+	cpdef bint inparticle(self, Vector point):
+		cdef Node N = self.getnode(point)
+		cdef int p_ind
+		for p_ind in range(len(N.particle_ind_list)):
+			P = self.root.particle_list[N.particle_ind_list[p_ind]]
+			if P.contains(point): return True
+
+		return False
 
 	cpdef void appendparticle(self, particle_t P):
 		if self.root is self:
@@ -380,13 +351,15 @@ cdef class Node: #node of octree
 
 
 cdef class Assembly(Node):
-	def __init__(self, list particle_list = []):
+	def __init__(self, subsampleres = Vector(100, 100, 100), list particle_list = []):
 		super().__init__(Box(Vector(-1,-1,-1), Vector(1,1,1)), 0)
 
-		self.maxdepth = 5
+		self.maxdepth = 6
 		self.particle_list = particle_list
 		self.bbox = self.getbbox()
 
+		self.subsamplebox = self.bbox.copy()
+		self.subsampleres = subsampleres
 
 	cpdef Box getbbox(self): #get bbox for particle_list
 		if len(self.particle_list) == 0: return Box(Vector(-1,-1,-1), Vector(1,1,1))
@@ -395,6 +368,36 @@ cdef class Assembly(Node):
 		for n in range(1,len(self.particle_list)):
 			bbox @= self.particle_list[n].bbox #smallest bounding box containing box and bbox
 		return bbox
+
+
+	cpdef void to_dat(self, str filename):
+		#check if resolution is sufficient
+		# cdef Vector h = (1.0/2**self.totaldepth)*self.bbox.sidelength
+		cdef Vector target_h = self.subsamplebox.sidelength/self.subsampleres
+		# if not target_h < h: raise Exception("Mesh is not fine enough. Increase maxdepth and re-process or reduce required resolution.")
+
+		cdef list block
+		cdef Vector centroid = Vector(0,0,0)
+		cdef int i, j, k
+		with open(filename, 'w') as _file:
+			###############  header ###############
+			_file.write("nx= {:d}\n".format(<int>self.subsampleres[0]))
+			_file.write("ny= {:d}\n".format(<int>self.subsampleres[1]))
+			_file.write("nz= {:d}\n".format(<int>self.subsampleres[2]))
+
+			for k in range(self.subsampleres[2]):
+				centroid[2] = self.subsamplebox.low[2]+(k+0.5)*target_h[2]
+				block = ['\n']
+				for j in range(self.subsampleres[1]):
+					centroid[1] = self.subsamplebox.low[1]+(j+0.5)*target_h[1]
+					for i in range(self.subsampleres[0]):
+						centroid[0] = self.subsamplebox.low[0]+(i+0.5)*target_h[0]
+						block.append(f"{<int> self.inparticle(centroid)} ")
+						# print(centroid)
+					block.append('\n')
+				_file.write(''.join(block))
+
+
 
 
 	cpdef void process(self):
@@ -440,3 +443,109 @@ cdef class Assembly(Node):
 
 		self.bbox = self.getbbox()
 
+
+
+cpdef void dat_to_vtk(Box bbox, str infile, str outfile):
+	cdef int nx, ny, nz
+	cdef Vector H 
+
+	cdef set pointlist = set()
+	cdef list elemboxes = []
+	cdef list elemvalue = []
+
+	cdef Vector low = Vector(3)
+	cdef Vector high = Vector(3)
+	cdef Box elem
+
+	cdef int i, j, k, n
+	with open(infile,'r') as file:
+		# read dimensions
+		line = file.readline()
+		nx = int(line.strip("nx= "))
+		
+		line = file.readline()
+		ny = int(line.strip("ny= "))
+
+		line = file.readline()
+		nz = int(line.strip("nz= "))
+
+		# save cell size
+		H = Vector(bbox.sidelength.x/nx, bbox.sidelength.y/ny, bbox.sidelength.z/nz)
+		# print(H, bbox)
+		# read mask from file
+		for k in range(nz):
+			low.z = bbox.low.z + k*H.z
+			for j in range(ny):
+				low.y = bbox.low.y + j*H.y
+				line = file.readline()
+				vals = line.split(' ')
+				
+				if len(vals) > 1:
+					for i in range(nx):
+						low.x = bbox.low.x + i*H.x
+						elem = Box(low,low+H)
+						elemboxes.append(elem)
+						elemvalue.append(atoi(vals[i].encode()))
+
+						# print(low)
+						for n in range(8):
+							pointlist.add(elem.vertex(n))
+
+			line = file.readline()
+
+	# write to .vtk
+	#get list of nodes, sort for better node ordering
+	cdef list _nodelist  = sorted(pointlist)
+
+	#get voxel element node indices using a hash/dictionary
+	cdef dict _nodedict = dict(enumerate(_nodelist))
+	cdef dict _getnodeindex = dict(zip(_nodedict.values(), _nodedict.keys()))
+
+	#number of elements and points
+	cdef int n_elem = len(elemboxes)
+	cdef int n_points = len(_nodelist)
+
+	#write .vtk file
+	cdef list string
+	cdef elem_index, ind
+	with open(outfile, 'w') as _file:
+		###############  header ###############
+		_file.write("# vtk DataFile Version 2.0\n")
+		_file.write("Octree Structure\n")
+		_file.write("ASCII\n\n")
+
+		############## points ###############
+		_file.write("DATASET UNSTRUCTURED_GRID\n")
+		_file.write(f"POINTS {n_points} float\n")
+		string = []
+		for elem_index from 0 <= elem_index < n_points: #Print node locations
+			string.append(f"{_nodelist[elem_index].x} {_nodelist[elem_index].y} {_nodelist[elem_index].z}\n")
+		string.append("\n")
+		_file.write(''.join(string))
+
+		############## voxels ###############
+		_file.write(f"CELLS {n_elem} {n_elem+8*n_elem}\n")
+		string = []
+		for elem_index from 0 <= elem_index < n_elem:
+			string.append("8 ")
+			for n from 0 <= n < 8:
+				ind = _getnodeindex[elemboxes[elem_index].vertex(n)]
+				string.append(f"{ind} ")
+			string.append("\n")
+		string.append("\n")
+		_file.write(''.join(string))
+
+		_file.write(f"CELL_TYPES {n_elem}\n")
+		string = ["11\n"]*n_elem
+		string.append("\n")
+		_file.write(''.join(string))
+
+		############## nvert ################
+		_file.write(f"CELL_DATA {n_elem}\n")
+		_file.write("SCALARS centroid double\n")
+		_file.write("LOOKUP_TABLE default\n")
+		string = []
+		for elem_index from 0<= elem_index < n_elem:
+			string.append(f"{elemvalue[elem_index]}\n")
+		string.append("\n")
+		_file.write(''.join(string))
