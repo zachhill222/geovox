@@ -5,6 +5,7 @@
 #include <iostream>
 
 namespace GeoVox::util{
+	using Point3 = Point<3>;
 	class Matrix3{
 	public:
 		Matrix3(){}
@@ -24,14 +25,14 @@ namespace GeoVox::util{
 		double trace() const;
 
 		Matrix3 inv() const;
-		Point solve(const Point& rhs) const;
+		Point3 solve(const Point3& rhs) const;
 
-		Point col(int j) const;
-		Point row(int i) const;
-		void setcol(int j, const Point& vec);
-		void setrow(int i, const Point& vec);
+		Point3 col(int j) const;
+		Point3 row(int i) const;
+		void setcol(int j, const Point3& vec);
+		void setrow(int i, const Point3& vec);
 
-		Point operator*(const Point& x) const;
+		Point3 operator*(const Point3& x) const;
 		Matrix3 operator*(const double c) const;
 		Matrix3 operator*(const Matrix3& other) const;
 		Matrix3 operator+(const Matrix3& other) const;

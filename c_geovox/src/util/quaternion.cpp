@@ -10,7 +10,7 @@ namespace GeoVox::util{
 
 	double Quaternion::q0() const {return _q0;}
 
-	Point Quaternion::qv() const {return _qv;}
+	Point3 Quaternion::qv() const {return _qv;}
 
 	Quaternion Quaternion::conj() const{
 		return Quaternion(_q0, -_qv);
@@ -32,12 +32,12 @@ namespace GeoVox::util{
 		_qv*=C;
 		return this;
 	}
-	Quaternion* Quaternion::setrotation(const double& theta, const Point& axis){
+	Quaternion* Quaternion::setrotation(const double& theta, const Point3& axis){
 		_q0 = std::cos(0.5*theta);
 		_qv = std::sin(0.5*theta)*axis.normalize();
 		return this;
 	}
-	Point Quaternion::rotate(const Point& point) const {
+	Point3 Quaternion::rotate(const Point3& point) const {
 		Quaternion V = Quaternion(0.0, point);
 		V = operator*((V*conj()));
 		return V.qv();
@@ -68,7 +68,7 @@ namespace GeoVox::util{
 	}
 	Quaternion Quaternion::operator*(const Quaternion& other) const{
 		double Q0 = _q0*other.q0() - _qv.dot(other.qv());
-		Point  QV = _q0*other.qv() + other.q0()*_qv + _qv.cross(other.qv());
+		Point3  QV = _q0*other.qv() + other.q0()*_qv + _qv.cross(other.qv());
 		return Quaternion(Q0, QV);
 	}
 	Quaternion* Quaternion::operator/=(const Quaternion& other){

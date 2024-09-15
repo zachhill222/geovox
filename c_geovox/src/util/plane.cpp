@@ -2,14 +2,14 @@
 
 namespace GeoVox::util{
 	void Plane::calcbasis(){
-		Point vec1 = _normal.cross(Point(1,0,0));
+		Point3 vec1 = _normal.cross(Point3(1,0,0));
 		
-		Point vec2 = _normal.cross(Point(0,1,0));
+		Point3 vec2 = _normal.cross(Point3(0,1,0));
 		if (vec2.norm2() > vec1.norm2()){
 			vec1 = vec2;
 		}
 
-		vec2 = _normal.cross(Point(0,0,1));
+		vec2 = _normal.cross(Point3(0,0,1));
 		if (vec2.norm2() > vec1.norm2()){
 			vec1 = vec2;
 		}
@@ -19,7 +19,7 @@ namespace GeoVox::util{
 	}
 
 
-	Point Plane::operator[](int idx) const{
+	Point3 Plane::operator[](int idx) const{
 		switch (idx) {
 		case 0:
 			return _basis[0];
@@ -33,28 +33,28 @@ namespace GeoVox::util{
 		}
 
 		std::out_of_range("A Plane only has 3 basis vectors. Index must be between 0 and 2.");
-		return Point();
+		return Point3();
 	}
 
-	double Plane::dist(const Point& point) const{
+	double Plane::dist(const Point3& point) const{
 		return (point-_origin).dot(_normal);
 	}
 
-	Point Plane::project(const Point& point) const{
-		Point local = this->tolocal(point); //write point in local coordinates
-		return Point(local[0], local[1]);
+	Point3 Plane::project(const Point3& point) const{
+		Point3 local = this->tolocal(point); //write point in local coordinates
+		return Point3(local[0], local[1]);
 	}
 
-	Point Plane::tolocal(const Point& point) const{
-		Point shift = point - _origin;
+	Point3 Plane::tolocal(const Point3& point) const{
+		Point3 shift = point - _origin;
 		double a = shift.dot(_basis[0]);
 		double b = shift.dot(_basis[1]);
 		double c = shift.dot(_normal);
-		return Point(a,b,c);
+		return Point3(a,b,c);
 	}
 
-	Point Plane::toglobal(const Point& point) const{
-		Point result = _origin + point[0]*_basis[0] + point[1]*_basis[1];
+	Point3 Plane::toglobal(const Point3& point) const{
+		Point3 result = _origin + point[0]*_basis[0] + point[1]*_basis[1];
 		if (point.len()>2){
 			result += point[2]*_normal;
 		}

@@ -6,17 +6,18 @@
 #include <cmath>
 
 namespace GeoVox::util{
+	using Point3 = Point<3>;
 	class Quaternion{
 	public:
 		//// INITIALIZERS
-		Quaternion(): _q0(1), _qv(Point(0,0,0)) {}
-		Quaternion(const double q0, const double q1, const double q2, const double q3): _q0(q0), _qv(Point(q1,q2,q3)) {}
-		Quaternion(const double q0, const Point qv): _q0(q0), _qv(Point(qv[0], qv[1], qv[2])) {}
+		Quaternion(): _q0(1), _qv(Point3(0,0,0)) {}
+		Quaternion(const double q0, const double q1, const double q2, const double q3): _q0(q0), _qv(Point3(q1,q2,q3)) {}
+		Quaternion(const double q0, const Point3 qv): _q0(q0), _qv(Point3(qv[0], qv[1], qv[2])) {}
 
 		//// ATTRIBUTES
 		double operator[](int idx) const;
 		double q0() const;
-		Point qv() const;
+		Point3 qv() const;
 
 		//// ROTATIONS
 		Quaternion conj() const;
@@ -24,8 +25,8 @@ namespace GeoVox::util{
 		double norm2() const;
 		double norm() const;
 		Quaternion* normalize(); //normalize this quaternion to a rotation quaternion
-		Quaternion* setrotation(const double& theta, const Point& axis);
-		Point rotate(const Point& point) const; //rotate point
+		Quaternion* setrotation(const double& theta, const Point3& axis);
+		Point3 rotate(const Point3& point) const; //rotate point
 
 		///// ARITHMETIC
 		Quaternion* operator+=(const Quaternion& other);
@@ -40,7 +41,7 @@ namespace GeoVox::util{
 
 	private:
 		double _q0;
-		Point _qv;
+		Point3 _qv;
 	};
 }
 

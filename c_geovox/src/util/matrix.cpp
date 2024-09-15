@@ -25,32 +25,32 @@ namespace GeoVox::util{
 		return _data[0] + _data[4] + _data[8];
 	}
 
-	Point Matrix3::col(int j) const{
-		return Point(_data[3*j], _data[3*j+1], _data[3*j+2]);
+	Point3 Matrix3::col(int j) const{
+		return Point3(_data[3*j], _data[3*j+1], _data[3*j+2]);
 	}
 
-	Point Matrix3::row(int i) const{
-		return Point(_data[i], _data[i+3], _data[i+6]);
+	Point3 Matrix3::row(int i) const{
+		return Point3(_data[i], _data[i+3], _data[i+6]);
 	}
 
-	void Matrix3::setcol(int j, const Point& vec){
+	void Matrix3::setcol(int j, const Point3& vec){
 		_data[3*j]   = vec[0];
 		_data[3*j+1] = vec[1];
 		_data[3*j+2] = vec[2];
 	}
 
-	void Matrix3::setrow(int i, const Point& vec){
+	void Matrix3::setrow(int i, const Point3& vec){
 		_data[i]   = vec[0];
 		_data[i+3] = vec[1];
 		_data[i+6] = vec[2];
 	}
 
-	Point Matrix3::solve(const Point& rhs) const{
+	Point3 Matrix3::solve(const Point3& rhs) const{
 		double C = 1.0/det();
-		Point result = Point();
-		Point col0 = col(0);
-		Point col1 = col(1);
-		Point col2 = col(2);
+		Point3 result = Point3();
+		Point3 col0 = col(0);
+		Point3 col1 = col(1);
+		Point3 col2 = col(2);
 
 		result[0] = C*(col1.cross(col2).dot(rhs));
 		result[1] = C*(col2.cross(col0).dot(rhs));
@@ -69,8 +69,8 @@ namespace GeoVox::util{
 		return result;
 	}
 
-	Point Matrix3::operator*(const Point& x) const{
-		Point result = Point();
+	Point3 Matrix3::operator*(const Point3& x) const{
+		Point3 result = Point3();
 		result[0] = row(0).dot(x);
 		result[1] = row(1).dot(x);
 		result[2] = row(2).dot(x);

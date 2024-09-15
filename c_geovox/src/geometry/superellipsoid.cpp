@@ -6,12 +6,12 @@ namespace GeoVox::geometry{
 		return result;
 	}
 
-	SuperEllipsoid* SuperEllipsoid::operator+=(const GeoVox::util::Point& other){
+	SuperEllipsoid* SuperEllipsoid::operator+=(const GeoVox::util::Point3& other){
 		_center+= other;
 		return this;
 	}
 
-	SuperEllipsoid SuperEllipsoid::operator+(const GeoVox::util::Point& other) const{
+	SuperEllipsoid SuperEllipsoid::operator+(const GeoVox::util::Point3& other) const{
 		SuperEllipsoid result = this->copy();
 		result+=other;
 		return result;
@@ -28,13 +28,13 @@ namespace GeoVox::geometry{
 		return result;
 	}
 
-	GeoVox::util::Point SuperEllipsoid::tolocal(const GeoVox::util::Point& point) const{
-		GeoVox::util::Point result = _Q.rotate(point - _center);
+	GeoVox::util::Point3 SuperEllipsoid::tolocal(const GeoVox::util::Point3& point) const{
+		GeoVox::util::Point3 result = _Q.rotate(point - _center);
 		return result;
 	}
 
-	GeoVox::util::Point SuperEllipsoid::toglobal(const GeoVox::util::Point& point) const{
-		GeoVox::util::Point result = _Q.conj().rotate(point) + _center;
+	GeoVox::util::Point3 SuperEllipsoid::toglobal(const GeoVox::util::Point3& point) const{
+		GeoVox::util::Point3 result = _Q.conj().rotate(point) + _center;
 		return result;
 	}
 
@@ -42,8 +42,8 @@ namespace GeoVox::geometry{
 		stream << "SuperEllipsoid( r=(" << _r[0] << ", " << _r[1] << ", " << _r[2] << "), eps1=" << _eps1 << ", eps2=" << _eps2 << ", center=(" << _center[0] << ", " << _center[1] << ", " << _center[2] << "), Q=(" << _Q[0] << ", " << _Q[1] << ", " << _Q[2] << ", " << _Q[3] << ") )\n";
 	}
 
-	double SuperEllipsoid::levelval(const GeoVox::util::Point& point) const{
-		GeoVox::util::Point localpoint = this->tolocal(point);
+	double SuperEllipsoid::levelval(const GeoVox::util::Point3& point) const{
+		GeoVox::util::Point3 localpoint = this->tolocal(point);
 		localpoint/=_r;
 		localpoint*=localpoint;
 		localpoint[0] = std::pow(localpoint[0], _POWERS[1]);

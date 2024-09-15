@@ -5,13 +5,13 @@
 #include <stdexcept>
 
 
-
 namespace GeoVox::util{
+	using Point3 = Point<3>;
 	class Box{
 	public:
-		Box(): _low(Point(0.0, 0.0, 0.0)), _high(Point(1.0, 1.0, 1.0)) {}
+		Box(): _low(Point3(0.0, 0.0, 0.0)), _high(Point3(1.0, 1.0, 1.0)) {}
 
-		Box(const Point& vertex1, const Point& vertex2){
+		Box(const Point3& vertex1, const Point3& vertex2){
 			_low = el_min(vertex1, vertex2);
 			_high = el_max(vertex1, vertex2);
 			
@@ -29,35 +29,40 @@ namespace GeoVox::util{
 			}
 		}
 
-		~Box(){}
+		Box(const Box& other){
+			_low = other.low();
+			_high = other.high();
+		}
+
 
 		//////////////////////////
 		/////// ATTRIBUTES ///////
 		//////////////////////////
-		Point low() const;//get low
-		Point high() const; //get high
-		Point center() const; //get center of the box
-		Point operator[](const int idx) const; //GET idx-TH VERTEX IN VTK-VOXEL ORDERING 
-		void setlow(const Point& newlow);
-		void sethigh(const Point& newhigh);
-		Point hexvertex(const int idx) const; //Get idx-th vertex in vtk-hexahedral ordering
+		Point3 low() const;//get low
+		Point3 high() const; //get high
+		Point3 center() const; //get center of the box
+		Point3 operator[](const int idx) const; //GET idx-TH VERTEX IN VTK-VOXEL ORDERING 
+		void setlow(const Point3& newlow);
+		void sethigh(const Point3& newhigh);
+		Point3 hexvertex(const int idx) const; //Get idx-th vertex in vtk-hexahedral ordering
 
 
 		///////////////////////////////////////////////
 		/////// CONTAINMENT AND INTERSECTION //////////
 		///////////////////////////////////////////////
-		bool contains(const Point& point) const; //check if point is in box
+		bool contains(const Point3& point) const; //check if point is in box
 		bool contains(const Box& other) const; //check if this box contains the entire other box
 		bool intersects(const Box& other) const; //check if this box intersects the other box
+		Point3 support(const Point3& direction) const;
 
 
 		///////////////////////////////////////////////
 		////////// SHIFTING AND SCALING ///////////////
 		///////////////////////////////////////////////
-		Box* operator+=(const Point& shift); //shift by +shift
-		Box operator+(const Point& shift) const; 
-		Box* operator-=(const Point& shift);
-		Box operator-(const Point& shift) const;
+		Box* operator+=(const Point3& shift); //shift by +shift
+		Box operator+(const Point3& shift) const; 
+		Box* operator-=(const Point3& shift);
+		Box operator-(const Point3& shift) const;
 
 		Box* operator*=(const double& scale); //scale towards center
 		Box operator*(const double& scale) const;
@@ -67,9 +72,12 @@ namespace GeoVox::util{
 		Box* combine(const Box& other); //combine this box with other (same thing as the Box(Box,Box) initializer)
 
 	private:
-		Point _low;
-		Point _high;
+		Point3 _low;
+		Point3 _high;
 	};
+
+	//LHS scalar multiplication
+	Box operator*(const double& scale, const Box& box);
 }
 
 

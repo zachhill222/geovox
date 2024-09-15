@@ -2,52 +2,52 @@
 
 namespace GeoVox::util{
 
-	Point Box::low() const{
+	Point3 Box::low() const{
 		return _low;
 	}
 
-	Point Box::high() const{
+	Point3 Box::high() const{
 		return _high;
 	}
 
-	Point Box::center() const{
+	Point3 Box::center() const{
 		return 0.5*(_low+_high);
 	}
 
-	Point Box::operator[](const int idx) const{ //GET idx-TH VERTEX IN VTK-VOXEL ORDERING 
+	Point3 Box::operator[](const int idx) const{ //GET idx-TH VERTEX IN VTK-VOXEL ORDERING 
 		switch(idx){
 		case 0:
-			return GeoVox::util::Point(_low[0],  _low[1],  _low[2]);
+			return GeoVox::util::Point3(_low[0],  _low[1],  _low[2]);
 			break;
 		case 1:
-			return GeoVox::util::Point(_high[0], _low[1],  _low[2]);
+			return GeoVox::util::Point3(_high[0], _low[1],  _low[2]);
 			break;
 		case 2:
-			return GeoVox::util::Point(_low[0],  _high[1], _low[2]);
+			return GeoVox::util::Point3(_low[0],  _high[1], _low[2]);
 			break;
 		case 3:
-			return GeoVox::util::Point(_high[0], _high[1], _low[2]);
+			return GeoVox::util::Point3(_high[0], _high[1], _low[2]);
 			break;
 		case 4:
-			return GeoVox::util::Point(_low[0],  _low[1],  _high[2]);
+			return GeoVox::util::Point3(_low[0],  _low[1],  _high[2]);
 			break;
 		case 5:
-			return GeoVox::util::Point(_high[0], _low[1],  _high[2]);
+			return GeoVox::util::Point3(_high[0], _low[1],  _high[2]);
 			break;
 		case 6:
-			return GeoVox::util::Point(_low[0],  _high[1], _high[2]);
+			return GeoVox::util::Point3(_low[0],  _high[1], _high[2]);
 			break;
 		case 7:
-			return GeoVox::util::Point(_high[0], _high[1], _high[2]);
+			return GeoVox::util::Point3(_high[0], _high[1], _high[2]);
 			break;	
 		}
 		std::out_of_range("Box: vertex index must be from 0 to 7");
-		return Point();
+		return Point3();
 	}
 
-	void Box::setlow(const Point& newlow){
-		Point _newlow = el_min(newlow, _high);
-		Point _newhigh = el_max(newlow, _high);
+	void Box::setlow(const Point3& newlow){
+		Point3 _newlow = el_min(newlow, _high);
+		Point3 _newhigh = el_max(newlow, _high);
 		if (_newlow < _newhigh){
 			_low = _newlow;
 			_high = _newhigh;
@@ -56,9 +56,9 @@ namespace GeoVox::util{
 		}
 	}
 
-	void Box::sethigh(const Point& newhigh){
-		Point _newlow = el_min(newhigh, _high);
-		Point _newhigh = el_max(newhigh, _high);
+	void Box::sethigh(const Point3& newhigh){
+		Point3 _newlow = el_min(newhigh, _high);
+		Point3 _newhigh = el_max(newhigh, _high);
 		if (_newlow < _newhigh){
 			_low = _newlow;
 			_high = _newhigh;
@@ -67,7 +67,7 @@ namespace GeoVox::util{
 		}
 	}
 
-	Point Box::hexvertex(const int idx) const {
+	Point3 Box::hexvertex(const int idx) const {
 		switch (idx){
 		case 2:
 			return operator[](3);
@@ -85,10 +85,10 @@ namespace GeoVox::util{
 			break;
 		}
 		std::out_of_range("Box: vertex index must be from 0 to 7");
-		return Point();
+		return Point3();
 	}
 
-	bool Box::contains(const Point& point) const{
+	bool Box::contains(const Point3& point) const{
 		if (_low <= point && point <= _high){
 			return true;
 		}else{
@@ -110,38 +110,59 @@ namespace GeoVox::util{
 				return true;
 			}
 		}
+		for (int i=0; i<8; i++){
+			if (other.contains(operator[](i))){
+				return true;
+			}
+		}
 		return false;
 	}
 
-	Box* Box::operator+=(const Point& shift){
+	Point3 Box::support(const Point3& direction) const{
+		double maxdot = direction.dot(operator[](0));
+		int maxind = 0;
+		double tempdot;
+
+		for (int i=1; i<8; i++){
+			tempdot = direction.dot(operator[](i));
+			if (tempdot > maxdot){
+				maxdot = tempdot;
+				maxind = i;
+			}
+		}
+
+		return operator[](maxind);
+	}
+
+	Box* Box::operator+=(const Point3& shift){
 		_low+=shift;
 		_high+=shift;
 		return this;
 	}
 
-	Box Box::operator+(const Point& shift) const{
+	Box Box::operator+(const Point3& shift) const{
 		return Box(_low+shift, _high+shift);
 	}
 
-	Box* Box::operator-=(const Point& shift){
+	Box* Box::operator-=(const Point3& shift){
 		_low-=shift;
 		_high-=shift;
 		return this;
 	}
 
-	Box Box::operator-(const Point& shift) const{
+	Box Box::operator-(const Point3& shift) const{
 		return Box(_low-shift, _high-shift);
 	}
 
 	Box* Box::operator*=(const double& scale){
-		Point _center = center();
+		Point3 _center = center();
 		_low = _center + scale*(_low-_center);
 		_high = _center + scale*(_high-_center);
 		return this;
 	}
 
 	Box Box::operator*(const double& scale) const{
-		Point _center = center();
+		Point3 _center = center();
 		return Box(_center + scale*(_low-_center), _center + scale*(_high-_center));
 	}
 
@@ -154,11 +175,18 @@ namespace GeoVox::util{
 	}
 
 	Box* Box::combine(const Box& other){
-		Point _newlow = el_min(_low, other.low());
-		Point _newhigh = el_max(_high, other.high());
+		Point3 _newlow = el_min(_low, other.low());
+		Point3 _newhigh = el_max(_high, other.high());
 		_low = _newlow;
 		_high = _newhigh;
 		return this;
+	}
+
+
+	Box operator*(const double& scale, const Box& box){
+		Box result = box;
+		result *= scale;
+		return result;
 	}
 
 
