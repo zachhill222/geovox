@@ -4,6 +4,7 @@
 #include "util/point.hpp"
 #include <iostream>
 #include <vector>
+#include <initializer_list>
 
 namespace GeoVox::geometry{
 	using Point3 = GeoVox::util::Point<3>;
@@ -13,6 +14,8 @@ namespace GeoVox::geometry{
 		Polytope(const int npts){
 			_points.resize(npts);
 		}
+
+		Polytope(std::initializer_list<Point3> list) : _points(list) {}
 
 		Point3 operator[](int idx) const;
 		Point3& operator[](int idx);
@@ -48,6 +51,13 @@ namespace GeoVox::geometry{
 		}
 
 		Simplex(const Simplex& other): Polytope(4){
+			_points[0] = other[0];
+			_points[1] = other[1];
+			_points[2] = other[2];
+			_points[3] = other[3];
+		}
+
+		Simplex(const Polytope& other): Polytope(4){
 			_points[0] = other[0];
 			_points[1] = other[1];
 			_points[2] = other[2];

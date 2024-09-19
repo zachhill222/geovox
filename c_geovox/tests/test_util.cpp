@@ -6,6 +6,9 @@
 using namespace GeoVox;
 using Point3 = util::Point<3>;
 using Box = util::Box;
+using Sphere = geometry::Sphere;
+using SE = geometry::SuperEllipsoid;
+
 
 int test_point(){
 	geometry::Simplex S = geometry::Simplex();
@@ -25,11 +28,14 @@ int test_point(){
 
 
 int test_collision(){
-	Box S1 = Box(Point3(0,0,0), Point3(1,1,1));
-	Box S2 = 0.25*S1;
-	bool collide = geometry::GJK(S1,S2);
+	Box S1 = Box(Point3(-1,-1,-1), Point3(1,1,1));
+	Box S2 = S1+2*Point3(1,1,0);
+
+	Sphere S3 = Sphere(1.7321, Point3(0,0,0));
+	Sphere S4 = S3*0.5 + Point3(1,0,0);
+
+	bool collide = geometry::GJK(S1,S3+Point3(2,2,2));
 	std::cout << "collide= " << collide << std::endl;
-	std::cout << "intersect= " << S1.intersects(S2) << ", " << S2.intersects(S1) << std::endl;
 	return 1;
 }
 

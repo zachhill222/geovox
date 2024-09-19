@@ -12,7 +12,7 @@ namespace GeoVox::util{
 	public:
 		Plane(): _origin(Point3(0,0,0)), _normal(Point3(0,0,1)) {calcbasis();}
 		Plane( const Point3& origin, const Point3& normal): _origin(origin), _normal(normal.normalize()) {calcbasis();}
-		Plane( const Point3& p1, const Point3& p2, const Point3& p3): _origin(p1), _normal((p2-p1).cross(p3-p1).normalize()) {calcbasis();}
+		Plane( const Point3& p1, const Point3& p2, const Point3& p3): _origin(p1), _normal((p3-p1).cross(p2-p1).normalize()) {calcbasis();}
 		Plane( const Plane& other){
 			_basis[0] = other[0];
 			_basis[1] = other[1];

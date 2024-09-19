@@ -1,98 +1,276 @@
 #ifndef COLLISIONS_H
 #define COLLISIONS_H
 
-#define MAX_GJK_ITERATIONS 64
-
 #include "geometry/polytope.hpp"
 #include "util/point.hpp"
+#include "util/plane.hpp"
+#include <vector>
+
+#define MAX_GJK_ITERATIONS 64
 
 namespace GeoVox::geometry{
 using Point3 = GeoVox::util::Point<3>;
 using Simplex = GeoVox::geometry::Simplex;
+using Polytope = GeoVox::geometry::Polytope;
+using Plane = GeoVox::util::Plane;
 
-//A and B are two classes that represent convex shapes with a methods:
+
+//SA and SB are two classes that represent convex shapes with a methods:
 //	Point support(const Point& direction)
 //	Point center()
 
-template<class A, class B> 
-bool GJK(const A& S1, const B& S2);
+// FOR DETAILS, SEE:
+// “Implementing GJK - 2006”
+// by Casey Muratori
+// and 
+// https://cs.brown.edu/courses/cs195u/lectures/04_advancedCollisionsAndPhysics.pdf
+
+
+//SUPPORT FUNCTION IN MINKOWSKI DIFFERENCE
+template<class SA, class SB>
+Point3 support(const SA& S1, const SB& S2, const Point3& direction){
+	return S1.support(direction) - S2.support(-direction);
+}
+
+
+//LINE CASE
+bool lineCase(Polytope& simplex, Point3& direction){
+	Point3 &A = simplex[1]; //most recent point
+	Point3 &B = simplex[0];
+
+	Point3 AO = -A;
+	Point3 AB = B-A;
+	
+	double DOT;
+
+	DOT = AB.dot(AO);
+	if (DOT>0.0){
+		direction = AB.cross(AO.cross(AB));
+
+		//check if line segment contained the origin. AB and AO are co-linear.
+		if (direction.norm2() == 0.0){
+			return true;
+		}
+		// simplex = Polytope({B, A}); //no change to simplex
+	}
+	else{
+		direction = AO;
+		simplex = Polytope({A});
+	}
+
+
+	return false;
+}
+
+
+//TRIANGLE CASE
+bool triangleCase(Polytope& simplex, Point3& direction){
+	Point3 &A = simplex[2]; //most recent point
+	Point3 &B = simplex[1];
+	Point3 &C = simplex[0];
+
+	Point3 AO  = -A;
+	Point3 AB  = B-A;
+	Point3 AC  = C-A;
+
+	Point3 ABC_normal = AB.cross(AC); //normal to triangle
+	Point3 AB_normal  = AB.cross(ABC_normal); //away from triangle, normal to edge AB, in triangle plane
+	Point3 AC_normal  = ABC_normal.cross(AC); //away from triangle, normal to edge AB, in triangle plane
+
+	double DOT;
+
+	DOT = AC_normal.dot(AO);
+	if (DOT>0.0){
+		DOT = AC.dot(AO);
+		if (DOT>0.0){
+			direction = AC.cross(AO.cross(AC));
+			simplex = Polytope({C,A});
+
+			// std::cout << "REGION 1\n";
+		}
+		else{
+			DOT = AB.dot(AO);
+			if (DOT>0.0){ //STAR
+				direction = AB.cross(AO.cross(AB));
+				simplex = Polytope({B, A});
+
+				// std::cout << "REGION 3-\n";
+			}
+			else {
+				direction = AO;
+				simplex = Polytope({A});
+
+				// std::cout << "REGION 2-\n";
+			}
+		}
+	}
+	else{
+		DOT = AB_normal.dot(AO);
+		if (DOT>0.0){
+			DOT = AB.dot(AO);
+			if (DOT>0.0){ //STAR
+				direction = AB.cross(AO.cross(AB));
+				simplex = Polytope({B,A});
+
+				// std::cout << "REGION 3+\n";
+			}
+			else {
+				direction = AO;
+				simplex = Polytope({A});
+
+				// std::cout << "REGION 2+\n";
+			}
+		}
+		else{
+			DOT = ABC_normal.dot(AO);
+
+			//above, below, or on triangle
+			if (DOT>0.0){
+				direction = ABC_normal;
+				// simplex = Polytope({C,B,A}); //no change to simplex
+
+				// std::cout << "REGION 4\n";
+			}
+			else if (DOT<0.0){
+				direction = -ABC_normal;
+				simplex = Polytope({B, C, A}); //orientation matters
+
+				// std::cout << "REGION 5\n";
+			}
+			else{
+				return true;
+			}
+		}
+	}
+
+	return false; //triangle PROBABLY doesn't contain the origin
+}
+
+
+//FULL SIMPLEX (TETRAHEDRON) CASE
+bool tetraCase(Polytope& simplex, Point3& direction){
+	Point3 &A = simplex[3]; //most recent point
+	Point3 &B = simplex[2];
+	Point3 &C = simplex[1];
+	Point3 &D = simplex[0];
+
+	Point3 O = Point3(0.0,0.0,0.0);
+
+	Plane P;
+	double abc, adc, abd;
+
+	//get distance to each plane, we know the orighin is in the negative side of the plane BCD because A is the most recent point
+	P   = Plane(A,B,C); //normal faces out of tetrahedron
+	abc = P.dist(O);
+
+	P   = Plane(A,D,C); //normal faces out of tetrahedron
+	adc = P.dist(O);
+
+	P   = Plane(A,B,D); //normal faces out of tetrahedron
+	abd = P.dist(O);
+
+	// if all distances are negative, origin is in side the tetrahedron
+	if (std::max(abc,std::max(adc,abd))<0.0){
+		return true;
+	}
+
+
+	// reduce to triangle case
+	double abc_dist = abs(abc);
+	double adc_dist = abs(adc);
+	double abd_dist = abs(abd);
+	double min_dist = std::min(abc_dist, std::min(adc_dist, abd_dist));
+
+
+	if (abc_dist == min_dist){
+		simplex = Polytope({C, B, A});
+	}
+	else if(adc_dist == min_dist){
+		simplex = Polytope({C, D, A});
+	}
+	else{
+		simplex = Polytope({D, B, A});
+	}
+	
+
+	// run triangle case
+	return triangleCase(simplex, direction);
+
+
+
+
+}
+
+
+bool doSimplex(Polytope& simplex, Point3& direction){
+	//simplex must contain between 2 and 4 points initially
+	//simplex and direction will both be updated for the next iteration
+
+	bool result;
+	
+
+
+	//GET NEW SEARCH DIRECTION
+	switch (simplex.len()){
+	case 2:
+		std::cout << "LINE CASE\n";
+		result = lineCase(simplex, direction);
+		break;
+	case 3:
+		std::cout << "TRIANGLE CASE\n";
+		result = triangleCase(simplex, direction);
+		break;
+	case 4:
+		std::cout << "TETRAHEDRAL CASE\n";
+		result = tetraCase(simplex, direction);
+		break;
+	}
+
+	return result;
+}
 
 
 
 //IMPLEMENTATION
-template<class A, class B> 
-bool GJK(const A& S1, const B& S2){
-	Point3 d; //search direction
-	Point3 v0, v1, v2; //vertices and edges
-	Point3 origin = Point3(0.0, 0.0, 0.0);
-
-	Simplex simplex = Simplex(); //current simplex in the Minkowski difference
-
-
-	//FILL OUT SIMPLEX
-	//first point
-	d = (S2.center() - S1.center()).normalize(); //starting search direction
-	simplex[0] = S1.support(d) - S2.support(-d); //starting boundary point
-
-	//second point
-	d  = -simplex[0].normalize(); //new search direction
-	v0 = S1.support(d) - S2.support(-d);
-	if (v0.dot(d)<0){return false;}
-	simplex[1] = v0;
-
-	//third point
-	v1 = simplex[0]-simplex[1];
-	d  = v1.cross(-simplex[1]).cross(v1).normalize();
-	v0 = S1.support(d) - S2.support(-d);
-	if (v0.dot(d)<0){return false;}
-	simplex[2] = v0;
-
-	//fourth point
-	v2 = simplex[2] - simplex[0];
-	d  = v1.cross(v2).normalize();
-	v0 = S1.support(d) - S2.support(-d);
-	if (v0.dot(d)<0){return false;}
-	simplex[3] = v0;
+template<class SA, class SB> 
+bool GJK(const SA& S1, const SB& S2){
+	Point3 A, direction;
+	
+	direction = Point3(-1,-1,-1);
+	// direction = S1.center() - S2.center();
+	A = {support(S1,S2,direction)};
+	
+	Polytope simplex = Polytope({A});
+	direction = -simplex[0];
 
 	//MAIN LOOP
 	for (int i=0; i<MAX_GJK_ITERATIONS; i++){
-		//get worst point
-		double maxdist, tempdist;
-		int maxind, tempind;
+		A = support(S1,S2,direction);
 
-		maxdist = simplex[0].norm2();
-		maxind = 0;
-
-		for (int j=1; j<4; j++){
-			tempdist = simplex[j].norm2();
-			if (tempdist > maxdist){
-				maxdist = tempdist;
-				maxind  = j;
-			}
+		if (A.dot(direction) < 0.0){
+			return false;
 		}
 
+		simplex.addpoint(A);
 
-		//get new search direction
-		v0 = simplex[maxind+1] - simplex[maxind+2];//simplex takes care of index looping
-		v1 = simplex[maxind+1] - simplex[maxind+3];
-		d  = v0.cross(v1).normalize();
-		if (d.dot(simplex[maxind])>0){
-			d = -d;
-		}
+		std::cout << "\n====================\niteration= " << i << "\tdirection= ";
+		direction.print(std::cout);
+		std::cout << "A.dot(direction)= " << A.dot(direction) << std::endl;
+		simplex.print(std::cout);
 
-		//get new vertex
-		v0 = S1.support(d) - S2.support(-d);
-		if (v0.dot(d)<0){return false;}
-		simplex[maxind] = v0;
 
-		//check if vertex contains origin
-		if (simplex.contains(origin)){
+		if (doSimplex(simplex, direction)) {
 			return true;
 		}
+
+
+		std::cout << "\n====================\n";
 	}
 
 	return true; //failed to converge, return collision to be safe.
 }
+
+
 }
 
 #endif
