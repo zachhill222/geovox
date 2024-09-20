@@ -12,10 +12,64 @@ namespace GeoVox::geometry{
 		return _center;
 	}
 
+
+	Point3 SuperEllipsoid::radius() const{
+		return _r;
+	}
+
+	double SuperEllipsoid::eps1() const{
+		return _eps1;
+	}
+
+	double SuperEllipsoid::eps2() const{
+		return _eps2;
+	}
+
+	Quaternion SuperEllipsoid::quaternion() const{
+		return _Q;
+	}
+
 	SuperEllipsoid SuperEllipsoid::copy() const{
 		SuperEllipsoid result = SuperEllipsoid(_r, _eps1, _eps2, _center, _Q);
 		return result;
 	}
+
+	Polytope SuperEllipsoid::bbox() const{
+		Polytope box = Polytope(8);
+		Box local_box = Box(-_r,_r);
+
+		for (int i=0; i<8; i++){
+			box.addpoint(toglobal(local_box[i]));
+		}
+
+		return box;
+	}
+
+	Box SuperEllipsoid::axis_alligned_bbox() const{
+		Point3 low = Point3();
+		Point3 high = Point3();
+		Point3 support_point;
+
+		//GET LOW CORNER
+		support_point = support(Point3(-1,0,0));
+		low[0] = support_point[0];
+		support_point = support(Point3(0,-1,0));
+		low[1] = support_point[1];
+		support_point = support(Point3(0,0,-1));
+		low[2] = support_point[2];
+
+		//GET HIGH CORNER
+		support_point = support(Point3(1,0,0));
+		high[0] = support_point[0];
+		support_point = support(Point3(0,1,0));
+		high[1] = support_point[1];
+		support_point = support(Point3(0,0,1));
+		high[2] = support_point[2];
+
+		Box box = Box(low, high);
+		return box;
+	}
+
 
 	SuperEllipsoid* SuperEllipsoid::operator+=(const Point3& other){
 		_center+= other;

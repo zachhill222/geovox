@@ -1,12 +1,22 @@
 #ifndef SUPERELLIPSOID_H
 #define SUPERELLIPSOID_H
 
-#include "util.hpp"
+#include "util/point.hpp"
+#include "util/quaternion.hpp"
+#include "util/box.hpp"
+
+#include "geometry/polytope.hpp"
+
 #include <cmath>
 
+
+
+using Point3 = GeoVox::util::Point<3>;
+using Quaternion = GeoVox::util::Quaternion;
+using Box = GeoVox::util::Box;
+using Polytope = GeoVox::geometry::Polytope;
+
 namespace GeoVox::geometry{
-	using Point3 = GeoVox::util::Point<3>;
-	using Quaternion = GeoVox::util::Quaternion;
 
 	class SuperEllipsoid{
 	public:
@@ -31,8 +41,16 @@ namespace GeoVox::geometry{
 		//copy
 		SuperEllipsoid copy() const;
 
-		//get center
+		//get attributes
 		Point3 center() const;
+		Point3 radius() const;
+		double eps1() const;
+		double eps2() const;
+		Quaternion quaternion() const;
+
+		//bounds
+		Box axis_alligned_bbox() const;
+		Polytope bbox() const;
 
 		//shifting
 		SuperEllipsoid* operator+=(const Point3& other);

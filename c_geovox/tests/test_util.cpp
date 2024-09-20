@@ -7,8 +7,8 @@ using namespace GeoVox;
 using Point3 = util::Point<3>;
 using Box = util::Box;
 using Sphere = geometry::Sphere;
-using SE = geometry::SuperEllipsoid;
-
+using SuperEllipsoid = geometry::SuperEllipsoid;
+using Assembly = geometry::Assembly;
 
 int test_point(){
 	geometry::Simplex S = geometry::Simplex();
@@ -34,7 +34,7 @@ int test_collision(){
 	Sphere S3 = Sphere(1.7321, Point3(0,0,0));
 	Sphere S4 = S3*0.5 + Point3(1,0,0);
 
-	SE S5 = SE();
+	SuperEllipsoid S5 = SuperEllipsoid();
 
 
 	bool collide = geometry::GJK(S1,S5+Point3(1,0,0));
@@ -43,9 +43,14 @@ int test_collision(){
 }
 
 
+int test_assembly(){
+	Assembly A = Assembly("particles_50.txt");
+	A.print(std::cout);
+	return 1;
+}
 
 int main(int argc, char* argv[]){
-	int flag = test_collision();
-
+	// int flag = test_collision();
+	int flag = test_assembly();
 	return flag;
 }
