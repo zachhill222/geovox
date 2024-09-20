@@ -94,49 +94,46 @@ namespace GeoVox::geometry{
 	}
 
 	Point3 SuperEllipsoid::support(const Point3& direction) const{
+		//convert to local coordinates
 		Point3 d = tolocal(direction);
 		
+		//get omega
+		double x = sgn(d[1])*pow(abs(_r[1]*d[1]), _INVPOWERS[1]);
+		double y = sgn(d[0])*pow(abs(_r[0]*d[0]), _INVPOWERS[1]);
+		double omega = atan2(x,y); //in [-pi,pi]
 
+		//get eta
+		x = pow(abs(_r[0]*d[0]), _INVPOWERS[0]);
+		y = sgn(d[2]) * pow( abs( _r[2]*d[2]*cos_pow(omega,2.0-_eps2) ) , _INVPOWERS[0]);
+		double eta = atan2(x,y); //in [-pi/2,pi/2] because x >= 0
 
-		//get angles
-		double theta = atan2( sgn(d[1]) * pow(abs(_r[1]*d[1]), _INVPOWERS[0]), sgn(d[0]) * pow(abs(_r[0]*d[0]), _INVPOWERS[0]) );
-		if (theta<0){
-			theta += 6.283185307;
-		}
-
-		double C = _r[2]*d[2]*pow(abs(cos(theta)), 2.0-_eps2);
-		double phi   = atan2( sgn(d[2]) * pow(abs(C), _INVPOWERS[1]), pow(abs(_r[0]*d[0]), _INVPOWERS[1]) );
-		if (abs(phi)>1.570796327){
-			if (phi<0){
-				phi += 1.570796327;
-			}
-			phi -= 1.570796327;
-		}
-
-
-		std::cout << "theta= " << theta << "\tphi= " << phi << std::endl;
-
-		//get local point
-		Point3 point = Point3();
-
-		double COS1 = cos(theta);
-		double SIN1 = sin(theta);
-		double COS2 = cos(phi);
-		double SIN2 = sin(phi);
-
-		double POW1 = pow(abs(COS2), _eps2);
-
-		point[0] = sgn(COS1)*_r[0]*pow(abs(COS1),_eps1)*POW1;
-		point[1] = sgn(SIN1)*_r[1]*pow(abs(SIN1),_eps1)*POW1;
-		point[0] = sgn(SIN2)*_r[2]*pow(abs(SIN2),_eps2);
-
-		std::cout << "point= ";
-		toglobal(point).print(std::cout);
-		std::cout << std::endl;
-
-		return toglobal(point);
-
+		//get normal in global coordinates
+		Point3 result = parametric(eta, omega);
+		return result;
 	}
+
+	Point3 SuperEllipsoid::parametric(const double eta, const double omega) const{
+		//compute sines and cosines
+		double C_eta = cos_pow(eta, _eps1);
+		double S_eta = sin_pow(eta, _eps1);
+		double C_omega = cos_pow(omega, _eps2);
+		double S_omega = sin_pow(omega, _eps2);
+
+		Point3 result = Point3(_r[0]*C_eta*C_omega, _r[1]*C_eta*S_omega, _r[2]*S_eta);
+		return toglobal(result);
+	}
+
+	Point3 SuperEllipsoid::normal_parametric(const double eta, const double omega) const{
+		//compute sines and cosines
+		double C_eta = cos_pow(eta, 2.0-_eps1);
+		double S_eta = sin_pow(eta, 2.0-_eps1);
+		double C_omega = cos_pow(omega, 2.0-_eps2);
+		double S_omega = sin_pow(omega, 2.0-_eps2);
+
+		Point3 result = Point3(C_eta*C_omega/_r[0], C_eta*S_omega/_r[1], S_eta/_r[2]);
+		return toglobal(result);
+	}
+
 
 
 
@@ -202,6 +199,30 @@ namespace GeoVox::geometry{
 
 	Point3 Sphere::support(const Point3& direction) const{
 		return _center + _r*direction.normalize();
+	}
+
+
+
+
+
+	double cos_pow(const double theta, const double eps){
+		double C = cos(theta);
+		if (C<0){
+			return -pow(-C,eps);
+		}
+		else{
+			return pow(C,eps);
+		}
+	}
+
+	double sin_pow(const double theta, const double eps){
+		double S = sin(theta);
+		if (S<0){
+			return -pow(-S,eps);
+		}
+		else{
+			return pow(S,eps);
+		}
 	}
 
 }

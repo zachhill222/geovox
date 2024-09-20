@@ -61,6 +61,10 @@ namespace GeoVox::geometry{
 		//convex support (point of tangency for a supporting hyperplane with normal unit vector direction)
 		Point3 support(const Point3& direction) const;
 
+		//parametric coordinats: -pi/2 <= eta <= pi/2 and -pi <= omega <= pi SEE: http://www.cs.bilkent.edu.tr/~gudukbay/cs465/super_quadrics.pdf
+		Point3 parametric(const double eta, const double omega) const; //get point from parametric coordinates
+		Point3 normal_parametric(const double eta, const double omega) const; //get normal vector from parametric coordinates
+
 	private:
 		Point3 _r;
 		double _eps1;
@@ -120,6 +124,10 @@ namespace GeoVox::geometry{
 		double _r, _1r2;
 		Point3 _center;
 	};
+
+
+	double cos_pow(const double theta, const double eps);
+	double sin_pow(const double theta, const double eps);
 }
 
 

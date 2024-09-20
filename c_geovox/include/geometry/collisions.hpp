@@ -4,7 +4,7 @@
 #include "geometry/polytope.hpp"
 #include "util/point.hpp"
 #include "util/plane.hpp"
-#include <vector>
+#include <cfloat> //need DBL_EPSILON
 
 #define MAX_GJK_ITERATIONS 64
 
@@ -48,7 +48,7 @@ bool lineCase(Polytope& simplex, Point3& direction){
 		direction = AB.cross(AO.cross(AB));
 
 		//check if line segment contained the origin. AB and AO are co-linear.
-		if (direction.norm2() == 0.0){
+		if (direction.norm2() <= DBL_EPSILON){
 			return true;
 		}
 		// simplex = Polytope({B, A}); //no change to simplex
@@ -123,15 +123,15 @@ bool triangleCase(Polytope& simplex, Point3& direction){
 		}
 		else{
 			DOT = ABC_normal.dot(AO);
-
+			// std::cout << DOT << std::endl;
 			//above, below, or on triangle
-			if (DOT>0.0){
+			if (DOT>DBL_EPSILON ){
 				direction = ABC_normal;
 				// simplex = Polytope({C,B,A}); //no change to simplex
 
 				// std::cout << "REGION 4\n";
 			}
-			else if (DOT<0.0){
+			else if (DOT<-DBL_EPSILON){
 				direction = -ABC_normal;
 				simplex = Polytope({B, C, A}); //orientation matters
 
@@ -170,7 +170,9 @@ bool tetraCase(Polytope& simplex, Point3& direction){
 	abd = P.dist(O);
 
 	// if all distances are negative, origin is in side the tetrahedron
-	if (std::max(abc,std::max(adc,abd))<0.0){
+	double max_dist = std::max(abc,std::max(adc,abd));
+	// std::cout << "max_dist= " << max_dist << std::endl;
+	if (max_dist<0.0){
 		return true;
 	}
 
@@ -180,15 +182,18 @@ bool tetraCase(Polytope& simplex, Point3& direction){
 	double adc_dist = abs(adc);
 	double abd_dist = abs(abd);
 	double min_dist = std::min(abc_dist, std::min(adc_dist, abd_dist));
-
+	// std::cout << "min_dist= " << min_dist << std::endl;
 
 	if (abc_dist == min_dist){
-		simplex = Polytope({C, B, A});
+		// std::cout << "Plane BCA\n";
+		simplex = Polytope({B, C, A});
 	}
 	else if(adc_dist == min_dist){
+		// std::cout << "Plane CDA\n";
 		simplex = Polytope({C, D, A});
 	}
 	else{
+		// std::cout << "Plane DBA\n";
 		simplex = Polytope({D, B, A});
 	}
 	
@@ -213,15 +218,15 @@ bool doSimplex(Polytope& simplex, Point3& direction){
 	//GET NEW SEARCH DIRECTION
 	switch (simplex.len()){
 	case 2:
-		std::cout << "LINE CASE\n";
+		// std::cout << "LINE CASE\n";
 		result = lineCase(simplex, direction);
 		break;
 	case 3:
-		std::cout << "TRIANGLE CASE\n";
+		// std::cout << "TRIANGLE CASE\n";
 		result = triangleCase(simplex, direction);
 		break;
 	case 4:
-		std::cout << "TETRAHEDRAL CASE\n";
+		// std::cout << "TETRAHEDRAL CASE\n";
 		result = tetraCase(simplex, direction);
 		break;
 	}
@@ -253,10 +258,10 @@ bool GJK(const SA& S1, const SB& S2){
 
 		simplex.addpoint(A);
 
-		std::cout << "\n====================\niteration= " << i << "\tdirection= ";
-		direction.print(std::cout);
-		std::cout << "A.dot(direction)= " << A.dot(direction) << std::endl;
-		simplex.print(std::cout);
+		// std::cout << "\n====================\niteration= " << i << "\tdirection= ";
+		// direction.print(std::cout);
+		// std::cout << "A.dot(direction)= " << A.dot(direction) << std::endl;
+		// simplex.print(std::cout);
 
 
 		if (doSimplex(simplex, direction)) {
@@ -264,7 +269,7 @@ bool GJK(const SA& S1, const SB& S2){
 		}
 
 
-		std::cout << "\n====================\n";
+		// std::cout << "\n====================\n";
 	}
 
 	return true; //failed to converge, return collision to be safe.

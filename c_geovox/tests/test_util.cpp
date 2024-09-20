@@ -34,7 +34,10 @@ int test_collision(){
 	Sphere S3 = Sphere(1.7321, Point3(0,0,0));
 	Sphere S4 = S3*0.5 + Point3(1,0,0);
 
-	bool collide = geometry::GJK(S1,S3+Point3(2,2,2));
+	SE S5 = SE();
+
+
+	bool collide = geometry::GJK(S1,S5+Point3(1,0,0));
 	std::cout << "collide= " << collide << std::endl;
 	return 1;
 }
