@@ -26,6 +26,8 @@ namespace GeoVox::geometry{
 
 		Point3 support(const Point3& direction) const;
 
+		Point3 center() const;
+
 		void print(std::ostream& stream) const;
 
 	protected:

@@ -35,14 +35,15 @@ namespace GeoVox::geometry{
 			}
 		}
 
-		void insert_particle(const SuperEllipsoid& P);
+		void insert_particle(const long unsigned int idx, const SuperEllipsoid& P);
 		Node* _root;
 		Node* _parent;
 		int _maxdepth;
 		const int _depth;
 
 	protected:
-		std::vector<SuperEllipsoid> _particles;
+		std::vector<SuperEllipsoid> _particles; //only for _root node
+		std::vector<long unsigned int> _particle_index;
 		Box _box;
 		
 	private:
@@ -71,7 +72,6 @@ namespace GeoVox::geometry{
 
 	private:
 		void _setbbox();
-
 	};
 
 

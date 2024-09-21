@@ -3,35 +3,48 @@
 
 namespace GeoVox::geometry{
 	//NODE (OF OCTREE)
-	void Node::insert_particle(const SuperEllipsoid& P){
+	void Node::insert_particle(const long unsigned int idx, const SuperEllipsoid& P){
+		//check if this node collides with the bounding box (rotated prism) of the particle
+		if (!GeoVox::geometry::GJK(_box, P.bbox())){
+			return;
+		}
+
+		//check if this node collides with the particle itself
+		if (!GeoVox::geometry::GJK(_box, P)){
+			return;
+		}
+
+
 		if (_isdivided){
 			for (int i=0; i<8; i++){
-				_children[i]->insert_particle(P);
+				_children[i]->insert_particle(idx, P);
 			}
 		}
 		else{
-			//check if this node collides with the bounding box (rotated prism) of the particle
-			if (GeoVox::geometry::GJK(_box, P.bbox())){
-				//check if this node collides with the particle itself
-				if (GeoVox::geometry::GJK(_box, P)){
-					if (_depth < _maxdepth){
-						//create children
-						_isdivided = true;
-						for (int i=0; i<8; i++){
-							//initialize child node
-							_children[i] = new Node(_box[i],_box.center(), _depth+1); //PROBABLY NEED new Node. Would need to add delete _children[i] to destructor.
-							_children[i]->_root = _root;
-							_children[i]->_parent = this;
-							_children[i]->_maxdepth = _maxdepth;
-
-							//insert particle
-							_children[i]->insert_particle(P);
-						}
-					}
-					else{
-						_particles.push_back(P);
-					}
+			//check if entire voxel is contained in P
+			bool iscontained = true;
+			for (int v_idx=0; v_idx<8; v_idx++){
+				if (!P.contains(_box[v_idx])){
+					iscontained = false;
 				}
+			}
+
+			if (_depth < _maxdepth && !iscontained){
+				//create children
+				_isdivided = true;
+				for (int i=0; i<8; i++){
+					//initialize child node
+					_children[i] = new Node(_box[i],_box.center(), _depth+1); //PROBABLY NEED new Node. Would need to add delete _children[i] to destructor.
+					_children[i]->_root = _root;
+					_children[i]->_parent = this;
+					_children[i]->_maxdepth = _maxdepth;
+
+					//insert particle
+					_children[i]->insert_particle(idx, P);
+				}
+			}
+			else{
+				_particle_index.push_back(idx);
 			}
 		}
 	}

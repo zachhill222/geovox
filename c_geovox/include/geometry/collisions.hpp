@@ -237,8 +237,8 @@ template<class SA, class SB>
 bool GJK(const SA& S1, const SB& S2){
 	Point3 A, direction;
 	
-	direction = Point3(-1,-1,-1);
-	// direction = S1.center() - S2.center();
+	// direction = Point3(-1,-1,-1);
+	direction = S1.center() - S2.center();
 	A = {support(S1,S2,direction)};
 	
 	Polytope simplex = Polytope({A});

@@ -33,6 +33,16 @@ namespace GeoVox::geometry{
 		return _points[maxind];
 	}
 
+	Point3 Polytope::center() const{
+		double C = 1.0/_points.size();
+		Point3 result = C*_points[0];
+
+		for (long unsigned int i=0; i<_points.size(); i++){
+			result += C*_points[i];
+		}
+
+		return result;
+	}
 
 	void Polytope::print(std::ostream& stream) const{
 		stream << std::endl;
