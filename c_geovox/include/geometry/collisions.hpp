@@ -200,10 +200,6 @@ bool tetraCase(Polytope& simplex, Point3& direction){
 
 	// run triangle case
 	return triangleCase(simplex, direction);
-
-
-
-
 }
 
 
@@ -211,7 +207,7 @@ bool doSimplex(Polytope& simplex, Point3& direction){
 	//simplex must contain between 2 and 4 points initially
 	//simplex and direction will both be updated for the next iteration
 
-	bool result;
+	bool result = false;
 	
 
 

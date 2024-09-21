@@ -19,7 +19,7 @@ namespace GeoVox::geometry{
 						_isdivided = true;
 						for (int i=0; i<8; i++){
 							//initialize child node
-							_children[i] = Node(_box[i],_box.center(), _depth+1); //PROBABLY NEED new Node. Would need to add delete _children[i] to destructor.
+							_children[i] = new Node(_box[i],_box.center(), _depth+1); //PROBABLY NEED new Node. Would need to add delete _children[i] to destructor.
 							_children[i]->_root = _root;
 							_children[i]->_parent = this;
 							_children[i]->_maxdepth = _maxdepth;

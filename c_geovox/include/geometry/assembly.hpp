@@ -27,6 +27,14 @@ namespace GeoVox::geometry{
 		Node(const int depth=0) : _root(NULL), _parent(NULL), _depth(depth), _box(Box(Point3(0,0,0), Point3(1,1,1))), _isdivided(false) {}
 		Node(const Point3& low, const Point3& high, const int depth=0) : _root(NULL), _parent(NULL), _depth(depth), _box(Box(low, high)), _isdivided(false) {}
 
+		~Node(){
+			if (_isdivided){
+				for (int i=0; i<8; i++){
+					delete _children[i];
+				}
+			}
+		}
+
 		void insert_particle(const SuperEllipsoid& P);
 		Node* _root;
 		Node* _parent;
