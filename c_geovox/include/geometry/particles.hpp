@@ -75,6 +75,8 @@ namespace GeoVox::geometry{
 		double levelval(const Point3& point) const;
 		Point3 local_levelgrad(const Point3& point) const;
 		Point3 levelgrad(const Point3& point) const;
+		bool contains(const Point3& point) const;
+
 
 		//convex support (point of tangency for a supporting hyperplane with normal unit vector direction)
 		Point3 support(const Point3& direction) const;

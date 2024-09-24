@@ -71,6 +71,8 @@ namespace GeoVox::util{
 
 		Box* combine(const Box& other); //combine this box with other (same thing as the Box(Box,Box) initializer)
 
+		void print(std::ostream &stream) const;
+
 	private:
 		Point3 _low;
 		Point3 _high;

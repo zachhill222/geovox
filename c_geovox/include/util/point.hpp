@@ -448,7 +448,7 @@ namespace GeoVox::util{
 		for (int i=0; i<_len; i++){
 			stream << _data[i] << " ";
 		}
-		stream << "\n";
+		// stream << "\n";
 	}
 
 

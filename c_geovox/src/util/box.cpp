@@ -183,11 +183,22 @@ namespace GeoVox::util{
 	}
 
 
+	void Box::print(std::ostream &stream) const{
+		for (int i=0; i<8; i++){
+			stream << i << ": ";
+			operator[](i).print(stream);
+			stream << std::endl;
+		}
+	}
+
+
 	Box operator*(const double& scale, const Box& box){
 		Box result = box;
 		result *= scale;
 		return result;
 	}
+
+
 
 
 

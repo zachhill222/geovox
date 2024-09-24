@@ -12,7 +12,7 @@ namespace GeoVox::geometry{
 	class Polytope{
 	public:
 		Polytope(const int npts){
-			_points.resize(npts);
+			_points.reserve(npts);
 		}
 
 		Polytope(std::initializer_list<Point3> list) : _points(list) {}
@@ -39,6 +39,7 @@ namespace GeoVox::geometry{
 	class Simplex : public Polytope {
 	public:
 		Simplex(): Polytope(4) {
+			_points.resize(4);
 			_points[0] = Point3(0,0,0);
 			_points[1] = Point3(1,0,0);
 			_points[2] = Point3(0,1,0);
@@ -46,6 +47,7 @@ namespace GeoVox::geometry{
 		}
 
 		Simplex(const Point3& p1, const Point3& p2, const Point3& p3, const Point3& p4): Polytope(4) {
+			_points.resize(4);
 			_points[0] = p1;
 			_points[1] = p2;
 			_points[2] = p3;
@@ -53,6 +55,7 @@ namespace GeoVox::geometry{
 		}
 
 		Simplex(const Simplex& other): Polytope(4){
+			_points.resize(4);
 			_points[0] = other[0];
 			_points[1] = other[1];
 			_points[2] = other[2];
@@ -60,6 +63,7 @@ namespace GeoVox::geometry{
 		}
 
 		Simplex(const Polytope& other): Polytope(4){
+			_points.resize(4);
 			_points[0] = other[0];
 			_points[1] = other[1];
 			_points[2] = other[2];

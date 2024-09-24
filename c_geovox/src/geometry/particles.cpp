@@ -147,6 +147,10 @@ namespace GeoVox::geometry{
 		return grad;
 	}
 
+	bool SuperEllipsoid::contains(const Point3& point) const{
+		return (levelval(point) <= 1.0);
+	}
+
 	Point3 SuperEllipsoid::support(const Point3& direction) const{
 		//convert to local coordinates
 		Point3 d = tolocal(direction);

@@ -10,6 +10,7 @@ using Sphere = geometry::Sphere;
 using SuperEllipsoid = geometry::SuperEllipsoid;
 using Assembly = geometry::Assembly;
 
+
 int test_point(){
 	geometry::Simplex S = geometry::Simplex();
 	S[0] = Point3(1,1,1);
@@ -45,7 +46,11 @@ int test_collision(){
 
 int test_assembly(){
 	Assembly A = Assembly("particles_50.txt");
-	A.print(std::cout);
+	A.maxdepth(5);
+
+	// A.print(std::cout);
+	A.make_tree();
+	A.print_tree(std::cout);
 	return 1;
 }
 

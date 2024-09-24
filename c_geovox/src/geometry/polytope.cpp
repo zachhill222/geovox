@@ -45,10 +45,10 @@ namespace GeoVox::geometry{
 	}
 
 	void Polytope::print(std::ostream& stream) const{
-		stream << std::endl;
 		for (int i=0; i<len(); i++){
 			stream << i << ": ";
 			_points[i].print(stream);
+			stream << std::endl;
 		}
 	}
 

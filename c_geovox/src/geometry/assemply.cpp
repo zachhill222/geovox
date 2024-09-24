@@ -3,18 +3,26 @@
 
 namespace GeoVox::geometry{
 	//NODE (OF OCTREE)
+
 	void Node::insert_particle(const long unsigned int idx, const SuperEllipsoid& P){
+		// std::cout << "Node(" << _ID << "):\n";
+
 		//check if this node collides with the bounding box (rotated prism) of the particle
 		if (!GeoVox::geometry::GJK(_box, P.bbox())){
 			return;
 		}
+
+		// std::cout << "\tCoarse collision\n";
 
 		//check if this node collides with the particle itself
 		if (!GeoVox::geometry::GJK(_box, P)){
 			return;
 		}
 
+		// std::cout << "\tFine collision\n";
 
+
+		//particle collides with this node's box
 		if (_isdivided){
 			for (int i=0; i<8; i++){
 				_children[i]->insert_particle(idx, P);
@@ -30,23 +38,93 @@ namespace GeoVox::geometry{
 			}
 
 			if (_depth < _maxdepth && !iscontained){
-				//create children
 				_isdivided = true;
+
+				//create children
 				for (int i=0; i<8; i++){
 					//initialize child node
-					_children[i] = new Node(_box[i],_box.center(), _depth+1); //PROBABLY NEED new Node. Would need to add delete _children[i] to destructor.
+					_children[i] = new Node(_box[i],_box.center(), _depth+1);
 					_children[i]->_root = _root;
 					_children[i]->_parent = this;
 					_children[i]->_maxdepth = _maxdepth;
+					_children[i]->_ID = this->_ID*8+i+1;
+				}
 
-					//insert particle
+				//update _IJK indices for children
+				_children[0]->_IJK[0] = (2*this->_IJK[0]);
+				_children[0]->_IJK[1] = (2*this->_IJK[1]);
+				_children[0]->_IJK[2] = (2*this->_IJK[2]);
+
+				_children[1]->_IJK[0] = (2*this->_IJK[0])+1;
+				_children[1]->_IJK[1] = (2*this->_IJK[1]);
+				_children[1]->_IJK[2] = (2*this->_IJK[2]);
+
+				_children[2]->_IJK[0] = (2*this->_IJK[0]);
+				_children[2]->_IJK[1] = (2*this->_IJK[1])+1;
+				_children[2]->_IJK[2] = (2*this->_IJK[2]);
+
+				_children[3]->_IJK[0] = (2*this->_IJK[0])+1;
+				_children[3]->_IJK[1] = (2*this->_IJK[1])+1;
+				_children[3]->_IJK[2] = (2*this->_IJK[2]);
+
+				_children[4]->_IJK[0] = (2*this->_IJK[0]);
+				_children[4]->_IJK[1] = (2*this->_IJK[1]);
+				_children[4]->_IJK[2] = (2*this->_IJK[2])+1;
+
+				_children[5]->_IJK[0] = (2*this->_IJK[0])+1;
+				_children[5]->_IJK[1] = (2*this->_IJK[1]);
+				_children[5]->_IJK[2] = (2*this->_IJK[2])+1;
+
+				_children[6]->_IJK[0] = (2*this->_IJK[0]);
+				_children[6]->_IJK[1] = (2*this->_IJK[1])+1;
+				_children[6]->_IJK[2] = (2*this->_IJK[2])+1;
+
+				_children[7]->_IJK[0] = (2*this->_IJK[0])+1;
+				_children[7]->_IJK[1] = (2*this->_IJK[1])+1;
+				_children[7]->_IJK[2] = (2*this->_IJK[2])+1;
+
+
+				//update _global_vtk_voxel_idx for children
+				
+
+
+
+				//insert particle into children nodes
+				for (int i=0; i<8; i++){
 					_children[i]->insert_particle(idx, P);
 				}
+
 			}
 			else{
 				_particle_index.push_back(idx);
 			}
 		}
+	}
+
+	void Node::print_tree(std::ostream& stream) const{
+		//indent
+		for (int i=0; i<_depth; i++){
+			stream << "- - - - ";
+		}
+
+		stream << "Node("<<_ID << "): IJK= [" << _IJK[0] << ", " << _IJK[1] << ", " << _IJK[2] << "]\n";
+
+		if (_isdivided){
+			for (int i=0; i<8; i++){
+				_children[i]->print_tree(stream);
+			}
+		}
+	}
+
+
+	Point3 Node::global_vtk_voxel_coords(const int idx) const{
+		Point3 global_box_size = _root->_box.high() - _root->_box.low();
+		
+		double C = pow(2,-_depth);
+		double _h[3] {C*global_box_size[0], C*global_box_size[1], C*global_box_size[2]};
+
+		Point3 result = _root->_box.low() + Point3(_h[0]*_IJK[0], _h[1]*_IJK[1], _h[2]*_IJK[2]);
+		return result;
 	}
 
 
@@ -116,6 +194,21 @@ namespace GeoVox::geometry{
 		}
 	}
 
+	void Assembly::print_tree(std::ostream &stream) const{
+		Node::print_tree(stream);
+	}
+
+
+	void Assembly::make_tree(){
+		_setbbox();
+		for (long unsigned int i=0; i<_particles.size(); i++){
+			Node::insert_particle(i, _particles[i]);
+		}
+	}
+
+	void Assembly::maxdepth(const int depth){
+		_maxdepth = depth;
+	}
 
 	void Assembly::_setbbox() {
 		if (_particles.size() == 0){
