@@ -24,16 +24,14 @@ using Box = GeoVox::util::Box;
 namespace GeoVox::geometry{
 	class Node{
 	public:
-<<<<<<< HEAD
 		Node(const int depth=0) : _root(NULL), _parent(NULL), _depth(depth), _ID(0), _box(Box(Point3(0,0,0), Point3(1,1,1))), _isdivided(false) {
 			_IJK[0] = 0;
 			_IJK[1] = 0;
 			_IJK[2] = 0;
 		}
 
-=======
 		Node(const int depth=0) : _root(NULL), _parent(NULL), _depth(depth), _ID(0), _box(Box(Point3(0,0,0), Point3(1,1,1))), _isdivided(false) {}
->>>>>>> 5de0ddc (added _ID to Node)
+
 		Node(const Point3& low, const Point3& high, const int depth=0) : _root(NULL), _parent(NULL), _depth(depth), _ID(0), _box(Box(low, high)), _isdivided(false) {}
 
 		~Node(){
@@ -44,11 +42,7 @@ namespace GeoVox::geometry{
 			}
 		}
 
-<<<<<<< HEAD
-		Node(const Node& other) {
-=======
 		Node(const Node& other){
->>>>>>> 5de0ddc (added _ID to Node)
 			_root           = other._root;
 			_parent         = other._parent;
 			_maxdepth       = other._maxdepth;
@@ -67,7 +61,6 @@ namespace GeoVox::geometry{
 			_children[5]    = other._children[5];
 			_children[6]    = other._children[6];
 			_children[7]    = other._children[7];
-<<<<<<< HEAD
 
 			_IJK[0]         = other._IJK[0];
 			_IJK[1]         = other._IJK[1];
@@ -87,7 +80,6 @@ namespace GeoVox::geometry{
 		long unsigned int _global_vtk_voxel_idx[8];
 
 		std::vector<Point3> _points; //only for _root node
-=======
 		}
 
 		Node operator[](long unsigned int idx) const; //ID idx relative to current node. result._ID == idx if called from root node.
@@ -102,7 +94,6 @@ namespace GeoVox::geometry{
 		int _depth;
 		long unsigned int _ID; //PARENT_ID*8 + CHILD_ID
 
->>>>>>> 5de0ddc (added _ID to Node)
 		std::vector<SuperEllipsoid> _particles; //only for _root node
 		std::vector<long unsigned int> _particle_index;
 		Box _box;
