@@ -85,7 +85,77 @@ namespace GeoVox::geometry{
 
 
 				//update _global_vtk_voxel_idx for children
-				
+				_children[0]->_global_vtk_voxel_idx[0] = this->_global_vtk_voxel_idx[0];
+				// _children[0]->_global_vtk_voxel_idx[1] = this->_global_vtk_voxel_idx[1];
+				// _children[0]->_global_vtk_voxel_idx[2] = this->_global_vtk_voxel_idx[2];
+				// _children[0]->_global_vtk_voxel_idx[3] = this->_global_vtk_voxel_idx[3];
+				// _children[0]->_global_vtk_voxel_idx[4] = this->_global_vtk_voxel_idx[4];
+				// _children[0]->_global_vtk_voxel_idx[5] = this->_global_vtk_voxel_idx[5];
+				// _children[0]->_global_vtk_voxel_idx[6] = this->_global_vtk_voxel_idx[6];
+				// _children[0]->_global_vtk_voxel_idx[7] = this->_global_vtk_voxel_idx[7];
+
+				// _children[1]->_global_vtk_voxel_idx[0] = this->_global_vtk_voxel_idx[0];
+				_children[1]->_global_vtk_voxel_idx[1] = this->_global_vtk_voxel_idx[1];
+				// _children[1]->_global_vtk_voxel_idx[2] = this->_global_vtk_voxel_idx[2];
+				// _children[1]->_global_vtk_voxel_idx[3] = this->_global_vtk_voxel_idx[3];
+				// _children[1]->_global_vtk_voxel_idx[4] = this->_global_vtk_voxel_idx[4];
+				// _children[1]->_global_vtk_voxel_idx[5] = this->_global_vtk_voxel_idx[5];
+				// _children[1]->_global_vtk_voxel_idx[6] = this->_global_vtk_voxel_idx[6];
+				// _children[1]->_global_vtk_voxel_idx[7] = this->_global_vtk_voxel_idx[7];
+
+				// _children[2]->_global_vtk_voxel_idx[0] = this->_global_vtk_voxel_idx[0];
+				// _children[2]->_global_vtk_voxel_idx[1] = this->_global_vtk_voxel_idx[1];
+				_children[2]->_global_vtk_voxel_idx[2] = this->_global_vtk_voxel_idx[2];
+				// _children[2]->_global_vtk_voxel_idx[3] = this->_global_vtk_voxel_idx[3];
+				// _children[2]->_global_vtk_voxel_idx[4] = this->_global_vtk_voxel_idx[4];
+				// _children[2]->_global_vtk_voxel_idx[5] = this->_global_vtk_voxel_idx[5];
+				// _children[2]->_global_vtk_voxel_idx[6] = this->_global_vtk_voxel_idx[6];
+				// _children[2]->_global_vtk_voxel_idx[7] = this->_global_vtk_voxel_idx[7];
+
+				// _children[3]->_global_vtk_voxel_idx[0] = this->_global_vtk_voxel_idx[0];
+				// _children[3]->_global_vtk_voxel_idx[1] = this->_global_vtk_voxel_idx[1];
+				// _children[3]->_global_vtk_voxel_idx[2] = this->_global_vtk_voxel_idx[2];
+				_children[3]->_global_vtk_voxel_idx[3] = this->_global_vtk_voxel_idx[3];
+				// _children[3]->_global_vtk_voxel_idx[4] = this->_global_vtk_voxel_idx[4];
+				// _children[3]->_global_vtk_voxel_idx[5] = this->_global_vtk_voxel_idx[5];
+				// _children[3]->_global_vtk_voxel_idx[6] = this->_global_vtk_voxel_idx[6];
+				// _children[3]->_global_vtk_voxel_idx[7] = this->_global_vtk_voxel_idx[7];
+
+				// _children[4]->_global_vtk_voxel_idx[0] = this->_global_vtk_voxel_idx[0];
+				// _children[4]->_global_vtk_voxel_idx[1] = this->_global_vtk_voxel_idx[1];
+				// _children[4]->_global_vtk_voxel_idx[2] = this->_global_vtk_voxel_idx[2];
+				// _children[4]->_global_vtk_voxel_idx[3] = this->_global_vtk_voxel_idx[3];
+				_children[4]->_global_vtk_voxel_idx[4] = this->_global_vtk_voxel_idx[4];
+				// _children[4]->_global_vtk_voxel_idx[5] = this->_global_vtk_voxel_idx[5];
+				// _children[4]->_global_vtk_voxel_idx[6] = this->_global_vtk_voxel_idx[6];
+				// _children[4]->_global_vtk_voxel_idx[7] = this->_global_vtk_voxel_idx[7];
+
+				// _children[5]->_global_vtk_voxel_idx[0] = this->_global_vtk_voxel_idx[0];
+				// _children[5]->_global_vtk_voxel_idx[1] = this->_global_vtk_voxel_idx[1];
+				// _children[5]->_global_vtk_voxel_idx[2] = this->_global_vtk_voxel_idx[2];
+				// _children[5]->_global_vtk_voxel_idx[3] = this->_global_vtk_voxel_idx[3];
+				// _children[5]->_global_vtk_voxel_idx[4] = this->_global_vtk_voxel_idx[4];
+				_children[5]->_global_vtk_voxel_idx[5] = this->_global_vtk_voxel_idx[5];
+				// _children[5]->_global_vtk_voxel_idx[6] = this->_global_vtk_voxel_idx[6];
+				// _children[5]->_global_vtk_voxel_idx[7] = this->_global_vtk_voxel_idx[7];
+
+				// _children[6]->_global_vtk_voxel_idx[0] = this->_global_vtk_voxel_idx[0];
+				// _children[6]->_global_vtk_voxel_idx[1] = this->_global_vtk_voxel_idx[1];
+				// _children[6]->_global_vtk_voxel_idx[2] = this->_global_vtk_voxel_idx[2];
+				// _children[6]->_global_vtk_voxel_idx[3] = this->_global_vtk_voxel_idx[3];
+				// _children[6]->_global_vtk_voxel_idx[4] = this->_global_vtk_voxel_idx[4];
+				// _children[6]->_global_vtk_voxel_idx[5] = this->_global_vtk_voxel_idx[5];
+				_children[6]->_global_vtk_voxel_idx[6] = this->_global_vtk_voxel_idx[6];
+				// _children[6]->_global_vtk_voxel_idx[7] = this->_global_vtk_voxel_idx[7];
+
+				// _children[7]->_global_vtk_voxel_idx[0] = this->_global_vtk_voxel_idx[0];
+				// _children[7]->_global_vtk_voxel_idx[1] = this->_global_vtk_voxel_idx[1];
+				// _children[7]->_global_vtk_voxel_idx[2] = this->_global_vtk_voxel_idx[2];
+				// _children[7]->_global_vtk_voxel_idx[3] = this->_global_vtk_voxel_idx[3];
+				// _children[7]->_global_vtk_voxel_idx[4] = this->_global_vtk_voxel_idx[4];
+				// _children[7]->_global_vtk_voxel_idx[5] = this->_global_vtk_voxel_idx[5];
+				// _children[7]->_global_vtk_voxel_idx[6] = this->_global_vtk_voxel_idx[6];
+				_children[7]->_global_vtk_voxel_idx[7] = this->_global_vtk_voxel_idx[7];
 
 
 
