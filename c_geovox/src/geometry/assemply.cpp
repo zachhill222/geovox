@@ -4,6 +4,13 @@
 namespace GeoVox::geometry{
 	//NODE (OF OCTREE)
 
+<<<<<<< HEAD
+=======
+	Node Node::operator[](long unsigned int idx) const{
+		return *this;
+	}
+
+>>>>>>> 5de0ddc (added _ID to Node)
 	void Node::insert_particle(const long unsigned int idx, const SuperEllipsoid& P){
 		// std::cout << "Node(" << _ID << "):\n";
 
@@ -47,8 +54,12 @@ namespace GeoVox::geometry{
 					_children[i]->_root = _root;
 					_children[i]->_parent = this;
 					_children[i]->_maxdepth = _maxdepth;
+<<<<<<< HEAD
 					_children[i]->_ID = this->_ID*8+i+1;
 				}
+=======
+					_children[i]->_ID = this->_ID*8+i;
+>>>>>>> 5de0ddc (added _ID to Node)
 
 				//update _IJK indices for children
 				_children[0]->_IJK[0] = (2*this->_IJK[0]);
