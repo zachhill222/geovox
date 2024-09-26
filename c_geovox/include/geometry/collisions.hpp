@@ -56,7 +56,7 @@ bool GJK(const SA& S1, const SB& S2){
 	for (int i=0; i<MAX_GJK_ITERATIONS; i++){
 		A = support(S1,S2,direction);
 
-		if (A.dot(direction) < 0.0){
+		if (A.dot(direction) < 0){
 			return false;
 		}
 

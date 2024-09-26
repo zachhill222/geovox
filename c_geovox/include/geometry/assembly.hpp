@@ -30,9 +30,9 @@ namespace GeoVox::geometry{
 
 	class Node{
 	public:
-		Node(const int depth) : _root(NULL), _parent(NULL), _depth(depth), _ID(0), _isdivided(false) {}
+		Node(const int depth) : _root(NULL), _parent(NULL), _depth(depth), _ID(0), _nvert(0), _isdivided(false) {}
 		
-		Node(const Point3& low, const Point3& high): _box(Box(low, high)), _isdivided(false) {}
+		Node(const Point3& low, const Point3& high): _root(NULL), _parent(NULL), _nvert(0), _box(Box(low, high)), _isdivided(false) {}
 
 		~Node(){
 			if (_isdivided){
@@ -79,7 +79,6 @@ namespace GeoVox::geometry{
 			_ijk[2] = 0;
 
 			_nleaves = 1;
-			_nvert   = 0;
 			_root    = this;
 		}
 

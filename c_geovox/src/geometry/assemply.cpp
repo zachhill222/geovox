@@ -4,12 +4,8 @@
 namespace GeoVox::geometry{
 	//NODE (OF OCTREE)
 	void Node::divide(){
-		// std::cout << "Node(" << _ID << "): _isdivided= " << _isdivided;
-	 	// std::cout << " depth= " << _depth;
-	 	// std::cout << " ijk= (" << _ijk[0] << ", " << _ijk[1] << ", " << _ijk[2] << ")\n";
-		
 		if (_isdivided){
-			// std::cout << "recurse\n";
+			std::cout << "recurse\n";
 			for (int i=0; i<8; i++){
 				_children[i]->divide();
 			}
@@ -87,14 +83,16 @@ namespace GeoVox::geometry{
 				const SuperEllipsoid &P = _root->_particles[_particle_number];
 				
 				//coarse check if particle collides with child
+				// std::cout << "COARSE CHECK\n";
 				if (!GeoVox::geometry::GJK(_children[i]->_box, P.bbox())){
 					continue;
 				}
 
 				//fine check if particle collides with child
-				// if (!GeoVox::geometry::GJK(_children[i]->_box, P)){
-				// 	continue;
-				// }
+				// std::cout << "FINE CHECK\n";
+				if (!GeoVox::geometry::GJK(P, _children[i]->_box)){
+					continue;
+				}
 
 				//add index to child particle index list
 				_children[i]->_particle_index.push_back(_particle_number);
@@ -111,6 +109,13 @@ namespace GeoVox::geometry{
 				if (temp_vert > _children[i]->_nvert){
 					_children[i]->_nvert = temp_vert;
 				}
+			}
+		}
+
+		//divide again if needed
+		if (_depth+1 < _root->_maxdepth){
+			for (int c_idx=0; c_idx<8; c_idx++){
+				_children[c_idx]->divide();
 			}
 		}
 	}
@@ -220,46 +225,59 @@ namespace GeoVox::geometry{
 		std::map<long unsigned int, long unsigned int> reduced_index;
 		create_point_global_index_maps(point_map, reduced_index);
 
+
+		//create string stream for fewer io writes
+		std::stringstream buffer;
+
 		std::cout << "made point map\n";
 
 		//HEADER
-		stream << "# vtk DataFile Version 2.0\n";
-		stream << "Octree Structure\n";
-		stream << "ASCII\n\n";
+		buffer << "# vtk DataFile Version 2.0\n";
+		buffer << "Octree Structure\n";
+		buffer << "ASCII\n\n";
 
 		//TOPOLOGY
-		stream << "DATASET UNSTRUCTURED_GRID\n";
+		buffer << "DATASET UNSTRUCTURED_GRID\n";
 
 		//POINTS
-		stream << "POINTS " << point_map.size() << " float\n";
+		buffer << "POINTS " << point_map.size() << " float\n";
 		for (long unsigned int i=0; i<point_map.size(); i++){
-			point_map[i].print(stream);
-			stream << std::endl;
+			point_map[i].print(buffer);
+			buffer << std::endl;
 		}
-		stream << std::endl;
+		buffer << std::endl;
+
+		stream << buffer.rdbuf();
+		buffer.str("");
 
 		std::cout << "wrote points to file\n";
 
 		//VOXELS
-		stream << "CELLS " << _root->_nleaves << " " << 9*(_root->_nleaves) << std::endl;
-		print_voxel_idx(stream, reduced_index);
-		stream << std::endl;
+		buffer << "CELLS " << _root->_nleaves << " " << 9*(_root->_nleaves) << std::endl;
+		print_voxel_idx(buffer, reduced_index);
+		buffer << std::endl;
+
+		stream << buffer.rdbuf();
+		buffer.str("");
 
 		std::cout << "wrote voxels to file\n";
 
-		stream << "CELL_TYPES " << _root->_nleaves << std::endl;
+		buffer << "CELL_TYPES " << _root->_nleaves << std::endl;
 		for (long unsigned int i=0; i<_nleaves; i++){
-			stream << "11\n";
+			buffer << "11\n";
 		}
-		stream << std::endl;
+		buffer << std::endl;
 
 
 		//NVERT DATA
-		stream << "CELL_DATA " << _root->_nleaves << std::endl;
-		stream << "SCALARS nvert integer\n";
-		stream << "LOOKUP_TABLE default\n";
-		print_nvert(stream);
-		stream << std::endl;
+		buffer << "CELL_DATA " << _root->_nleaves << std::endl;
+		buffer << "SCALARS nvert integer\n";
+		buffer << "LOOKUP_TABLE default\n";
+		print_nvert(buffer);
+		buffer << std::endl;
+
+		stream << buffer.rdbuf();
+		buffer.str("");
 
 		std::cout << "wrote nvert to file\n";
 
@@ -361,20 +379,16 @@ namespace GeoVox::geometry{
 
 	void Assembly::make_tree(int maxdepth){
 		_setbbox();
+		// _box = 5*_box;
 		if (_isdivided){
 			for (int i=0; i<8; i++){
 				delete _children[i];
 			}
 		}
+		_isdivided = false;
 
 		_maxdepth = maxdepth;
-		// for (long unsigned int i=0; i<_particles.size(); i++){
-		// 	Node::insert_particle(i, _particles[i]);
-		// }
-		for (unsigned int i=0; i<_maxdepth+1; i++){
-			std::cout << "\n################ division " << i << " ################\n\n";
-			divide();
-		}
+		divide();
 	}
 
 

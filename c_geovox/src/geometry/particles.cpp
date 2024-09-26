@@ -148,46 +148,28 @@ namespace GeoVox::geometry{
 	// }
 
 	bool SuperEllipsoid::contains(const Point3& point) const{
+		// Box local_box = Box(-_r,_r);
+		// return local_box.contains(tolocal(point));
 		return (levelval(point) <= 1.0);
 	}
 
 	Point3 SuperEllipsoid::support(const Point3& direction) const{
 		//convert to local coordinates
-		Point3 d = tolocal(direction);
-		// d.print(std::cout);
-		// _r.print(std::cout);
-		// (d*_r).print(std::cout);
+		Point3 d = _Q.rotate(direction);
 
 		//get omega
 		double x = sgn(d[0])*pow(fabs(_r[0]*d[0]), _INVPOWERS[1]);
 		double y = sgn(d[1])*pow(fabs(_r[1]*d[1]), _INVPOWERS[1]);
 		double omega = atan2(y, x); //in [-pi,pi]
 
-		// std::cout << "x_base=" << fabs(_r[1]*d[1]);
-		// std::cout << " x_exp=" << _INVPOWERS[1];
-		// std::cout << " x=" << x;
-		// std::cout << " y=" << y;
-		// std::cout << " omega=" << omega << std::endl;
-
-		// if (omega<0) {
-		// 	omega += 6.28318530718;
-		// }
-
 		//get eta
 		x = pow(fabs(_r[0]*d[0]), _INVPOWERS[0]);
 		y = sgn(d[2]) * pow( fabs( _r[2]*d[2]*cos_pow(omega,2.0-_eps2) ) , _INVPOWERS[0]);
 		double eta = atan2(y, x); //in [-pi/2,pi/2] because x >= 0
 
-		// if (cos(eta)<0){
-		// 	std::cout << "x=" << x;
-		// 	std::cout << " y=" << y;
-		// 	std::cout << " eta=" << eta << std::endl;
-		// }
-
-
 		//get normal in global coordinates
 		Point3 result = parametric(eta, omega);
-
+		
 		return toglobal(result);
 	}
 

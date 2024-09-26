@@ -15,6 +15,7 @@ bool lineCase(Polytope& simplex, Point3& direction){
 
 	DOT = AB.dot(AO);
 	if (DOT>0.0){
+		// std::cout << "AB\n";
 		direction = AB.cross(AO.cross(AB));
 
 		//check if line segment contained the origin. AB and AO are co-linear.
@@ -24,6 +25,7 @@ bool lineCase(Polytope& simplex, Point3& direction){
 		// simplex = Polytope({B, A}); //no change to simplex
 	}
 	else{
+		// std::cout << "AO\n";
 		direction = AO;
 		simplex = Polytope({A});
 	}
