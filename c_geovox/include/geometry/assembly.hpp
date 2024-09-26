@@ -61,7 +61,7 @@ namespace GeoVox::geometry{
 		Node* _children[8];
 
 		void divide();
-
+		bool in_particle(const Point3& point) const;
 
 		void print_tree(std::ostream& stream) const;
 		void create_point_global_index_maps(std::vector<Point3>& point_map, std::map<long unsigned int, long unsigned int>& reduced_index) const;

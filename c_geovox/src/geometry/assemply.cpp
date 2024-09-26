@@ -3,6 +3,27 @@
 
 namespace GeoVox::geometry{
 	//NODE (OF OCTREE)
+	bool Node::in_particle(const Point3& point) const{
+		if (_isdivided){
+			for(int c_idx=0; c_idx<8; c_idx++){
+				if (_children[c_idx]->_box.contains(point)){
+					return _children[c_idx]->in_particle(point);
+				}
+			}
+		}
+
+		for (long unsigned int p_idx=0; p_idx<_particle_index.size(); p_idx++){
+			long unsigned int _particle_number = _particle_index[p_idx];
+			const SuperEllipsoid &P = _root->_particles[_particle_number];
+			if (P.contains(point)){
+				return true;
+			}
+		}
+		
+		return false;
+	}
+
+
 	void Node::divide(){
 		if (_isdivided){
 			std::cout << "recurse\n";
@@ -183,11 +204,6 @@ namespace GeoVox::geometry{
 		}
 	}
 
-	// Point3 Node::voxel_vertex(const int i) const{
-	// 	double H[3] {1.0, 1.0, 1.0};
-		
-	// }
-
 
 	void Node::print_voxel_idx(std::ostream& stream, const std::map<long unsigned int, long unsigned int>& reduced_index) const{
 		if (_isdivided) {
@@ -283,7 +299,17 @@ namespace GeoVox::geometry{
 
 
 		//CONTAINED DATA
-		// stream << "POINT_DATA " << point_map.size()
+		buffer << "POINT_DATA " << point_map.size() << std::endl;
+		buffer << "SCALARS in_particle integer\n";
+		buffer << "LOOKUP_TABLE default\n";
+		for (long unsigned int i=0; i<point_map.size(); i++){
+			buffer << in_particle(point_map[i]) << std::endl;
+		}
+		buffer << std::endl;
+
+		stream << buffer.rdbuf();
+		buffer.str("");
+
 	}
 
 	void Root::save_vtk(const std::string fullfile) const{
@@ -352,6 +378,8 @@ namespace GeoVox::geometry{
 			}
 		}
 
+		_setbbox();
+
 	}
 
 	void Assembly::print(std::ostream &stream) const{
@@ -372,14 +400,8 @@ namespace GeoVox::geometry{
 		}
 	}
 
-	// void Assembly::print_tree(std::ostream &stream) const{
-	// 	Node::print_tree(stream);
-	// }
-
 
 	void Assembly::make_tree(int maxdepth){
-		_setbbox();
-		// _box = 5*_box;
 		if (_isdivided){
 			for (int i=0; i<8; i++){
 				delete _children[i];
