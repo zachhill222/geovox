@@ -45,12 +45,12 @@ int test_collision(){
 
 
 int test_assembly(){
-	Assembly A = Assembly("particles_50.txt");
+	Assembly A = Assembly("particles_1000.txt");
 
 	// A.print(std::cout);
 
 	std::cout << "BUILDING TREE\n";
-	A.make_tree(6);
+	A.make_tree(8);
 	// A.print_tree(std::cout);
 	std::cout << "SAVING MESH\n";
 	A.save_vtk("voxel_mesh.vtk");

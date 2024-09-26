@@ -3,138 +3,6 @@
 
 namespace GeoVox::geometry{
 	//NODE (OF OCTREE)
-	// void Node::insert_particle(const long unsigned int idx, const SuperEllipsoid& P){
-	// 	// std::cout << "Node(" << _ID << "):";
-	// 	// std::cout << " depth= " << _depth;
-	// 	// std::cout << " IJK= (" << _IJK[0] << ", " << _IJK[1] << ", " << _IJK[2] << ")";
-	// 	// std::cout << " ijk= (" << _ijk[0] << ", " << _ijk[1] << ", " << _ijk[2] << ")\n";
-	// 	// std::cout << " _global_vtk_voxel_idx= [" << _global_vtk_voxel_idx[0] << ", " << _global_vtk_voxel_idx[1] << ", "<< _global_vtk_voxel_idx[2] << ", "<< _global_vtk_voxel_idx[3] << ", "<< _global_vtk_voxel_idx[4] << ", "<< _global_vtk_voxel_idx[5] << ", "<< _global_vtk_voxel_idx[6] << ", "<< _global_vtk_voxel_idx[7] << "]\n";
-
-	// 	//check if this node collides with the bounding box (rotated prism) of the particle
-	// 	if (!GeoVox::geometry::GJK(_box, P.bbox())){
-	// 		return;
-	// 	}
-
-	// 	// std::cout << "\tCoarse collision\n";
-
-	// 	//check if this node collides with the particle itself
-	// 	if (!GeoVox::geometry::GJK(_box, P)){
-	// 		return;
-	// 	}
-
-	// 	// std::cout << "\tFine collision\n";
-
-
-	// 	//particle collides with this node's box
-	// 	if (_isdivided){
-	// 		// std::cout << "\t RECURSE\n";
-	// 		for (int i=0; i<8; i++){
-	// 			_children[i]->insert_particle(idx, P);
-	// 		}
-	// 	}
-	// 	else{
-	// 		//check if entire voxel is contained in P
-	// 		bool iscontained = true;
-	// 		for (int v_idx=0; v_idx<8; v_idx++){
-	// 			if (!P.contains(_box[v_idx])){
-	// 				iscontained = false;
-	// 			}
-	// 		}
-
-	// 		if (_depth < _root->_maxdepth && !iscontained){
-	// 			_isdivided = true;
-	// 			_root->_nleaves += 7; //current node is no longer a leaf, create 8 new leaves
-
-	// 			// std::cout << "\t DIVIDE\n";
-	// 			//create children
-	// 			for (int i=0; i<8; i++){
-	// 				//initialize child node
-	// 				_children[i] = new Node(_box[i],_box.center(), _depth+1);
-	// 				_children[i]->_root = _root;
-	// 				_children[i]->_parent = this;
-	// 				_children[i]->_ID = this->_ID*8+i+1;
-	// 			}
-
-	// 			//update _ijk indices for children
-	// 			_children[0]->_ijk[0] = (2*this->_ijk[0]);
-	// 			_children[0]->_ijk[1] = (2*this->_ijk[1]);
-	// 			_children[0]->_ijk[2] = (2*this->_ijk[2]);
-
-	// 			_children[1]->_ijk[0] = (2*this->_ijk[0])+1;
-	// 			_children[1]->_ijk[1] = (2*this->_ijk[1]);
-	// 			_children[1]->_ijk[2] = (2*this->_ijk[2]);
-
-	// 			_children[2]->_ijk[0] = (2*this->_ijk[0]);
-	// 			_children[2]->_ijk[1] = (2*this->_ijk[1])+1;
-	// 			_children[2]->_ijk[2] = (2*this->_ijk[2]);
-
-	// 			_children[3]->_ijk[0] = (2*this->_ijk[0])+1;
-	// 			_children[3]->_ijk[1] = (2*this->_ijk[1])+1;
-	// 			_children[3]->_ijk[2] = (2*this->_ijk[2]);
-
-	// 			_children[4]->_ijk[0] = (2*this->_ijk[0]);
-	// 			_children[4]->_ijk[1] = (2*this->_ijk[1]);
-	// 			_children[4]->_ijk[2] = (2*this->_ijk[2])+1;
-
-	// 			_children[5]->_ijk[0] = (2*this->_ijk[0])+1;
-	// 			_children[5]->_ijk[1] = (2*this->_ijk[1]);
-	// 			_children[5]->_ijk[2] = (2*this->_ijk[2])+1;
-
-	// 			_children[6]->_ijk[0] = (2*this->_ijk[0]);
-	// 			_children[6]->_ijk[1] = (2*this->_ijk[1])+1;
-	// 			_children[6]->_ijk[2] = (2*this->_ijk[2])+1;
-
-	// 			_children[7]->_ijk[0] = (2*this->_ijk[0])+1;
-	// 			_children[7]->_ijk[1] = (2*this->_ijk[1])+1;
-	// 			_children[7]->_ijk[2] = (2*this->_ijk[2])+1;
-
-
-	// 			//update _global_vtk_voxel_idx for children
-	// 			// std::cout << "UPDATING _global_vtk_voxel_idx\n";
-	// 			// long unsigned int M2  = pow(2,_maxdepth);
-	// 			long unsigned int Mm2 = pow(2,_root->_maxdepth-_depth-1);
-	// 			for (int i=0; i<8; i++){
-	// 				_children[i]->_IJK[0] = Mm2*(_children[i]->_ijk[0]);
-	// 				_children[i]->_IJK[1] = Mm2*(_children[i]->_ijk[1]);
-	// 				_children[i]->_IJK[2] = Mm2*(_children[i]->_ijk[2]);
-
-	// 				// _children[i]->_global_vtk_voxel_idx[0] = (_children[i]->_IJK[0]   + M2 * (_children[i]->_IJK[1]   + M2 * (_children[i]->_IJK[2]  )));
-	// 				// _children[i]->_global_vtk_voxel_idx[1] = (_children[i]->_IJK[0]+1 + M2 * (_children[i]->_IJK[1]   + M2 * (_children[i]->_IJK[2]  )));
-	// 				// _children[i]->_global_vtk_voxel_idx[2] = (_children[i]->_IJK[0]   + M2 * (_children[i]->_IJK[1]+1 + M2 * (_children[i]->_IJK[2]  )));
-	// 				// _children[i]->_global_vtk_voxel_idx[3] = (_children[i]->_IJK[0]+1 + M2 * (_children[i]->_IJK[1]+1 + M2 * (_children[i]->_IJK[2]  )));
-	// 				// _children[i]->_global_vtk_voxel_idx[4] = (_children[i]->_IJK[0]   + M2 * (_children[i]->_IJK[1]   + M2 * (_children[i]->_IJK[2]+1)));
-	// 				// _children[i]->_global_vtk_voxel_idx[5] = (_children[i]->_IJK[0]+1 + M2 * (_children[i]->_IJK[1]   + M2 * (_children[i]->_IJK[2]+1)));
-	// 				// _children[i]->_global_vtk_voxel_idx[6] = (_children[i]->_IJK[0]   + M2 * (_children[i]->_IJK[1]+1 + M2 * (_children[i]->_IJK[2]+1)));
-	// 				// _children[i]->_global_vtk_voxel_idx[7] = (_children[i]->_IJK[0]+1 + M2 * (_children[i]->_IJK[1]+1 + M2 * (_children[i]->_IJK[2]+1)));
-	// 			}
-
-
-
-	// 			//insert particle into children nodes
-	// 			for (int i=0; i<8; i++){
-	// 				_children[i]->insert_particle(idx, P);
-	// 			}
-
-	// 		}
-	// 		else{
-	// 			_particle_index.push_back(idx);
-
-	// 			//update nvert
-	// 			int temp_vert = 0;
-	// 			for (int i=0; i<8; i++){
-	// 				if (P.contains(_box[i])){
-	// 					temp_vert += 1;
-	// 				}
-	// 			}
-
-	// 			if (temp_vert > _nvert){
-	// 				_nvert = temp_vert;
-	// 			}
-	// 		}
-	// 	}
-	// }
-
-
 	void Node::divide(){
 		// std::cout << "Node(" << _ID << "): _isdivided= " << _isdivided;
 	 	// std::cout << " depth= " << _depth;
@@ -175,43 +43,41 @@ namespace GeoVox::geometry{
 			_children[i]->_parent = this;
 			_children[i]->_ID = this->_ID*8+i+1;
 			_children[i]->_depth = _depth+1;
-
 			// std::cout << "created child with ID " << _children[i]->_ID << std::endl;
 		}
 
 		//update _ijk indices for children
-		_children[0]->_ijk[0] = (2*this->_ijk[0]);
-		_children[0]->_ijk[1] = (2*this->_ijk[1]);
-		_children[0]->_ijk[2] = (2*this->_ijk[2]);
+		_children[0]->_ijk[0] = (2*_ijk[0]);
+		_children[0]->_ijk[1] = (2*_ijk[1]);
+		_children[0]->_ijk[2] = (2*_ijk[2]);
 
-		_children[1]->_ijk[0] = (2*this->_ijk[0])+1;
-		_children[1]->_ijk[1] = (2*this->_ijk[1]);
-		_children[1]->_ijk[2] = (2*this->_ijk[2]);
+		_children[1]->_ijk[0] = (2*_ijk[0])+1;
+		_children[1]->_ijk[1] = (2*_ijk[1]);
+		_children[1]->_ijk[2] = (2*_ijk[2]);
 
-		_children[2]->_ijk[0] = (2*this->_ijk[0]);
-		_children[2]->_ijk[1] = (2*this->_ijk[1])+1;
-		_children[2]->_ijk[2] = (2*this->_ijk[2]);
+		_children[2]->_ijk[0] = (2*_ijk[0]);
+		_children[2]->_ijk[1] = (2*_ijk[1])+1;
+		_children[2]->_ijk[2] = (2*_ijk[2]);
 
-		_children[3]->_ijk[0] = (2*this->_ijk[0])+1;
-		_children[3]->_ijk[1] = (2*this->_ijk[1])+1;
-		_children[3]->_ijk[2] = (2*this->_ijk[2]);
+		_children[3]->_ijk[0] = (2*_ijk[0])+1;
+		_children[3]->_ijk[1] = (2*_ijk[1])+1;
+		_children[3]->_ijk[2] = (2*_ijk[2]);
 
-		_children[4]->_ijk[0] = (2*this->_ijk[0]);
-		_children[4]->_ijk[1] = (2*this->_ijk[1]);
-		_children[4]->_ijk[2] = (2*this->_ijk[2])+1;
+		_children[4]->_ijk[0] = (2*_ijk[0]);
+		_children[4]->_ijk[1] = (2*_ijk[1]);
+		_children[4]->_ijk[2] = (2*_ijk[2])+1;
 
-		_children[5]->_ijk[0] = (2*this->_ijk[0])+1;
-		_children[5]->_ijk[1] = (2*this->_ijk[1]);
-		_children[5]->_ijk[2] = (2*this->_ijk[2])+1;
+		_children[5]->_ijk[0] = (2*_ijk[0])+1;
+		_children[5]->_ijk[1] = (2*_ijk[1]);
+		_children[5]->_ijk[2] = (2*_ijk[2])+1;
 
-		_children[6]->_ijk[0] = (2*this->_ijk[0]);
-		_children[6]->_ijk[1] = (2*this->_ijk[1])+1;
-		_children[6]->_ijk[2] = (2*this->_ijk[2])+1;
+		_children[6]->_ijk[0] = (2*_ijk[0]);
+		_children[6]->_ijk[1] = (2*_ijk[1])+1;
+		_children[6]->_ijk[2] = (2*_ijk[2])+1;
 
-		_children[7]->_ijk[0] = (2*this->_ijk[0])+1;
-		_children[7]->_ijk[1] = (2*this->_ijk[1])+1;
-		_children[7]->_ijk[2] = (2*this->_ijk[2])+1;
-
+		_children[7]->_ijk[0] = (2*_ijk[0])+1;
+		_children[7]->_ijk[1] = (2*_ijk[1])+1;
+		_children[7]->_ijk[2] = (2*_ijk[2])+1;
 
 
 		//add particles to children
@@ -221,12 +87,12 @@ namespace GeoVox::geometry{
 				const SuperEllipsoid &P = _root->_particles[_particle_number];
 				
 				//coarse check if particle collides with child
-				if (!GeoVox::geometry::GJK(_box, P.bbox())){
+				if (!GeoVox::geometry::GJK(_children[i]->_box, P.bbox())){
 					continue;
 				}
 
 				//fine check if particle collides with child
-				// if (!GeoVox::geometry::GJK(_box, P)){
+				// if (!GeoVox::geometry::GJK(_children[i]->_box, P)){
 				// 	continue;
 				// }
 
@@ -236,8 +102,8 @@ namespace GeoVox::geometry{
 
 				//update nvert
 				int temp_vert = 0;
-				for (int i=0; i<8; i++){
-					if (P.contains(_children[i]->_box[i])){
+				for (int v=0; v<8; v++){
+					if (P.contains(_children[i]->_box[v])){
 						temp_vert += 1;
 					}
 				}
@@ -265,53 +131,14 @@ namespace GeoVox::geometry{
 	}
 
 
-	void Node::print_vtk(std::ostream &stream) const{
-		//ASSEMBLE REDUCED GLOBAL INDICES
-		std::vector<Point3> point_map;
-		std::map<long unsigned int, long unsigned int> reduced_index;
-		create_point_global_index_maps(point_map, reduced_index);
-
-
-		//HEADER
-		stream << "# vtk DataFile Version 2.0\n";
-		stream << "Octree Structure\n";
-		stream << "ASCII\n\n";
-
-		//TOPOLOGY
-		stream << "DATASET UNSTRUCTURED_GRID\n";
-
-		//POINTS
-		stream << "POINTS " << point_map.size() << " float\n";
-		for (long unsigned int i=0; i<point_map.size(); i++){
-			point_map[i].print(stream);
-			stream << std::endl;
-		}
-		stream << std::endl;
-
-		//VOXELS
-		stream << "CELLS " << _root->_nleaves << " " << 9*(_root->_nleaves) << std::endl;
-		print_voxel_idx(stream, reduced_index);
-		stream << std::endl;
-
-		stream << "CELL_TYPES " << _root->_nleaves << std::endl;
-		for (long unsigned int i=0; i<_nleaves; i++){
-			stream << "11\n";
-		}
-		stream << std::endl;
-
-
-		//NVERT DATA
-		stream << "CELL_DATA " << _root->_nleaves << std::endl;
-		stream << "SCALARS nvert integer\n";
-		stream << "LOOKUP_TABLE default\n";
-		this->print_nvert(stream);
-
-	}
+	
 
 	void Node::get_global_vertex_index(long unsigned int (&global_index)[8]) const{
 		//compute global index
-		long unsigned int M2 = pow(2,_root->_maxdepth)+1; //number of vertices in global side length
-		long unsigned int Mm2 = pow(2, _root->_maxdepth-_depth);
+		long unsigned int M2 = pow(2,_root->_maxdepth) + 1; //maximum number of vertices in side length
+		long unsigned int Mm2 = pow(2, _root->_maxdepth-_depth); //conversion factor from current depth to _maxdepth
+
+		// std::cout << "_depth=" << _depth << " _maxdepth=" << _root->_maxdepth << " M2=" << M2 << " Mm2=" << Mm2 << std::endl;
 
 		global_index[0] = Mm2*(_ijk[0]   + M2*(_ijk[1]   + M2*(_ijk[2]  )));
 		global_index[1] = Mm2*(_ijk[0]+1 + M2*(_ijk[1]   + M2*(_ijk[2]  )));
@@ -351,6 +178,11 @@ namespace GeoVox::geometry{
 		}
 	}
 
+	// Point3 Node::voxel_vertex(const int i) const{
+	// 	double H[3] {1.0, 1.0, 1.0};
+		
+	// }
+
 
 	void Node::print_voxel_idx(std::ostream& stream, const std::map<long unsigned int, long unsigned int>& reduced_index) const{
 		if (_isdivided) {
@@ -381,7 +213,62 @@ namespace GeoVox::geometry{
 	}
 
 
-	void Node::save_vtk(const std::string fullfile) const{
+	// ROOT
+	void Root::print_vtk(std::ostream &stream) const{
+		//ASSEMBLE REDUCED GLOBAL INDICES
+		std::vector<Point3> point_map;
+		std::map<long unsigned int, long unsigned int> reduced_index;
+		create_point_global_index_maps(point_map, reduced_index);
+
+		std::cout << "made point map\n";
+
+		//HEADER
+		stream << "# vtk DataFile Version 2.0\n";
+		stream << "Octree Structure\n";
+		stream << "ASCII\n\n";
+
+		//TOPOLOGY
+		stream << "DATASET UNSTRUCTURED_GRID\n";
+
+		//POINTS
+		stream << "POINTS " << point_map.size() << " float\n";
+		for (long unsigned int i=0; i<point_map.size(); i++){
+			point_map[i].print(stream);
+			stream << std::endl;
+		}
+		stream << std::endl;
+
+		std::cout << "wrote points to file\n";
+
+		//VOXELS
+		stream << "CELLS " << _root->_nleaves << " " << 9*(_root->_nleaves) << std::endl;
+		print_voxel_idx(stream, reduced_index);
+		stream << std::endl;
+
+		std::cout << "wrote voxels to file\n";
+
+		stream << "CELL_TYPES " << _root->_nleaves << std::endl;
+		for (long unsigned int i=0; i<_nleaves; i++){
+			stream << "11\n";
+		}
+		stream << std::endl;
+
+
+		//NVERT DATA
+		stream << "CELL_DATA " << _root->_nleaves << std::endl;
+		stream << "SCALARS nvert integer\n";
+		stream << "LOOKUP_TABLE default\n";
+		print_nvert(stream);
+		stream << std::endl;
+
+		std::cout << "wrote nvert to file\n";
+
+
+		//CONTAINED DATA
+		// stream << "POINT_DATA " << point_map.size()
+	}
+
+	void Root::save_vtk(const std::string fullfile) const{
 		std::ofstream voxel_mesh(fullfile);
 
 		if( not voxel_mesh.is_open() )
@@ -440,7 +327,7 @@ namespace GeoVox::geometry{
 				iss >> q3;
 
 				// std::cout << rx << "\t" << ry << "\t"<< rz << "\t"<< eps1 << "\t"<< eps2 << "\t"<< x << "\t" << y << "\t" << z << "\t" << q0 << "\t"<< q1 << "\t" << q2 << "\t" << q3 << "\n";
-				SuperEllipsoid P = SuperEllipsoid(Point3(rx,ry,rz), eps1, eps2, Point3(x,y,z), Quaternion(q0,q1,q2,q3));
+				SuperEllipsoid P = SuperEllipsoid(Point3(rx,ry,rz), eps1, eps2, Point3(x,y,z), Quaternion(q0,-q1,-q2,-q3));
 				_particles.push_back(P);
 				_particle_index.push_back(particle_number);
 				particle_number += 1;
@@ -467,9 +354,9 @@ namespace GeoVox::geometry{
 		}
 	}
 
-	void Assembly::print_tree(std::ostream &stream) const{
-		Node::print_tree(stream);
-	}
+	// void Assembly::print_tree(std::ostream &stream) const{
+	// 	Node::print_tree(stream);
+	// }
 
 
 	void Assembly::make_tree(int maxdepth){

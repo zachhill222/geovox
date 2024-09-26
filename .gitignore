@@ -13,7 +13,7 @@ geovox/*.cpp
 build/
 dist/
 geovox.egg-info/
-c_geovox/build
+c_geovox/lib
 
 # ignore .vtk files from examples
 *.vtk

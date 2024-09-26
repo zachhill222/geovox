@@ -128,24 +128,24 @@ namespace GeoVox::geometry{
 		return std::pow(localpoint[0]+localpoint[1], _POWERS[2]) + localpoint[2];
 	}
 
-	Point3 SuperEllipsoid::levelgrad(const Point3& point) const{
-		return toglobal(local_levelgrad(tolocal(point)));
-	}
+	// Point3 SuperEllipsoid::levelgrad(const Point3& point) const{
+	// 	return toglobal(local_levelgrad(tolocal(point)));
+	// }
 
-	Point3 SuperEllipsoid::local_levelgrad(const Point3& point) const{
-		Point3 localpoint = point;
-		localpoint/=_r;
+	// Point3 SuperEllipsoid::local_levelgrad(const Point3& point) const{
+	// 	Point3 localpoint = point;
+	// 	localpoint/=_r;
 
-		double val1 = pow(localpoint[0],2.0/_eps1) + pow(localpoint[1],2.0/_eps2);
-		val1 = (2.0/_eps1)*pow(val1, _POWERS[2]-1.0);
+	// 	double val1 = pow(localpoint[0],2.0/_eps1) + pow(localpoint[1],2.0/_eps2);
+	// 	val1 = (2.0/_eps1)*pow(val1, _POWERS[2]-1.0);
 
-		Point3 grad = Point3();
-		grad[0] = val1*pow(localpoint[0],(2.0-_eps2)/_eps2)/_r[0];
-		grad[1] = val1*pow(localpoint[1],(2.0-_eps2)/_eps2)/_r[1];
-		grad[2] = 2.0*pow(localpoint[2],(2.0-_eps1)/_eps1)/(_r[2]*_eps1);
+	// 	Point3 grad = Point3();
+	// 	grad[0] = val1*pow(localpoint[0],(2.0-_eps2)/_eps2)/_r[0];
+	// 	grad[1] = val1*pow(localpoint[1],(2.0-_eps2)/_eps2)/_r[1];
+	// 	grad[2] = 2.0*pow(localpoint[2],(2.0-_eps1)/_eps1)/(_r[2]*_eps1);
 
-		return grad;
-	}
+	// 	return grad;
+	// }
 
 	bool SuperEllipsoid::contains(const Point3& point) const{
 		return (levelval(point) <= 1.0);
@@ -154,23 +154,45 @@ namespace GeoVox::geometry{
 	Point3 SuperEllipsoid::support(const Point3& direction) const{
 		//convert to local coordinates
 		Point3 d = tolocal(direction);
-		
+		// d.print(std::cout);
+		// _r.print(std::cout);
+		// (d*_r).print(std::cout);
+
 		//get omega
-		double x = sgn(d[1])*pow(abs(_r[1]*d[1]), _INVPOWERS[1]);
-		double y = sgn(d[0])*pow(abs(_r[0]*d[0]), _INVPOWERS[1]);
-		double omega = atan2(x,y); //in [-pi,pi]
+		double x = sgn(d[0])*pow(fabs(_r[0]*d[0]), _INVPOWERS[1]);
+		double y = sgn(d[1])*pow(fabs(_r[1]*d[1]), _INVPOWERS[1]);
+		double omega = atan2(y, x); //in [-pi,pi]
+
+		// std::cout << "x_base=" << fabs(_r[1]*d[1]);
+		// std::cout << " x_exp=" << _INVPOWERS[1];
+		// std::cout << " x=" << x;
+		// std::cout << " y=" << y;
+		// std::cout << " omega=" << omega << std::endl;
+
+		// if (omega<0) {
+		// 	omega += 6.28318530718;
+		// }
 
 		//get eta
-		x = pow(abs(_r[0]*d[0]), _INVPOWERS[0]);
-		y = sgn(d[2]) * pow( abs( _r[2]*d[2]*cos_pow(omega,2.0-_eps2) ) , _INVPOWERS[0]);
-		double eta = atan2(x,y); //in [-pi/2,pi/2] because x >= 0
+		x = pow(fabs(_r[0]*d[0]), _INVPOWERS[0]);
+		y = sgn(d[2]) * pow( fabs( _r[2]*d[2]*cos_pow(omega,2.0-_eps2) ) , _INVPOWERS[0]);
+		double eta = atan2(y, x); //in [-pi/2,pi/2] because x >= 0
+
+		// if (cos(eta)<0){
+		// 	std::cout << "x=" << x;
+		// 	std::cout << " y=" << y;
+		// 	std::cout << " eta=" << eta << std::endl;
+		// }
+
 
 		//get normal in global coordinates
 		Point3 result = parametric(eta, omega);
-		return result;
+
+		return toglobal(result);
 	}
 
 	Point3 SuperEllipsoid::parametric(const double eta, const double omega) const{
+		//LOCAL COORDINATE
 		//compute sines and cosines
 		double C_eta = cos_pow(eta, _eps1);
 		double S_eta = sin_pow(eta, _eps1);
@@ -178,10 +200,11 @@ namespace GeoVox::geometry{
 		double S_omega = sin_pow(omega, _eps2);
 
 		Point3 result = Point3(_r[0]*C_eta*C_omega, _r[1]*C_eta*S_omega, _r[2]*S_eta);
-		return toglobal(result);
+		return result;
 	}
 
 	Point3 SuperEllipsoid::normal_parametric(const double eta, const double omega) const{
+		//LOCAL COORDINATE
 		//compute sines and cosines
 		double C_eta = cos_pow(eta, 2.0-_eps1);
 		double S_eta = sin_pow(eta, 2.0-_eps1);
@@ -189,7 +212,7 @@ namespace GeoVox::geometry{
 		double S_omega = sin_pow(omega, 2.0-_eps2);
 
 		Point3 result = Point3(C_eta*C_omega/_r[0], C_eta*S_omega/_r[1], S_eta/_r[2]);
-		return toglobal(result);
+		return result;
 	}
 
 
