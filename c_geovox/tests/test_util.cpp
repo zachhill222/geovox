@@ -16,7 +16,7 @@ int test_assembly(){
 	// A.print(std::cout);
 
 	std::cout << "BUILDING TREE\n";
-	A.make_tree(6);
+	A.make_tree(5);
 	// A.print_tree(std::cout);
 
 	std::cout << "SAVING GEOMETRY\n";

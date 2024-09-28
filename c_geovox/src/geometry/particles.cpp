@@ -146,6 +146,7 @@ namespace GeoVox::geometry{
 		//get eta
 		x = pow(fabs(_r[0]*d[0]), _INVPOWERS[0]);
 		y = sgn(d[2]) * pow( fabs( _r[2]*d[2]*cos_pow(omega,2.0-_eps2) ) , _INVPOWERS[0]);
+
 		double eta = atan2(y, x); //in [-pi/2,pi/2] because x >= 0
 
 		//get normal in global coordinates
@@ -179,15 +180,18 @@ namespace GeoVox::geometry{
 	}
 
 	Point3 SuperEllipsoid::closest_point(const Point3& point) const{
-		// Point3 result = support(point-_center);
-		// for (int i=0; i<10; i++){
-		// 	result = support(point - result);
+		Point3 result = support(point-_center);
+		// if (contains(point)){
+		// 	for (int i=0; i<3; i++){
+		// 		result = support(result-point);
+		// 	}
+		// }else{
+		// 	for (int i=0; i<3; i++){
+		// 		result = support(point-result);
+		// 	}
 		// }
-
-		// return result;
-
-		//convert to local coordinates
-		Point3 localpoint = tolocal(point);
+		 
+		return result;
 		Point3 d = _Q.rotate(point-_center);
 
 		//get omega
@@ -198,22 +202,25 @@ namespace GeoVox::geometry{
 		//get eta
 		x = pow(fabs(_r[0]*d[0]), _INVPOWERS[0]);
 		y = sgn(d[2]) * pow( fabs( _r[2]*d[2]*cos_pow(omega,2.0-_eps2) ) , _INVPOWERS[0]);
+
 		double eta = atan2(y, x); //in [-pi/2,pi/2] because x >= 0
 		
 
 		//set up nelder mead
 		GeoVox::util::Simplex<2> simplex;
 		simplex[0] = GeoVox::util::Point<2>(eta, omega);
-		simplex[1] = GeoVox::util::Point<2>(eta+0.1, omega);
-		simplex[2] = GeoVox::util::Point<2>(eta, omega+0.1);
+		simplex[1] = GeoVox::util::Point<2>(eta+0.01, omega);
+		simplex[2] = GeoVox::util::Point<2>(eta, omega+0.01);
 
 
 		
 		std::function<double(GeoVox::util::Point<2>, GeoVox::util::Point<3>)> myfun = std::bind(&SuperEllipsoid::neldermeadfun, this, std::placeholders::_1, std::placeholders::_2);
 
+		Point3 localpoint = tolocal(point);
 		GeoVox::util::Point<2> coords = GeoVox::util::neldermead(myfun, simplex, localpoint);
 		return toglobal(parametric(coords[0], coords[1]));
 	}
+
 
 	double SuperEllipsoid::neldermeadfun(GeoVox::util::Point<2> coords, Point3 localpoint) const{
 		return (parametric(coords[0], coords[1])-localpoint).norm2();

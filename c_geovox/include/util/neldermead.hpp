@@ -7,10 +7,10 @@
 
 
 #define NELDERMEAD_ALPHA 1.0
-#define NELDERMEAD_GAMMA 2.0
+#define NELDERMEAD_GAMMA 1.25
 #define NELDERMEAD_RHO 0.5
-#define NELDERMEAD_SIGMA 0.5
-#define NELDERMEAD_MAXITER 1
+#define NELDERMEAD_SIGMA 0.125
+#define NELDERMEAD_MAXITER 2
 
 namespace GeoVox::util{
 	template<size_t dim, typename F, typename Args>
@@ -22,7 +22,7 @@ namespace GeoVox::util{
 
 	template<size_t dim, typename F, typename Args>
 	GeoVox::util::Point<dim> neldermead(F fun, GeoVox::util::Simplex<dim>& simplex, const Args& args){
-		std::cout << "starting neldermead\n";
+		// std::cout << "starting neldermead\n";
 		//INITIALIZE SIMPLEX AND FVALS
 		double fvals[dim+1];
 		for (long unsigned int i=0; i<dim+1; i++){
@@ -105,7 +105,7 @@ namespace GeoVox::util{
 		}
 
 		sortSimplex(fvals, simplex);
-		std::cout << fvals[0] << std::endl;
+		// std::cout << fvals[0] << std::endl;
 		return simplex[0];
 	}
 

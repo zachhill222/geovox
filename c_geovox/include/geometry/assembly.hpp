@@ -55,7 +55,7 @@ namespace GeoVox::geometry{
 		long unsigned int _ID; //PARENT_ID*8 + CHILD_ID + 1
 		unsigned int _ijk[3]; //ijk indices of current voxel at _depth
 		
-		long unsigned int _nvert; //maximum number of vertices contained by a SINGLE particle (leaves only)
+		int _nvert; //maximum number of vertices contained by a SINGLE particle (leaves only)
 
 		std::vector<long unsigned int> _particle_index;
 		Box _box;
@@ -64,17 +64,12 @@ namespace GeoVox::geometry{
 		Node* _children[8];
 
 		void divide();
-		void get_nvert(); //sum all nverts of children
 		bool in_particle(const Point3& point) const;
 		void move_to_particle_surface(Point3& point) const;
 
 		void makeElements(const std::map<long unsigned int, long unsigned int>& reduced_index, std::vector<std::vector<long unsigned int>> &elem2node, std::vector<int> &elemMarkers) const;
-
-		void print_tree(std::ostream& stream) const;
 		void create_point_global_index_maps(std::vector<Point3>& point_map, std::map<long unsigned int, long unsigned int>& reduced_index) const;
-		void print_voxel_idx(std::ostream& stream, const std::map<long unsigned int, long unsigned int>& reduced_index) const;
-		void print_nvert(std::ostream& stream) const;
-		void get_global_vertex_index(long unsigned int (&global_index)[8]) const;		
+		void get_global_vertex_index(long unsigned int (&global_index)[8]) const;
 	};
 
 
@@ -93,9 +88,6 @@ namespace GeoVox::geometry{
 		unsigned int _maxdepth;
 		long unsigned int _nleaves;
 		std::vector<SuperEllipsoid> _particles;
-
-		void print_vtk(std::ostream &stream) const;
-		void save_vtk(const std::string fullfile) const;
 	};
 
 

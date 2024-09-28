@@ -1,5 +1,11 @@
 #include "geometry/assembly.hpp"
 
+double sgn(double x){
+	if (x < 0.0){
+		return -1.0;
+	}
+	return 1.0;
+}
 
 namespace GeoVox::geometry{
 	//NODE (OF OCTREE)
@@ -120,7 +126,7 @@ namespace GeoVox::geometry{
 
 
 				//update nvert
-				long unsigned int temp_vert = 0;
+				int temp_vert = 0;
 				for (int v=0; v<8; v++){
 					if (P.contains(_children[i]->_box[v])){
 						temp_vert += 1;
@@ -141,23 +147,6 @@ namespace GeoVox::geometry{
 		}
 	}
 
-	void Node::print_tree(std::ostream& stream) const{
-		//indent
-		for (unsigned int i=0; i<_depth; i++){
-			stream << "- - - - ";
-		}
-
-		stream << "Node("<<_ID << "): ijk= [" << _ijk[0] << ", " << _ijk[1] << ", " << _ijk[2] << "]\n";
-
-		if (_isdivided){
-			for (int i=0; i<8; i++){
-				_children[i]->print_tree(stream);
-			}
-		}
-	}
-
-
-	
 
 	void Node::get_global_vertex_index(long unsigned int (&global_index)[8]) const{
 		//compute global index
@@ -205,34 +194,6 @@ namespace GeoVox::geometry{
 	}
 
 
-	void Node::print_voxel_idx(std::ostream& stream, const std::map<long unsigned int, long unsigned int>& reduced_index) const{
-		if (_isdivided) {
-			for (int i=0; i<8; i++){
-				_children[i]->print_voxel_idx(stream, reduced_index);
-			}
-		}else{
-			//compute global index
-			long unsigned int global_index[8];
-			get_global_vertex_index(global_index);
-
-			stream << "8 "; //number of vertices
-			for (int i=0; i<8; i++){
-				stream << reduced_index.at(global_index[i]) << " ";
-			}
-			stream << std::endl;
-		}
-	}
-
-	void Node::get_nvert(){
-		if (_isdivided){
-			_nvert = 0;
-			for (int c_idx=0; c_idx<8; c_idx++){
-				_children[c_idx]->get_nvert();
-				_nvert += _children[c_idx]->_nvert;
-			}
-		}
-	}
-
 	void Node::move_to_particle_surface(Point3& point) const{
 		//traverse to leaf that contains point (if it is unique)
 		// or traverse to branch point
@@ -254,7 +215,15 @@ namespace GeoVox::geometry{
 			}
 
 			SuperEllipsoid &P = _root->_particles[_particle_index[min_p_idx]];
-			point = P.closest_point(point);
+			Point3 direction;
+
+			if (P.levelval(point) > P.levelval(_box.center())){
+				direction = point - _box.center();
+			}else{
+				direction = _box.center() - point;
+			}
+			
+			point = P.support(direction);
 			return;
 		}
 
@@ -264,16 +233,6 @@ namespace GeoVox::geometry{
 				_children[c_idx]->move_to_particle_surface(point);
 				return;
 			}
-		}
-	}
-
-	void Node::print_nvert(std::ostream& stream) const{
-		if (_isdivided) {
-			for (int i=0; i<8; i++){
-				_children[i]->print_nvert(stream);
-			}
-		}else{
-			stream << this->_nvert << std::endl;
 		}
 	}
 
@@ -298,103 +257,6 @@ namespace GeoVox::geometry{
 			elemMarkers.push_back(_nvert);
 		}
 	}
-
-
-	// ROOT
-	void Root::print_vtk(std::ostream &stream) const{
-		//ASSEMBLE REDUCED GLOBAL INDICES
-		std::vector<Point3> point_map;
-		std::map<long unsigned int, long unsigned int> reduced_index;
-		create_point_global_index_maps(point_map, reduced_index);
-
-
-		//create string stream for fewer io writes
-		std::stringstream buffer;
-
-		std::cout << "made point map\n";
-
-		//HEADER
-		buffer << "# vtk DataFile Version 2.0\n";
-		buffer << "Octree Structure\n";
-		buffer << "ASCII\n\n";
-
-		//TOPOLOGY
-		buffer << "DATASET UNSTRUCTURED_GRID\n";
-
-		//POINTS
-		buffer << "POINTS " << point_map.size() << " float\n";
-		for (long unsigned int i=0; i<point_map.size(); i++){
-			point_map[i].print(buffer);
-			buffer << std::endl;
-		}
-		buffer << std::endl;
-
-		stream << buffer.rdbuf();
-		buffer.str("");
-
-		std::cout << "wrote points to file\n";
-
-		//VOXELS
-		buffer << "CELLS " << _root->_nleaves << " " << 9*(_root->_nleaves) << std::endl;
-		print_voxel_idx(buffer, reduced_index);
-		buffer << std::endl;
-
-		stream << buffer.rdbuf();
-		buffer.str("");
-
-		std::cout << "wrote voxels to file\n";
-
-		buffer << "CELL_TYPES " << _root->_nleaves << std::endl;
-		for (long unsigned int i=0; i<_nleaves; i++){
-			buffer << "11\n";
-		}
-		buffer << std::endl;
-
-
-		//NVERT DATA
-		buffer << "CELL_DATA " << _root->_nleaves << std::endl;
-		buffer << "SCALARS nvert integer\n";
-		buffer << "LOOKUP_TABLE default\n";
-		print_nvert(buffer);
-		buffer << std::endl;
-
-		stream << buffer.rdbuf();
-		buffer.str("");
-
-		std::cout << "wrote nvert to file\n";
-
-
-		//CONTAINED DATA
-		buffer << "POINT_DATA " << point_map.size() << std::endl;
-		buffer << "SCALARS in_particle integer\n";
-		buffer << "LOOKUP_TABLE default\n";
-		for (long unsigned int i=0; i<point_map.size(); i++){
-			buffer << in_particle(point_map[i]) << std::endl;
-		}
-		buffer << std::endl;
-
-		stream << buffer.rdbuf();
-		buffer.str("");
-
-	}
-
-	void Root::save_vtk(const std::string fullfile) const{
-		std::ofstream voxel_mesh(fullfile);
-
-		if( not voxel_mesh.is_open() )
-		{
-			std::cout << "Couldn't write to " << fullfile << std::endl;
-			voxel_mesh.close();
-			return;
-		}
-
-		print_vtk(voxel_mesh);
-		
-
-		// close file
-		voxel_mesh.close();
-	}
-
 
 	//ASSEMBLY
 	SuperEllipsoid Assembly::operator[](int idx) const{
@@ -514,53 +376,232 @@ namespace GeoVox::geometry{
 
 		//mark points to move to boundary
 		for (long unsigned int e_idx=0; e_idx<mesh.nElems(); e_idx++){
-			if (mesh._elemMarkers[e_idx]>0 && mesh._elemMarkers[e_idx]<8){
-				// std::cout << "changing boundary element " << e_idx << std::endl;
-				
-				if (mesh._elemMarkers[e_idx] <= 3){
-					//most nodes are outside. Move inside nodes to boundary.
-					// for (int n_idx=0; n_idx<8; n_idx++){
-					// 	if (mesh._nodeMarkers[mesh._elem2node[e_idx][n_idx]] == 1){
-					// 		// std::cout << "marking node " << mesh._elem2node[e_idx][n_idx] << " to move\n";
-					// 		mesh._nodeMarkers[mesh._elem2node[e_idx][n_idx]] = 2;
-					// 	}
-					// }
-				}else if (mesh._elemMarkers[e_idx] >=6){
-					//most nodes are inside. Move outside nodes to boundary.
-					for (int n_idx=0; n_idx<8; n_idx++){
-						if (mesh._nodeMarkers[mesh._elem2node[e_idx][n_idx]] == 0){
-							// std::cout << "marking node " << mesh._elem2node[e_idx][n_idx] << " to move\n";
-							mesh._nodeMarkers[mesh._elem2node[e_idx][n_idx]] = 2;
+			if (mesh._vtkID[e_idx] == 11){
+				switch (mesh._elemMarkers[e_idx]){
+				case 6:
+					std::vector<long unsigned int> old_element = mesh._elem2node[e_idx];
+					long unsigned int n1=9;
+					long unsigned int n2=9;
+					for (long unsigned int i=0; i<8; i++){
+						if (mesh._nodeMarkers[old_element[i]] == 0){
+							if (n1==9){
+								n1 = i;
+							}else{
+								n2 = i;
+							}
 						}
 					}
+
+					std::vector<long unsigned int> new_element1;
+					new_element1.resize(6);
+
+					std::vector<long unsigned int> new_element2;
+					new_element2.resize(6);
+					switch (n2-n1){
+					case 1:
+						new_element1[0] = old_element[(n1+0)%8];
+						new_element1[1] = old_element[(n1+2)%8];
+						new_element1[2] = old_element[(n1+4)%8];
+						new_element1[3] = old_element[(n2+0)%8];
+						new_element1[4] = old_element[(n2+2)%8];
+						new_element1[5] = old_element[(n2+4)%8];
+
+						new_element2[0] = old_element[(n1+6)%8];
+						new_element2[1] = old_element[(n1+2)%8];
+						new_element2[2] = old_element[(n1+4)%8];
+						new_element2[3] = old_element[(n2+6)%8];
+						new_element2[4] = old_element[(n2+2)%8];
+						new_element2[5] = old_element[(n2+4)%8];
+						break;
+					case 2:
+						new_element1[0] = old_element[(n1+0)%8];
+						new_element1[1] = old_element[(n1+1)%8];
+						new_element1[2] = old_element[(n1+2)%8];
+						new_element1[3] = old_element[(n2+1)%8];
+						new_element1[4] = old_element[(n2+2)%8];
+						new_element1[5] = old_element[(n2+3)%8];
+
+						new_element2[0] = old_element[(n1+6)%8];
+						new_element2[1] = old_element[(n1+1)%8];
+						new_element2[2] = old_element[(n1+2)%8];
+						new_element2[3] = old_element[(n2+6)%8];
+						new_element2[4] = old_element[(n2+1)%8];
+						new_element2[5] = old_element[(n2+2)%8];
+						break;
+					case 3:
+						new_element1[0] = old_element[(n1+0)%8];
+						new_element1[1] = old_element[(n1+1)%8];
+						new_element1[2] = old_element[(n1+2)%8];
+						new_element1[3] = old_element[(n2+0)%8];
+						new_element1[4] = old_element[(n2+1)%8];
+						new_element1[5] = old_element[(n2+2)%8];
+
+						new_element2[0] = old_element[(n1+6)%8];
+						new_element2[1] = old_element[(n1+1)%8];
+						new_element2[2] = old_element[(n1+2)%8];
+						new_element2[3] = old_element[(n2+6)%8];
+						new_element2[4] = old_element[(n2+1)%8];
+						new_element2[5] = old_element[(n2+2)%8];
+						break;
+					}
+
+
+
+					mesh._elem2node[e_idx] = new_element1;
+					mesh._vtkID[e_idx] = 13;
+					mesh._elemMarkers[e_idx] = 4;
+
+
+					mesh._elem2node.push_back(new_element2);
+					mesh._vtkID.push_back(14);
+					mesh._elemMarkers.push_back(6);
 				}
+				
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+				// // std::cout << mesh._vtkID[e_idx] << std::endl;
+
+				// //split into 6 pyramids
+				// Point3 centroid = 0.5*(mesh._node[mesh._elem2node[e_idx][0]] + mesh._node[mesh._elem2node[e_idx][7]]);
+				
+
+
+				// long unsigned int new_node = mesh.nNodes();
+				// mesh._node.push_back(centroid);
+				// mesh._nodeMarkers.push_back(in_particle(centroid));
+
+				// //convert current element to pyramid (FACE 3-2-0-1)
+				// std::vector<long unsigned int> old_element = mesh._elem2node[e_idx];
+				// std::vector<long unsigned int> new_element;
+
+				// new_element.resize(5);
+				// new_element[0] = old_element[3];
+				// new_element[1] = old_element[2];
+				// new_element[2] = old_element[0];
+				// new_element[3] = old_element[1];
+				// new_element[4] = new_node;
+
+				// mesh._elem2node[e_idx] = new_element;
+				// mesh._vtkID[e_idx] = 14;
+				// mesh._elemMarkers[e_idx] = 0;
+				// for (long unsigned int i=0; i<5; i++){
+				// 	mesh._elemMarkers[e_idx] += mesh._nodeMarkers[new_element[i]];
+				// }
+
+				// // std::cout << "Face 0-1-3-2\n";
+
+				// //FACE 1-0-4-6 
+				// new_element[0] = old_element[1];
+				// new_element[1] = old_element[0];
+				// new_element[2] = old_element[4];
+				// new_element[3] = old_element[6];
+				
+				// mesh._elem2node.push_back(new_element);
+				// mesh._vtkID.push_back(14);
+				// mesh._elemMarkers.push_back(0);
+				// for (long unsigned int i=0; i<5; i++){
+				// 	mesh._elemMarkers[mesh.nElems()-1] += mesh._nodeMarkers[new_element[i]];
+				// }
+
+
+				// // std::cout << "Face 1-0-4-6\n";
+
+				// //FACE 5-4-6-7
+				// new_element[0] = old_element[5];
+				// new_element[1] = old_element[4];
+				// new_element[2] = old_element[6];
+				// new_element[3] = old_element[7];
+
+				// mesh._elem2node.push_back(new_element);
+				// mesh._vtkID.push_back(14);
+				// mesh._elemMarkers.push_back(0);
+				// for (long unsigned int i=0; i<5; i++){
+				// 	mesh._elemMarkers[mesh.nElems()-1] += mesh._nodeMarkers[new_element[i]];
+				// }
+
+				// //FACE 7-6-2-3
+				// new_element[0] = old_element[7];
+				// new_element[1] = old_element[6];
+				// new_element[2] = old_element[2];
+				// new_element[3] = old_element[3];
+
+				// mesh._elem2node.push_back(new_element);
+				// mesh._vtkID.push_back(14);
+				// mesh._elemMarkers.push_back(0);
+				// for (long unsigned int i=0; i<5; i++){
+				// 	mesh._elemMarkers[mesh.nElems()-1] += mesh._nodeMarkers[new_element[i]];
+				// }
+
+				// //FACE 0-2-6-4
+				// new_element[0] = old_element[0];
+				// new_element[1] = old_element[2];
+				// new_element[2] = old_element[6];
+				// new_element[3] = old_element[4];
+
+				// mesh._elem2node.push_back(new_element);
+				// mesh._vtkID.push_back(14);
+				// mesh._elemMarkers.push_back(0);
+				// for (long unsigned int i=0; i<5; i++){
+				// 	mesh._elemMarkers[mesh.nElems()-1] += mesh._nodeMarkers[new_element[i]];
+				// }
+
+				// //FACE 7-3-1-5
+				// new_element[0] = old_element[7];
+				// new_element[1] = old_element[3];
+				// new_element[2] = old_element[1];
+				// new_element[3] = old_element[5];
+
+				// mesh._elem2node.push_back(new_element);
+				// mesh._vtkID.push_back(14);
+				// mesh._elemMarkers.push_back(0);
+				// for (long unsigned int i=0; i<5; i++){
+				// 	mesh._elemMarkers[mesh.nElems()-1] += mesh._nodeMarkers[new_element[i]];
+				// }
+
+				
 
 				//change vtkID from voxel to hexahedron
 				// std::cout << "re-ordering element " << e_idx << " from voxel to hexahedron\n";
-				mesh._vtkID[e_idx] = 12;
+				// mesh._vtkID[e_idx] = 12;
 
 				//re-order nodes
-				long unsigned int temp;
+				// long unsigned int temp;
 
-				temp = mesh._elem2node[e_idx][3];
-				mesh._elem2node[e_idx][3] = mesh._elem2node[e_idx][2];
-				mesh._elem2node[e_idx][2] = temp;
+				// temp = mesh._elem2node[e_idx][3];
+				// mesh._elem2node[e_idx][3] = mesh._elem2node[e_idx][2];
+				// mesh._elem2node[e_idx][2] = temp;
 
-				temp = mesh._elem2node[e_idx][7];
-				mesh._elem2node[e_idx][7] = mesh._elem2node[e_idx][6];
-				mesh._elem2node[e_idx][6] = temp;
+				// temp = mesh._elem2node[e_idx][7];
+				// mesh._elem2node[e_idx][7] = mesh._elem2node[e_idx][6];
+				// mesh._elem2node[e_idx][6] = temp;
 			}
 		}
 
 
 
 		//move points to boundary
-		for (long unsigned int n_idx=0; n_idx<mesh.nNodes(); n_idx++){
-			if (mesh._nodeMarkers[n_idx] == 2){
-				// std::cout << "moving node " << n_idx << std::endl;
-				move_to_particle_surface(mesh._node[n_idx]);
-			}
-		}
+		// for (long unsigned int n_idx=0; n_idx<mesh.nNodes(); n_idx++){
+		// 	if (mesh._nodeMarkers[n_idx] == 2){
+		// 		// std::cout << "moving node " << n_idx << std::endl;
+		// 		move_to_particle_surface(mesh._node[n_idx]);
+		// 	}
+		// }
 
 		return mesh;
 	}
