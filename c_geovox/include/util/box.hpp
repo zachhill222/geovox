@@ -5,8 +5,9 @@
 #include <stdexcept>
 
 
+using Point3 = GeoVox::util::Point<3>;
+
 namespace GeoVox::util{
-	using Point3 = Point<3>;
 	class Box{
 	public:
 		Box(): _low(Point3(0.0, 0.0, 0.0)), _high(Point3(1.0, 1.0, 1.0)) {}

@@ -120,7 +120,7 @@ namespace GeoVox::geometry{
 
 
 				//update nvert
-				int temp_vert = 0;
+				long unsigned int temp_vert = 0;
 				for (int v=0; v<8; v++){
 					if (P.contains(_children[i]->_box[v])){
 						temp_vert += 1;
@@ -223,6 +223,50 @@ namespace GeoVox::geometry{
 		}
 	}
 
+	void Node::get_nvert(){
+		if (_isdivided){
+			_nvert = 0;
+			for (int c_idx=0; c_idx<8; c_idx++){
+				_children[c_idx]->get_nvert();
+				_nvert += _children[c_idx]->_nvert;
+			}
+		}
+	}
+
+	void Node::move_to_particle_surface(Point3& point) const{
+		//traverse to leaf that contains point (if it is unique)
+		// or traverse to branch point
+		// std::cout << _particle_index.size() << std::endl;
+		if (_particle_index.size() == 0){
+			return;
+		}
+
+		if (_particle_index.size() <= 5){
+			// std::cout << "search\n";
+			double min_level_val =  _root->_particles[_particle_index[0]].levelval(point);
+			long unsigned int min_p_idx = 0;
+
+			for (long unsigned int p_idx=1; p_idx < _particle_index.size(); p_idx++){
+				SuperEllipsoid &P = _root->_particles[_particle_index[p_idx]];
+				if (P.levelval(point) < min_level_val){
+					min_p_idx = p_idx;
+				}
+			}
+
+			SuperEllipsoid &P = _root->_particles[_particle_index[min_p_idx]];
+			point = P.closest_point(point);
+			return;
+		}
+
+		// std::cout << "recurse\n";
+		for (int c_idx=0; c_idx<8; c_idx++){
+			if (_children[c_idx]->_box.contains(point)){
+				_children[c_idx]->move_to_particle_surface(point);
+				return;
+			}
+		}
+	}
+
 	void Node::print_nvert(std::ostream& stream) const{
 		if (_isdivided) {
 			for (int i=0; i<8; i++){
@@ -230,6 +274,28 @@ namespace GeoVox::geometry{
 			}
 		}else{
 			stream << this->_nvert << std::endl;
+		}
+	}
+
+	void Node::makeElements(const std::map<long unsigned int, long unsigned int>& reduced_index, std::vector<std::vector<long unsigned int>> &elem2node, std::vector<int> &elemMarkers) const{
+		if (_isdivided){
+			for (int i=0; i<8; i++){
+				_children[i]->makeElements(reduced_index, elem2node, elemMarkers);
+			}
+		}else{
+			long unsigned int global_index[8];
+			get_global_vertex_index(global_index);
+
+			elem2node.push_back({reduced_index.at(global_index[0]),
+								reduced_index.at(global_index[1]), 
+								reduced_index.at(global_index[2]), 
+								reduced_index.at(global_index[3]),
+								reduced_index.at(global_index[4]),
+								reduced_index.at(global_index[5]),
+								reduced_index.at(global_index[6]),
+								reduced_index.at(global_index[7])});
+
+			elemMarkers.push_back(_nvert);
 		}
 	}
 
@@ -411,6 +477,145 @@ namespace GeoVox::geometry{
 
 		_maxdepth = maxdepth;
 		divide();
+	}
+
+
+	Mesh Assembly::make_voxel_mesh() const{
+		//ASSEMBLE REDUCED GLOBAL INDICES
+		std::vector<Point3> points;
+		std::map<long unsigned int, long unsigned int> reduced_index;
+		create_point_global_index_maps(points, reduced_index);
+
+		//MAKE ELEMENTS
+		std::vector<std::vector<long unsigned int>> elem2node;
+		elem2node.reserve(_nleaves);
+
+		std::vector<int> elemMarkers;
+		elemMarkers.reserve(_nleaves);
+
+		makeElements(reduced_index, elem2node, elemMarkers);
+
+		//MAKE NODE MARKERS
+		std::vector<int> nodeMarkers;
+		nodeMarkers.reserve(points.size());
+		for (long unsigned int n=0; n<points.size(); n++){
+			nodeMarkers.push_back(in_particle(points[n]));
+		}
+
+		//MAKE VTK_ID
+		std::vector<unsigned int> vtkID(_nleaves, 11);
+		
+		return Mesh(points, elem2node, vtkID, nodeMarkers, elemMarkers);
+	}
+
+	Mesh Assembly::make_mixed_mesh() const{
+		//get initial mesh
+		Mesh mesh = make_voxel_mesh();
+
+		//mark points to move to boundary
+		for (long unsigned int e_idx=0; e_idx<mesh.nElems(); e_idx++){
+			if (mesh._elemMarkers[e_idx]>0 && mesh._elemMarkers[e_idx]<8){
+				// std::cout << "changing boundary element " << e_idx << std::endl;
+				
+				if (mesh._elemMarkers[e_idx] <= 3){
+					//most nodes are outside. Move inside nodes to boundary.
+					// for (int n_idx=0; n_idx<8; n_idx++){
+					// 	if (mesh._nodeMarkers[mesh._elem2node[e_idx][n_idx]] == 1){
+					// 		// std::cout << "marking node " << mesh._elem2node[e_idx][n_idx] << " to move\n";
+					// 		mesh._nodeMarkers[mesh._elem2node[e_idx][n_idx]] = 2;
+					// 	}
+					// }
+				}else if (mesh._elemMarkers[e_idx] >=6){
+					//most nodes are inside. Move outside nodes to boundary.
+					for (int n_idx=0; n_idx<8; n_idx++){
+						if (mesh._nodeMarkers[mesh._elem2node[e_idx][n_idx]] == 0){
+							// std::cout << "marking node " << mesh._elem2node[e_idx][n_idx] << " to move\n";
+							mesh._nodeMarkers[mesh._elem2node[e_idx][n_idx]] = 2;
+						}
+					}
+				}
+
+				//change vtkID from voxel to hexahedron
+				// std::cout << "re-ordering element " << e_idx << " from voxel to hexahedron\n";
+				mesh._vtkID[e_idx] = 12;
+
+				//re-order nodes
+				long unsigned int temp;
+
+				temp = mesh._elem2node[e_idx][3];
+				mesh._elem2node[e_idx][3] = mesh._elem2node[e_idx][2];
+				mesh._elem2node[e_idx][2] = temp;
+
+				temp = mesh._elem2node[e_idx][7];
+				mesh._elem2node[e_idx][7] = mesh._elem2node[e_idx][6];
+				mesh._elem2node[e_idx][6] = temp;
+			}
+		}
+
+
+
+		//move points to boundary
+		for (long unsigned int n_idx=0; n_idx<mesh.nNodes(); n_idx++){
+			if (mesh._nodeMarkers[n_idx] == 2){
+				// std::cout << "moving node " << n_idx << std::endl;
+				move_to_particle_surface(mesh._node[n_idx]);
+			}
+		}
+
+		return mesh;
+	}
+
+
+	void Assembly::save_geometry(const std::string filename, const Box& box, const int N[3]) const{
+		//////////////// OPEN FILE ////////////////
+		std::ofstream geofile(filename);
+
+		if (not geofile.is_open()){
+			std::cout << "Couldn't write to " << filename << std::endl;
+			geofile.close();
+			return;
+		}
+
+
+		//////////////// WRITE FILE ////////////////
+		std::stringstream buffer;
+
+		//HEADER
+		buffer << "nx= " << N[0] << std::endl;
+		buffer << "ny= " << N[1] << std::endl;
+		buffer << "nz= " << N[2] << std::endl;
+
+
+		//DATA
+		Point3 centroid = Point3(0,0,0);
+		Point3 H = box.high()-box.low();
+		H[0]/=N[0];
+		H[1]/=N[1];
+		H[2]/=N[2];
+
+		for (int k=0; k<N[2]; k++){
+			centroid[2] = box.low()[2] + H[2]*(0.5+k);
+			for (int j=0; j<N[1]; j++){
+				centroid[1] = box.low()[1] + H[1]*(0.5+j);
+				for (int i=0; i<N[0]; i++){
+					centroid[0] = box.low()[0] + H[0]*(0.5+i);
+					buffer << in_particle(centroid) << " ";
+				}
+				buffer << std::endl;
+			}
+			buffer << std::endl;
+
+			geofile << buffer.rdbuf();
+			buffer.str("");
+		}
+
+
+		//////////////// CLOSE FILE ////////////////
+		geofile.close();
+	}
+
+	void Assembly::save_geometry(const std::string filename, const int N[3]) const{
+		save_geometry(filename, _box, N);
 	}
 
 

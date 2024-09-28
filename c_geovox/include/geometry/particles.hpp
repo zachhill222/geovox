@@ -4,9 +4,10 @@
 #include "util/point.hpp"
 #include "util/quaternion.hpp"
 #include "util/box.hpp"
+#include "util/polytope.hpp"
+#include "util/neldermead.hpp"
 
-#include "geometry/polytope.hpp"
-
+#include <functional>
 #include <cmath>
 
 
@@ -14,7 +15,9 @@
 using Point3 = GeoVox::util::Point<3>;
 using Quaternion = GeoVox::util::Quaternion;
 using Box = GeoVox::util::Box;
-using Polytope = GeoVox::geometry::Polytope;
+using Polytope3 = GeoVox::util::Polytope<3>;
+
+typedef double (*NelderMeadFun_t)(GeoVox::util::Point<2>, GeoVox::util::Point<3>);
 
 namespace GeoVox::geometry{
 
@@ -50,7 +53,7 @@ namespace GeoVox::geometry{
 
 		//bounds
 		Box axis_alligned_bbox() const;
-		Polytope bbox() const;
+		Polytope3 bbox() const;
 
 		//shifting
 		SuperEllipsoid* operator+=(const Point3& other);
@@ -73,17 +76,21 @@ namespace GeoVox::geometry{
 
 		//level set evaluation
 		double levelval(const Point3& point) const;
-		Point3 local_levelgrad(const Point3& point) const;
-		Point3 levelgrad(const Point3& point) const;
 		bool contains(const Point3& point) const;
 
 
 		//convex support (point of tangency for a supporting hyperplane with normal unit vector direction)
 		Point3 support(const Point3& direction) const;
 
+		//get closest point on surface to given point
+		Point3 closest_point(const Point3& point) const;
+
 		//parametric coordinats: -pi/2 <= eta <= pi/2 and -pi <= omega <= pi SEE: http://www.cs.bilkent.edu.tr/~gudukbay/cs465/super_quadrics.pdf
 		Point3 parametric(const double eta, const double omega) const; //get point from parametric coordinates
 		Point3 normal_parametric(const double eta, const double omega) const; //get normal vector from parametric coordinates
+
+		double neldermeadfun(GeoVox::util::Point<2> coords,  GeoVox::util::Point<3> localpoint) const;
+	
 
 	private:
 		Point3 _r;
@@ -149,6 +156,7 @@ namespace GeoVox::geometry{
 	double cos_pow(const double theta, const double eps);
 	double sin_pow(const double theta, const double eps);
 }
+
 
 
 

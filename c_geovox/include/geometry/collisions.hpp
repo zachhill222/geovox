@@ -1,7 +1,7 @@
 #ifndef COLLISIONS_H
 #define COLLISIONS_H
 
-#include "geometry/polytope.hpp"
+#include "util/polytope.hpp"
 #include "util/point.hpp"
 #include "util/plane.hpp"
 #include <cfloat> //need DBL_EPSILON
@@ -10,8 +10,7 @@
 
 namespace GeoVox::geometry{
 using Point3 = GeoVox::util::Point<3>;
-using Simplex = GeoVox::geometry::Simplex;
-using Polytope = GeoVox::geometry::Polytope;
+using Polytope3 = GeoVox::util::Polytope<3>;
 using Plane = GeoVox::util::Plane;
 
 
@@ -33,10 +32,10 @@ Point3 support(const SA& S1, const SB& S2, const Point3& direction){
 }
 
 
-bool lineCase(Polytope& simplex, Point3& direction); //LINE CASE
-bool triangleCase(Polytope& simplex, Point3& direction); //TRIANGLE CASE
-bool tetraCase(Polytope& simplex, Point3& direction); //FULL SIMPLEX (TETRAHEDRON) CASE
-bool doSimplex(Polytope& simplex, Point3& direction);
+bool lineCase(Polytope3& simplex, Point3& direction); //LINE CASE
+bool triangleCase(Polytope3& simplex, Point3& direction); //TRIANGLE CASE
+bool tetraCase(Polytope3& simplex, Point3& direction); //FULL SIMPLEX (TETRAHEDRON) CASE
+bool doSimplex(Polytope3& simplex, Point3& direction);
 
 
 
@@ -49,7 +48,7 @@ bool GJK(const SA& S1, const SB& S2){
 	direction = S1.center() - S2.center();
 	A = {support(S1,S2,direction)};
 	
-	Polytope simplex = Polytope({A});
+	Polytope3 simplex = Polytope3({A});
 	direction = -simplex[0];
 
 	//MAIN LOOP

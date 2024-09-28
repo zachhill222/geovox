@@ -1,10 +1,12 @@
 #include "geometry/collisions.hpp"
 
 
+
+
 namespace GeoVox::geometry{
 
 //LINE CASE
-bool lineCase(Polytope& simplex, Point3& direction){
+bool lineCase(Polytope3& simplex, Point3& direction){
 	Point3 &A = simplex[1]; //most recent point
 	Point3 &B = simplex[0];
 
@@ -22,12 +24,12 @@ bool lineCase(Polytope& simplex, Point3& direction){
 		if (direction.norm2() <= DBL_EPSILON){
 			return true;
 		}
-		// simplex = Polytope({B, A}); //no change to simplex
+		// simplex = Polytope3({B, A}); //no change to simplex
 	}
 	else{
 		// std::cout << "AO\n";
 		direction = AO;
-		simplex = Polytope({A});
+		simplex = Polytope3({A});
 	}
 
 
@@ -36,7 +38,7 @@ bool lineCase(Polytope& simplex, Point3& direction){
 
 
 //TRIANGLE CASE
-bool triangleCase(Polytope& simplex, Point3& direction){
+bool triangleCase(Polytope3& simplex, Point3& direction){
 	Point3 &A = simplex[2]; //most recent point
 	Point3 &B = simplex[1];
 	Point3 &C = simplex[0];
@@ -56,7 +58,7 @@ bool triangleCase(Polytope& simplex, Point3& direction){
 		DOT = AC.dot(AO);
 		if (DOT>0.0){
 			direction = AC.cross(AO.cross(AC));
-			simplex = Polytope({C,A});
+			simplex = Polytope3({C,A});
 
 			// std::cout << "REGION 1\n";
 		}
@@ -64,13 +66,13 @@ bool triangleCase(Polytope& simplex, Point3& direction){
 			DOT = AB.dot(AO);
 			if (DOT>0.0){ //STAR
 				direction = AB.cross(AO.cross(AB));
-				simplex = Polytope({B, A});
+				simplex = Polytope3({B, A});
 
 				// std::cout << "REGION 3-\n";
 			}
 			else {
 				direction = AO;
-				simplex = Polytope({A});
+				simplex = Polytope3({A});
 
 				// std::cout << "REGION 2-\n";
 			}
@@ -82,13 +84,13 @@ bool triangleCase(Polytope& simplex, Point3& direction){
 			DOT = AB.dot(AO);
 			if (DOT>0.0){ //STAR
 				direction = AB.cross(AO.cross(AB));
-				simplex = Polytope({B,A});
+				simplex = Polytope3({B,A});
 
 				// std::cout << "REGION 3+\n";
 			}
 			else {
 				direction = AO;
-				simplex = Polytope({A});
+				simplex = Polytope3({A});
 
 				// std::cout << "REGION 2+\n";
 			}
@@ -99,13 +101,13 @@ bool triangleCase(Polytope& simplex, Point3& direction){
 			//above, below, or on triangle
 			if (DOT>DBL_EPSILON ){
 				direction = ABC_normal;
-				// simplex = Polytope({C,B,A}); //no change to simplex
+				// simplex = Polytope3({C,B,A}); //no change to simplex
 
 				// std::cout << "REGION 4\n";
 			}
 			else if (DOT<-DBL_EPSILON){
 				direction = -ABC_normal;
-				simplex = Polytope({B, C, A}); //orientation matters
+				simplex = Polytope3({B, C, A}); //orientation matters
 
 				// std::cout << "REGION 5\n";
 			}
@@ -120,7 +122,7 @@ bool triangleCase(Polytope& simplex, Point3& direction){
 
 
 //FULL SIMPLEX (TETRAHEDRON) CASE
-bool tetraCase(Polytope& simplex, Point3& direction){
+bool tetraCase(Polytope3& simplex, Point3& direction){
 	Point3 &A = simplex[3]; //most recent point
 	Point3 &B = simplex[2];
 	Point3 &C = simplex[1];
@@ -158,15 +160,15 @@ bool tetraCase(Polytope& simplex, Point3& direction){
 
 	if (abc_dist == min_dist){
 		// std::cout << "Plane BCA\n";
-		simplex = Polytope({B, C, A});
+		simplex = Polytope3({B, C, A});
 	}
 	else if(adc_dist == min_dist){
 		// std::cout << "Plane CDA\n";
-		simplex = Polytope({C, D, A});
+		simplex = Polytope3({C, D, A});
 	}
 	else{
 		// std::cout << "Plane DBA\n";
-		simplex = Polytope({D, B, A});
+		simplex = Polytope3({D, B, A});
 	}
 	
 
@@ -175,7 +177,7 @@ bool tetraCase(Polytope& simplex, Point3& direction){
 }
 
 
-bool doSimplex(Polytope& simplex, Point3& direction){
+bool doSimplex(Polytope3& simplex, Point3& direction){
 	//simplex must contain between 2 and 4 points initially
 	//simplex and direction will both be updated for the next iteration
 

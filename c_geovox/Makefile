@@ -10,6 +10,10 @@ UTIL_OBJECTS := $(UTIL_SOURCES:.cpp=.o)
 GEO_SOURCES := $(wildcard src/geometry/*.cpp)
 GEO_OBJECTS := $(GEO_SOURCES:.cpp=.o)
 
+#mesh module
+MESH_SOURCES := $(wildcard src/mesh/*.cpp)
+MESH_OBJECTS := $(MESH_SOURCES:.cpp=.o)
+
 CC        := g++
 CFLAGS    := -O2 -Wall
 
@@ -22,7 +26,7 @@ TARGET    := $(BUILD_DIR)/libcgeovox.a
 ##############################################
 ######### BUILD LIBRARY ######################
 ##############################################
-$(TARGET): $(UTIL_OBJECTS) $(GEO_OBJECTS) | $(BUILD_DIR)
+$(TARGET): $(UTIL_OBJECTS) $(GEO_OBJECTS) $(MESH_OBJECTS) | $(BUILD_DIR)
 	ar rcs $@ $^
 	ranlib $@
 
@@ -55,3 +59,7 @@ clean:
 print:
 	@echo UTIL_SOURCES:= $(UTIL_SOURCES)
 	@echo UTIL_OBJECTS:= $(UTIL_OBJECTS)
+	@echo GEO_SOURCES:= $(GEO_SOURCES)
+	@echo GEO_OBJECTS:= $(GEO_OBJECTS)
+	@echo MESH_SOURCES:= $(MESH_SOURCES)
+	@echo MESH_OBJECTS:= $(MESH_OBJECTS)

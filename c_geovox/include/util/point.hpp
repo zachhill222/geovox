@@ -13,7 +13,11 @@ namespace GeoVox::util{
 		//////////////////////////////////////////////////////////////////
 		////////////////// CONSTRUCTOR AND DESTRUCTOR ////////////////////
 		//////////////////////////////////////////////////////////////////
-		Point(){}
+		Point(){
+			for (long unsigned int i=0; i<size; i++){
+				_data[i] = 0.0;
+			}
+		}
 
 		Point(const double x, const double y){
 			_data[0] = x;
@@ -28,9 +32,9 @@ namespace GeoVox::util{
 
 		//copy constructor
 		Point(const Point& other) {
-			_data[0] = other[0];
-			_data[1] = other[1];
-			_data[2] = other[2];
+			for (long unsigned int i=0; i<size; i++){
+				_data[i] = other[i];
+			}
 		}
 
 		// ~Point(){

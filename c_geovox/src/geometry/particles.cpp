@@ -34,8 +34,8 @@ namespace GeoVox::geometry{
 		return result;
 	}
 
-	Polytope SuperEllipsoid::bbox() const{
-		Polytope box = Polytope(8);
+	Polytope3 SuperEllipsoid::bbox() const{
+		Polytope3 box = Polytope3(8);
 		Box local_box = Box(-_r,_r);
 
 		for (int i=0; i<8; i++){
@@ -128,25 +128,6 @@ namespace GeoVox::geometry{
 		return std::pow(localpoint[0]+localpoint[1], _POWERS[2]) + localpoint[2];
 	}
 
-	// Point3 SuperEllipsoid::levelgrad(const Point3& point) const{
-	// 	return toglobal(local_levelgrad(tolocal(point)));
-	// }
-
-	// Point3 SuperEllipsoid::local_levelgrad(const Point3& point) const{
-	// 	Point3 localpoint = point;
-	// 	localpoint/=_r;
-
-	// 	double val1 = pow(localpoint[0],2.0/_eps1) + pow(localpoint[1],2.0/_eps2);
-	// 	val1 = (2.0/_eps1)*pow(val1, _POWERS[2]-1.0);
-
-	// 	Point3 grad = Point3();
-	// 	grad[0] = val1*pow(localpoint[0],(2.0-_eps2)/_eps2)/_r[0];
-	// 	grad[1] = val1*pow(localpoint[1],(2.0-_eps2)/_eps2)/_r[1];
-	// 	grad[2] = 2.0*pow(localpoint[2],(2.0-_eps1)/_eps1)/(_r[2]*_eps1);
-
-	// 	return grad;
-	// }
-
 	bool SuperEllipsoid::contains(const Point3& point) const{
 		// Box local_box = Box(-_r,_r);
 		// return local_box.contains(tolocal(point));
@@ -197,7 +178,46 @@ namespace GeoVox::geometry{
 		return result;
 	}
 
+	Point3 SuperEllipsoid::closest_point(const Point3& point) const{
+		// Point3 result = support(point-_center);
+		// for (int i=0; i<10; i++){
+		// 	result = support(point - result);
+		// }
 
+		// return result;
+
+		//convert to local coordinates
+		Point3 localpoint = tolocal(point);
+		Point3 d = _Q.rotate(point-_center);
+
+		//get omega
+		double x = sgn(d[0])*pow(fabs(_r[0]*d[0]), _INVPOWERS[1]);
+		double y = sgn(d[1])*pow(fabs(_r[1]*d[1]), _INVPOWERS[1]);
+		double omega = atan2(y, x); //in [-pi,pi]
+
+		//get eta
+		x = pow(fabs(_r[0]*d[0]), _INVPOWERS[0]);
+		y = sgn(d[2]) * pow( fabs( _r[2]*d[2]*cos_pow(omega,2.0-_eps2) ) , _INVPOWERS[0]);
+		double eta = atan2(y, x); //in [-pi/2,pi/2] because x >= 0
+		
+
+		//set up nelder mead
+		GeoVox::util::Simplex<2> simplex;
+		simplex[0] = GeoVox::util::Point<2>(eta, omega);
+		simplex[1] = GeoVox::util::Point<2>(eta+0.1, omega);
+		simplex[2] = GeoVox::util::Point<2>(eta, omega+0.1);
+
+
+		
+		std::function<double(GeoVox::util::Point<2>, GeoVox::util::Point<3>)> myfun = std::bind(&SuperEllipsoid::neldermeadfun, this, std::placeholders::_1, std::placeholders::_2);
+
+		GeoVox::util::Point<2> coords = GeoVox::util::neldermead(myfun, simplex, localpoint);
+		return toglobal(parametric(coords[0], coords[1]));
+	}
+
+	double SuperEllipsoid::neldermeadfun(GeoVox::util::Point<2> coords, Point3 localpoint) const{
+		return (parametric(coords[0], coords[1])-localpoint).norm2();
+	}
 
 
 

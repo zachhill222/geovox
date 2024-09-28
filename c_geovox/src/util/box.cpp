@@ -17,28 +17,28 @@ namespace GeoVox::util{
 	Point3 Box::operator[](const int idx) const{ //GET idx-TH VERTEX IN VTK-VOXEL ORDERING 
 		switch(idx){
 		case 0:
-			return GeoVox::util::Point3(_low[0],  _low[1],  _low[2]);
+			return Point3(_low[0],  _low[1],  _low[2]);
 			break;
 		case 1:
-			return GeoVox::util::Point3(_high[0], _low[1],  _low[2]);
+			return Point3(_high[0], _low[1],  _low[2]);
 			break;
 		case 2:
-			return GeoVox::util::Point3(_low[0],  _high[1], _low[2]);
+			return Point3(_low[0],  _high[1], _low[2]);
 			break;
 		case 3:
-			return GeoVox::util::Point3(_high[0], _high[1], _low[2]);
+			return Point3(_high[0], _high[1], _low[2]);
 			break;
 		case 4:
-			return GeoVox::util::Point3(_low[0],  _low[1],  _high[2]);
+			return Point3(_low[0],  _low[1],  _high[2]);
 			break;
 		case 5:
-			return GeoVox::util::Point3(_high[0], _low[1],  _high[2]);
+			return Point3(_high[0], _low[1],  _high[2]);
 			break;
 		case 6:
-			return GeoVox::util::Point3(_low[0],  _high[1], _high[2]);
+			return Point3(_low[0],  _high[1], _high[2]);
 			break;
 		case 7:
-			return GeoVox::util::Point3(_high[0], _high[1], _high[2]);
+			return Point3(_high[0], _high[1], _high[2]);
 			break;	
 		}
 		std::out_of_range("Box: vertex index must be from 0 to 7");

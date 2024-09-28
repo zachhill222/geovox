@@ -8,6 +8,8 @@
 #include "geometry/particles.hpp"
 #include "geometry/collisions.hpp"
 
+#include "mesh/mesh.hpp"
+
 #include <vector>
 #include <map>
 #include <initializer_list>
@@ -21,6 +23,7 @@
 using SuperEllipsoid = GeoVox::geometry::SuperEllipsoid;
 using Point3 = GeoVox::util::Point<3>;
 using Box = GeoVox::util::Box;
+using Mesh = GeoVox::mesh::Mesh;
 
 namespace GeoVox::geometry{
 	class Node;
@@ -52,7 +55,7 @@ namespace GeoVox::geometry{
 		long unsigned int _ID; //PARENT_ID*8 + CHILD_ID + 1
 		unsigned int _ijk[3]; //ijk indices of current voxel at _depth
 		
-		int _nvert; //maximum number of vertices contained by a SINGLE particle
+		long unsigned int _nvert; //maximum number of vertices contained by a SINGLE particle (leaves only)
 
 		std::vector<long unsigned int> _particle_index;
 		Box _box;
@@ -61,7 +64,11 @@ namespace GeoVox::geometry{
 		Node* _children[8];
 
 		void divide();
+		void get_nvert(); //sum all nverts of children
 		bool in_particle(const Point3& point) const;
+		void move_to_particle_surface(Point3& point) const;
+
+		void makeElements(const std::map<long unsigned int, long unsigned int>& reduced_index, std::vector<std::vector<long unsigned int>> &elem2node, std::vector<int> &elemMarkers) const;
 
 		void print_tree(std::ostream& stream) const;
 		void create_point_global_index_maps(std::vector<Point3>& point_map, std::map<long unsigned int, long unsigned int>& reduced_index) const;
@@ -106,6 +113,13 @@ namespace GeoVox::geometry{
 		void print(std::ostream &stream) const;
 		// void print_tree(std::ostream &stream) const;
 		void make_tree(int maxdepth);
+
+		Mesh make_voxel_mesh() const; //turn octree into a voxel mesh
+		Mesh make_mixed_mesh() const; //turn octree into a mesh with voxels and hexahedrons. Points near the boundary of a particle are moved to the boundary.
+
+		void save_geometry(const std::string filename, const Box& box, const int N[3]) const;
+		void save_geometry(const std::string filename, const int N[3]) const;
+
 
 	private:
 		void _setbbox();
