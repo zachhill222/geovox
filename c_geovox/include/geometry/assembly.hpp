@@ -8,6 +8,8 @@
 #include "geometry/particles.hpp"
 #include "geometry/collisions.hpp"
 
+#include "mesh/vtk_linear.hpp"
+#include "mesh/vtk_convex_cell.hpp"
 #include "mesh/mesh.hpp"
 
 #include <vector>
@@ -24,6 +26,7 @@ using SuperEllipsoid = GeoVox::geometry::SuperEllipsoid;
 using Point3 = GeoVox::util::Point<3>;
 using Box = GeoVox::util::Box;
 using Mesh = GeoVox::mesh::Mesh;
+using Vertex = GeoVox::mesh::Vertex;
 
 namespace GeoVox::geometry{
 	class Node;
@@ -63,12 +66,18 @@ namespace GeoVox::geometry{
 		bool _isdivided;
 		Node* _children[8];
 
+		Node* findnode(const unsigned int depth, const Point3& point); //find the node at the given depth that contains the specified point. Return NULL if there is no such node.
+		Node* findleaf(const Point3& point);
+
 		void divide();
+		void make_children();
+		bool is_gradiated();
+
 		bool in_particle(const Point3& point) const;
 		void move_to_particle_surface(Point3& point) const;
 
 		void makeElements(const std::map<long unsigned int, long unsigned int>& reduced_index, std::vector<std::vector<long unsigned int>> &elem2node, std::vector<int> &elemMarkers) const;
-		void create_point_global_index_maps(std::vector<Point3>& point_map, std::map<long unsigned int, long unsigned int>& reduced_index) const;
+		void create_point_global_index_maps(std::vector<Vertex>& points, std::map<long unsigned int, long unsigned int>& reduced_index) const;
 		void get_global_vertex_index(long unsigned int (&global_index)[8]) const;
 	};
 
@@ -84,6 +93,8 @@ namespace GeoVox::geometry{
 			_root    = this;
 		}
 
+
+		void gradiate(); //ensure depth changes by at most one between neighbors
 
 		unsigned int _maxdepth;
 		long unsigned int _nleaves;
