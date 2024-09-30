@@ -16,11 +16,11 @@ int test_assembly(){
 	// A.print(std::cout);
 
 	std::cout << "BUILDING TREE\n";
-	A.make_tree(7);
+	A.make_tree(6);
 
 	std::cout << "SAVING GEOMETRY\n";
 	int N[3] {50, 50, 50};
-	A.save_geometry("Geometry.dat", 0.875*A._box, N);
+	A.save_geometry("Geometry.dat", 0.875*A.box, N);
 
 	// std::cout << "MAKING MIXED MESH\n";
 	// Mesh M = A.make_mixed_mesh();

@@ -1,9 +1,9 @@
 #ifndef ASSEMBLY_H
 #define ASSEMBLY_H
 
-#include "util/quaternion.hpp"
 #include "util/point.hpp"
 #include "util/box.hpp"
+#include "util/octree.hpp"
 
 #include "geometry/particles.hpp"
 #include "geometry/collisions.hpp"
@@ -29,89 +29,48 @@ using Mesh = GeoVox::mesh::Mesh;
 using Vertex = GeoVox::mesh::Vertex;
 
 namespace GeoVox::geometry{
-	class Node;
-	class Root;
+	class AssemblyNode;
 	class Assembly;
+	using OctreeNode = GeoVox::util::OctreeNode<Assembly, AssemblyNode>;
 
-
-	class Node{
+	class AssemblyNode : public OctreeNode{
 	public:
-		Node(const int depth) : _root(NULL), _parent(NULL), _depth(depth), _ID(0), _nvert(0), _isdivided(false) {}
+		AssemblyNode() : OctreeNode(), _nvert(0) {}
+
+		AssemblyNode(const Box& box, const long unsigned int ID, unsigned int (&ijk)[3], unsigned int depth, Assembly* root) : 
+			OctreeNode(box, ID, ijk, depth, root), _nvert(0) {}
 		
-		Node(const Point3& low, const Point3& high): _root(NULL), _parent(NULL), _nvert(0), _box(Box(low, high)), _isdivided(false) {}
-
-		~Node(){
-			if (_isdivided){
-				for (int i=0; i<8; i++){
-					delete _children[i];
-				}
-			}
-		}
-
-
-		// void insert_particle(const long unsigned int idx, const SuperEllipsoid& P);
-
-		Root* _root;
-		Node* _parent;
-		unsigned int _depth;
-		
-		long unsigned int _ID; //PARENT_ID*8 + CHILD_ID + 1
-		unsigned int _ijk[3]; //ijk indices of current voxel at _depth
-		
-		int _nvert; //maximum number of vertices contained by a SINGLE particle (leaves only)
-
-		std::vector<long unsigned int> _particle_index;
-		Box _box;
-		
-		bool _isdivided;
-		Node* _children[8];
-
-		Node* findnode(const unsigned int depth, const Point3& point); //find the node at the given depth that contains the specified point. Return NULL if there is no such node.
-		Node* findleaf(const Point3& point);
-
-		void divide();
 		void make_children();
 		bool is_gradiated();
-
 		bool in_particle(const Point3& point) const;
-		void move_to_particle_surface(Point3& point) const;
 
+		void divide();
+		int _nvert; //maximum number of vertices contained by a SINGLE particle (leaves only)
+	protected:
+		
+		std::vector<long unsigned int> _particle_index;
+		
 		void makeElements(const std::map<long unsigned int, long unsigned int>& reduced_index, std::vector<std::vector<long unsigned int>> &elem2node, std::vector<int> &elemMarkers) const;
 		void create_point_global_index_maps(std::vector<Vertex>& points, std::map<long unsigned int, long unsigned int>& reduced_index) const;
-		void get_global_vertex_index(long unsigned int (&global_index)[8]) const;
 	};
 
 
-	class Root : public Node {
+	class Assembly : public AssemblyNode {
 	public:
-		Root(const int maxdepth=0, const Box box=Box(Point3(0,0,0), Point3(1,1,1))) : Node(0), _maxdepth(maxdepth) {
-			_ijk[0] = 0;
-			_ijk[1] = 0;
-			_ijk[2] = 0;
-
-			_nleaves = 1;
-			_root    = this;
+		Assembly() : AssemblyNode(), _maxdepth(5), _nleaves(1) {
+			_root = this;
 		}
 
-
-		void gradiate(); //ensure depth changes by at most one between neighbors
-
-		unsigned int _maxdepth;
-		long unsigned int _nleaves;
-		std::vector<SuperEllipsoid> _particles;
-	};
-
-
-	class Assembly : public Root {
-	public:
-		Assembly() : Root(0) {};
-
-		Assembly(const std::string particle_file) : Root(0) {
+		Assembly(const std::string particle_file) : AssemblyNode(), _maxdepth(5), _nleaves(1) {
+			_root = this;
 			readfile(particle_file);
 		}
 
-		SuperEllipsoid operator[](int idx) const;
-		SuperEllipsoid& operator[](int idx);
+		unsigned int _maxdepth;
+		long unsigned int _nleaves;
+
+		void gradiate(); //ensure depth changes by at most one between neighbors
+
 		void readfile(const std::string fullfile);
 		void print(std::ostream &stream) const;
 		// void print_tree(std::ostream &stream) const;
@@ -123,8 +82,8 @@ namespace GeoVox::geometry{
 		void save_geometry(const std::string filename, const Box& box, const int N[3]) const;
 		void save_geometry(const std::string filename, const int N[3]) const;
 
+		std::vector<SuperEllipsoid> _particles;
 
-	private:
 		void _setbbox();
 	};
 

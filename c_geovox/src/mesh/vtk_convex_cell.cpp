@@ -161,6 +161,6 @@ namespace GeoVox::mesh{
 				
 			break;
 		}
-
+	return std::vector<long unsigned int> {};
 	}
 }
