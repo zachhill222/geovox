@@ -200,7 +200,7 @@ namespace GeoVox::geometry{
 	}
 
 
-	void AssemblyNode::create_point_global_index_maps(std::vector<Vertex>& points, std::map<long unsigned int, long unsigned int>& reduced_index) const{
+	void AssemblyNode::create_point_global_index_maps(std::vector<Point3>& points, std::map<long unsigned int, long unsigned int>& reduced_index) const{
 		if (_isdivided){
 			for (int c_idx=0; c_idx<8; c_idx++){
 				// std::cout << "recurse from " << _ID << " to " << _children[i]->_ID << std::endl;
@@ -218,7 +218,7 @@ namespace GeoVox::geometry{
 				if (!reduced_index.count(global_index[i])){
 
 					// std::cout << "Added global_index " << global_index[i] << " with reduced_index " << reduced_index.size() << std::endl;
-					points.push_back(Vertex(box[i])); //important that this is VTK_VOXEL ordering
+					points.push_back(box[i]); //important that this is VTK_VOXEL ordering
 					reduced_index[global_index[i]] = reduced_index.size();
 				}
 			}
@@ -439,10 +439,24 @@ namespace GeoVox::geometry{
 
 	Mesh Assembly::make_voxel_mesh() const{
 		//ASSEMBLE REDUCED GLOBAL INDICES
-		std::vector<Vertex> points;
+		std::vector<Point3> points;
 		std::map<long unsigned int, long unsigned int> reduced_index;
 		std::cout << "making point index\n";
 		create_point_global_index_maps(points, reduced_index);
+
+		std::cout << "putting points into a new octree\n";
+		GeoVox::mesh::MeshNode meshnodes(points);
+
+		// for (long unsigned int i=0; i<points.size(); i++){
+		// 	std::cout << "Point " << i << " Point3(";
+		// 	points[i].print(std::cout);
+			
+		// 	long unsigned int new_idx = meshnodes.find(points[i]);
+		// 	std::cout << ") -> " << new_idx << " Point3(" ;
+		// 	meshnodes[new_idx].print(std::cout);
+		// 	std::cout << ") : difference: " << (points[i]-meshnodes[new_idx]).norm() << std::endl;
+		// }
+
 
 		//MAKE ELEMENTS
 		std::vector<std::vector<long unsigned int>> elem2node;
@@ -458,7 +472,7 @@ namespace GeoVox::geometry{
 		std::vector<int> nodeMarkers;
 		nodeMarkers.reserve(points.size());
 		for (long unsigned int n=0; n<points.size(); n++){
-			nodeMarkers.push_back(in_particle(points[n].topoint()));
+			nodeMarkers.push_back(in_particle(points[n]));
 		}
 
 		//MAKE VTK_ID

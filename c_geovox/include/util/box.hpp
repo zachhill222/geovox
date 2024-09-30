@@ -52,6 +52,7 @@ namespace GeoVox::util{
 		/////// CONTAINMENT AND INTERSECTION //////////
 		///////////////////////////////////////////////
 		bool contains(const Point3& point) const; //check if point is in box
+		bool contains_strict(const Point3& point) const; //check if point is in interior of the box
 		bool contains(const Box& other) const; //check if this box contains the entire other box
 		bool intersects(const Box& other) const; //check if this box intersects the other box
 		Point3 support(const Point3& direction) const;

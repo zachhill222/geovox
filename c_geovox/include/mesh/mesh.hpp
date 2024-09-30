@@ -3,6 +3,8 @@
 
 #include "util/point.hpp"
 #include "util/box.hpp"
+
+// #include "mesh/nodes.hpp"
 #include "mesh/vtk_linear.hpp"
 
 #include <vector>
@@ -18,7 +20,6 @@
 
 using Point3 = GeoVox::util::Point<3>;
 using Box = GeoVox::util::Box;
-using Vertex = GeoVox::mesh::Vertex;
 
 
 namespace GeoVox::mesh{
@@ -31,15 +32,15 @@ namespace GeoVox::mesh{
 			_node2elem.reserve(nNodes);
 		}
 
-		Mesh(const std::vector<Vertex> &node, const std::vector<std::vector<long unsigned int>> &elem2node, const std::vector<unsigned int> &vtkElemID): _node(node), _elem2node(elem2node), _vtkElemID(vtkElemID) {
+		Mesh(const std::vector<Point3> &node, const std::vector<std::vector<long unsigned int>> &elem2node, const std::vector<unsigned int> &vtkElemID): _node(node), _elem2node(elem2node), _vtkElemID(vtkElemID) {
 			make_node2elem();
 		}
 
-		// Mesh(const Mesh& other): _node(other._node), _elem2node(other._elem2node), _node2elem(other._node2elem), _vtkElemID(other._vtkElemID), 
-		// 							_face2node(other._face2node), _vtkFaceID(other._vtkFaceID),
-		// 								_nodeMarkers(other._nodeMarkers), _elemMarkers(other._elemMarkers) {}
+		Mesh(const Mesh& other): _node(other._node), _elem2node(other._elem2node), _node2elem(other._node2elem), _vtkElemID(other._vtkElemID), 
+									_face2node(other._face2node), _vtkFaceID(other._vtkFaceID),
+										_nodeMarkers(other._nodeMarkers), _elemMarkers(other._elemMarkers) {}
 
-		Mesh(const std::vector<Vertex> &node,
+		Mesh(const std::vector<Point3> &node,
 				const std::vector<std::vector<long unsigned int>> &elem2node,
 				const std::vector<unsigned int> &vtkElemID,
 				const std::vector<int> &nodeMarkers,
@@ -64,7 +65,7 @@ namespace GeoVox::mesh{
 		Mesh extract_boundary_mesh();
 
 		//essential data
-		std::vector<Vertex> _node; //point locations for each node
+		std::vector<Point3> _node; //point locations for each node
 		std::vector<std::vector<long unsigned int>> _elem2node; //could be slow, but will allow different types of elements in the same mesh
 		std::vector<std::vector<long unsigned int>> _node2elem;
 		std::vector<unsigned int> _vtkElemID; //element type

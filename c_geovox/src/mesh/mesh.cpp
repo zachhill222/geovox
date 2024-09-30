@@ -72,10 +72,7 @@ namespace GeoVox::mesh{
 					
 					//check if face center is a hanging node and skip
 					bool isHanging = false;
-					Vertex center = Vertex(0.25*(_node[element[0]].topoint()
-										+_node[element[1]].topoint()
-										+_node[element[2]].topoint()
-										+_node[element[3]].topoint()));
+					Point3 center = 0.25*(_node[element[0]]	+ _node[element[1]] + _node[element[2]] + _node[element[3]]);
 
 					for (long unsigned int n_idx=0; n_idx<nNodes(); n_idx++){
 						if (_node[n_idx]==center){
@@ -119,10 +116,10 @@ namespace GeoVox::mesh{
 				//check if face has a hanging node
 				Point3 center_point = Point3(0.0, 0.0, 0.0);
 				for (long unsigned int n_idx=0; n_idx<temp_face2node[f_idx].size(); n_idx++){
-					center_point += _node[temp_face2node[f_idx][n_idx]].topoint();
+					center_point += _node[temp_face2node[f_idx][n_idx]];
 				}
 
-				Vertex center(center_point/temp_face2node.size());
+				Point3 center = center_point/temp_face2node.size();
 
 				//loop through _node to see if center is contained
 				bool isHanging = false;
@@ -151,7 +148,7 @@ namespace GeoVox::mesh{
 			std::cout << "The mesh is empty. Did not write to " << filename << std::endl;
 			return;
 		}
-
+		
 
 		//////////////// OPEN FILE ////////////////
 		std::ofstream meshfile(filename);
@@ -174,7 +171,7 @@ namespace GeoVox::mesh{
 		//POINTS
 		buffer << "POINTS " << nNodes() << " float\n";
 		for (long unsigned int n_idx=0; n_idx<nNodes(); n_idx++){
-			_node[n_idx].topoint().print(buffer);
+			_node[n_idx].print(buffer);
 			buffer << std::endl;
 		}
 		buffer << std::endl;
@@ -353,8 +350,8 @@ namespace GeoVox::mesh{
 		Point3 high;
 
 		for (long unsigned int n_idx=0; n_idx<nNodes(); n_idx++){
-			low = GeoVox::util::el_min(low, _node[n_idx].topoint());
-			high = GeoVox::util::el_max(high, _node[n_idx].topoint());
+			low = GeoVox::util::el_min(low, _node[n_idx]);
+			high = GeoVox::util::el_max(high, _node[n_idx]);
 		}
 
 		return Box(low, high);

@@ -11,6 +11,7 @@
 #include "mesh/vtk_linear.hpp"
 #include "mesh/vtk_convex_cell.hpp"
 #include "mesh/mesh.hpp"
+#include "mesh/nodes.hpp"
 
 #include <vector>
 #include <map>
@@ -51,7 +52,7 @@ namespace GeoVox::geometry{
 		std::vector<long unsigned int> _particle_index;
 		
 		void makeElements(const std::map<long unsigned int, long unsigned int>& reduced_index, std::vector<std::vector<long unsigned int>> &elem2node, std::vector<int> &elemMarkers) const;
-		void create_point_global_index_maps(std::vector<Vertex>& points, std::map<long unsigned int, long unsigned int>& reduced_index) const;
+		void create_point_global_index_maps(std::vector<Point3>& points, std::map<long unsigned int, long unsigned int>& reduced_index) const;
 	};
 
 

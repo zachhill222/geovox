@@ -104,6 +104,14 @@ namespace GeoVox::util{
 		}
 	}
 
+	bool Box::contains_strict(const Point3& point) const{
+		if (_low < point && point < _high){
+			return true;
+		}else{
+			return false;
+		}
+	}
+
 	bool Box::intersects(const Box& other) const{ //return true if this box contains any vertex of the other box
 		for (int i=0; i<8; i++){
 			if (this->contains(other[i])){
