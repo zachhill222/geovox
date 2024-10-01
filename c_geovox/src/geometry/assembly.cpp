@@ -8,66 +8,80 @@ double sgn(double x){
 }
 
 namespace GeoVox::geometry{
-	void AssemblyNode::insert_particle(const SuperEllipsoid P){
-		// std::cout << "insert_particle\n";
-		std::cout << _isdivided << std::endl;
-		if (_isdivided){
-			// std::cout << "divided\n";
-			for (int c_idx=0; c_idx<8; c_idx++){
-				//coarse check if particle collides with child
-				if (!GeoVox::geometry::GJK(_children[c_idx]->box, P.bbox())){
-					continue;
-				}
-
-				//fine check if particle collides with child
-				if (!GeoVox::geometry::GJK(_children[c_idx]->box, P)){
-					continue;
-				}
-
-				_children[c_idx]->insert_particle(P);
-				return;
-			}
-		}else{
-			if (local_particles.size() >= _root->max_particles_per_node){
-				// std::cout << "ID= " << ID << " local_particles.size()= " << local_particles.size() << std::endl;
-				new_make_children();
-				// std::cout << "ID= " << ID << " local_particles.size()= " << local_particles.size() << std::endl;
-				for (int c_idx=0; c_idx<8; c_idx++){
-					// std::cout << "child " << c_idx << std::endl;
-					_children[c_idx]->insert_particle(P);
-				}
-				return;
-			}else{
-				// std::cout << "inserted particle\n";
-				local_particles.push_back(P);
-				std::cout << ID << ": " << local_particles.size() << std::endl;
-				int temp_nvert = 0;
-				for (int v_idx=0; v_idx<8; v_idx++){
-					if (P.contains(box[v_idx])){
-						temp_nvert+=1;
-					}
-				}
-				_nvert = std::max(_nvert, temp_nvert);
-				return;
-			}
+	bool AssemblyNode::data_valid(const SuperEllipsoid& P) const{
+		//coarse check if particle collides with child
+		if (!GeoVox::geometry::GJK(box, P.bbox())){
+			return false;
 		}
+
+		//fine check if particle collides with child
+		if (!GeoVox::geometry::GJK(box, P)){
+			return false;
+		}
+
+		return true;
 	}
 
+	// void AssemblyNode::insert_particle(const SuperEllipsoid P){
+	// 	// std::cout << "insert_particle\n";
+	// 	std::cout << _isdivided << std::endl;
+	// 	if (_isdivided){
+	// 		// std::cout << "divided\n";
+	// 		for (int c_idx=0; c_idx<8; c_idx++){
+	// 			//coarse check if particle collides with child
+	// 			if (!GeoVox::geometry::GJK(_children[c_idx]->box, P.bbox())){
+	// 				continue;
+	// 			}
 
-	void AssemblyNode::new_make_children(){
-		// std::cout << "new_make_children\n";
-		if (_depth >= _root->_maxdepth){
-			return;
-		}
+	// 			//fine check if particle collides with child
+	// 			if (!GeoVox::geometry::GJK(_children[c_idx]->box, P)){
+	// 				continue;
+	// 			}
 
-		OctreeNode::make_children();
-		// std::cout << "AssemblyNode::make_children: _isdivided= " << _isdivided << std::endl;
-		for (long unsigned int p_idx=0; p_idx<local_particles.size(); p_idx++){
-			insert_particle(local_particles[p_idx]);
-		}
+	// 			_children[c_idx]->insert_particle(P);
+	// 			return;
+	// 		}
+	// 	}else{
+	// 		if (local_particles.size() >= _root->max_particles_per_node){
+	// 			// std::cout << "ID= " << ID << " local_particles.size()= " << local_particles.size() << std::endl;
+	// 			new_make_children();
+	// 			// std::cout << "ID= " << ID << " local_particles.size()= " << local_particles.size() << std::endl;
+	// 			for (int c_idx=0; c_idx<8; c_idx++){
+	// 				// std::cout << "child " << c_idx << std::endl;
+	// 				_children[c_idx]->insert_particle(P);
+	// 			}
+	// 			return;
+	// 		}else{
+	// 			// std::cout << "inserted particle\n";
+	// 			local_particles.push_back(P);
+	// 			std::cout << ID << ": " << local_particles.size() << std::endl;
+	// 			int temp_nvert = 0;
+	// 			for (int v_idx=0; v_idx<8; v_idx++){
+	// 				if (P.contains(box[v_idx])){
+	// 					temp_nvert+=1;
+	// 				}
+	// 			}
+	// 			_nvert = std::max(_nvert, temp_nvert);
+	// 			return;
+	// 		}
+	// 	}
+	// }
 
-		local_particles.clear();
-	}
+
+	// void AssemblyNode::new_make_children(){
+	// 	// std::cout << "new_make_children\n";
+	// 	if (_depth >= _root->_maxdepth){
+	// 		return;
+	// 	}
+
+	// 	OctreeNode::make_children();
+	// 	// std::cout << "AssemblyNode::make_children: _isdivided= " << _isdivided << std::endl;
+	// 	for (long unsigned int p_idx=0; p_idx<local_particles.size(); p_idx++){
+	// 		insert_particle(local_particles[p_idx]);
+	// 	}
+
+	// 	local_particles.clear();
+	// }
 
 
 	bool AssemblyNode::in_particle(const Point3& point) const{
@@ -90,8 +104,8 @@ namespace GeoVox::geometry{
 		// return false;
 		// std::cout << "in_particle\n";
 		AssemblyNode const* leaf = findleaf_const(point);
-		for (long unsigned int p_idx=0; p_idx<leaf->local_particles.size(); p_idx++){
-			if (local_particles[p_idx].contains(point)){
+		for (long unsigned int p_idx=0; p_idx<leaf->_data.size(); p_idx++){
+			if (_data[p_idx].contains(point)){
 				return true;
 			}
 		}
@@ -140,134 +154,134 @@ namespace GeoVox::geometry{
 	// 	}
 	// }
 
-	void AssemblyNode::divide(){
-		//TRAVERSE TO LEAF
-		if (_isdivided){
-			for (int c_idx=0; c_idx<8; c_idx++){
-				std::cout << "child " << c_idx << std::endl;
-				_children[c_idx]->divide();
-			}
-			return;
-		}
+	// void AssemblyNode::divide(){
+	// 	//TRAVERSE TO LEAF
+	// 	if (_isdivided){
+	// 		for (int c_idx=0; c_idx<8; c_idx++){
+	// 			std::cout << "child " << c_idx << std::endl;
+	// 			_children[c_idx]->divide();
+	// 		}
+	// 		return;
+	// 	}
 
-		//ONLY DIVIDE IF THERE ARE PARTICLES
-		if (_particle_index.size() == 0){
-			return;
-		}
+	// 	//ONLY DIVIDE IF THERE ARE PARTICLES
+	// 	if (_particle_index.size() == 0){
+	// 		return;
+	// 	}
 
-		//PARTICLES ARE CONVEX, ALL CHILDREN WOULD HAVE _nvert=8
-		if (_nvert == 8){
-			return;
-		}
+	// 	//PARTICLES ARE CONVEX, ALL CHILDREN WOULD HAVE _nvert=8
+	// 	if (_nvert == 8){
+	// 		return;
+	// 	}
 
-		//RESPECT _maxdepth
-		if (_depth >= _root->_maxdepth){
-			return;
-		}
+	// 	//RESPECT _maxdepth
+	// 	if (_depth >= _root->_maxdepth){
+	// 		return;
+	// 	}
 
-		//DIVIDE
-		AssemblyNode::make_children();
+	// 	//DIVIDE
+	// 	AssemblyNode::make_children();
 
-		//CONTINUE TO CHILDERN
-		if (_depth+1 < _root->_maxdepth){
-			for (int c_idx=0; c_idx<8; c_idx++){
-				_children[c_idx]->divide();
-			}
-		}
-	}
+	// 	//CONTINUE TO CHILDERN
+	// 	if (_depth+1 < _root->_maxdepth){
+	// 		for (int c_idx=0; c_idx<8; c_idx++){
+	// 			_children[c_idx]->divide();
+	// 		}
+	// 	}
+	// }
 
-	bool AssemblyNode::is_gradiated(){
-		if (_isdivided){
-			bool result = true;
-			for (int c_idx=0; c_idx<8; c_idx++){
-				result = result && _children[c_idx]->is_gradiated();
-			}
-			return result;
-		}
+	// bool AssemblyNode::is_gradiated(){
+	// 	if (_isdivided){
+	// 		bool result = true;
+	// 		for (int c_idx=0; c_idx<8; c_idx++){
+	// 			result = result && _children[c_idx]->is_gradiated();
+	// 		}
+	// 		return result;
+	// 	}
 
-		bool result = true;
-		Point3 H = box.high() - box.low();
-		Point3 neighbor_center;
-		AssemblyNode* neighbor;
+	// 	bool result = true;
+	// 	Point3 H = box.high() - box.low();
+	// 	Point3 neighbor_center;
+	// 	AssemblyNode* neighbor;
 
-		neighbor_center = box.center() + Point3(-H[0], 0, 0);
-		neighbor = _root->findleaf(neighbor_center);
-		if (neighbor!=NULL){
-			if (neighbor->_depth > this->_depth+1){
-				this->make_children();
-				result = this->is_gradiated();
-			}else if (this->_depth > neighbor->_depth+1){
-				neighbor->make_children();
-				result = neighbor->is_gradiated();
-			}
-		}
+	// 	neighbor_center = box.center() + Point3(-H[0], 0, 0);
+	// 	neighbor = _root->findleaf(neighbor_center);
+	// 	if (neighbor!=NULL){
+	// 		if (neighbor->_depth > this->_depth+1){
+	// 			this->make_children();
+	// 			result = this->is_gradiated();
+	// 		}else if (this->_depth > neighbor->_depth+1){
+	// 			neighbor->make_children();
+	// 			result = neighbor->is_gradiated();
+	// 		}
+	// 	}
 
-		neighbor_center = box.center() + Point3(H[0], 0, 0);
-		neighbor = _root->findleaf(neighbor_center);
-		if (neighbor!=NULL){
-			if (neighbor->_depth > this->_depth+1){
-				this->make_children();
-				result = this->is_gradiated();
-			}else if (this->_depth > neighbor->_depth+1){
-				neighbor->make_children();
-				result = neighbor->is_gradiated();
-			}
-		}
-
-
-		neighbor_center = box.center() + Point3(0, -H[1], 0);
-		neighbor = _root->findleaf(neighbor_center);
-		if (neighbor!=NULL){
-			if (neighbor->_depth > this->_depth+1){
-				this->make_children();
-				result = this->is_gradiated();
-			}else if (this->_depth > neighbor->_depth+1){
-				neighbor->make_children();
-				result = neighbor->is_gradiated();
-			}
-		}
+	// 	neighbor_center = box.center() + Point3(H[0], 0, 0);
+	// 	neighbor = _root->findleaf(neighbor_center);
+	// 	if (neighbor!=NULL){
+	// 		if (neighbor->_depth > this->_depth+1){
+	// 			this->make_children();
+	// 			result = this->is_gradiated();
+	// 		}else if (this->_depth > neighbor->_depth+1){
+	// 			neighbor->make_children();
+	// 			result = neighbor->is_gradiated();
+	// 		}
+	// 	}
 
 
-		neighbor_center = box.center() + Point3(0, H[1], 0);
-		neighbor = _root->findleaf(neighbor_center);
-		if (neighbor!=NULL){
-			if (neighbor->_depth > this->_depth+1){
-				this->make_children();
-				result = this->is_gradiated();
-			}else if (this->_depth > neighbor->_depth+1){
-				neighbor->make_children();
-				result = neighbor->is_gradiated();
-			}
-		}
+	// 	neighbor_center = box.center() + Point3(0, -H[1], 0);
+	// 	neighbor = _root->findleaf(neighbor_center);
+	// 	if (neighbor!=NULL){
+	// 		if (neighbor->_depth > this->_depth+1){
+	// 			this->make_children();
+	// 			result = this->is_gradiated();
+	// 		}else if (this->_depth > neighbor->_depth+1){
+	// 			neighbor->make_children();
+	// 			result = neighbor->is_gradiated();
+	// 		}
+	// 	}
 
 
-		neighbor_center = box.center() + Point3(0, 0, -H[2]);
-		neighbor = _root->findleaf(neighbor_center);
-		if (neighbor!=NULL){
-			if (neighbor->_depth > this->_depth+1){
-				this->make_children();
-				result = this->is_gradiated();
-			}else if (this->_depth > neighbor->_depth+1){
-				neighbor->make_children();
-				result = neighbor->is_gradiated();
-			}
-		}
+	// 	neighbor_center = box.center() + Point3(0, H[1], 0);
+	// 	neighbor = _root->findleaf(neighbor_center);
+	// 	if (neighbor!=NULL){
+	// 		if (neighbor->_depth > this->_depth+1){
+	// 			this->make_children();
+	// 			result = this->is_gradiated();
+	// 		}else if (this->_depth > neighbor->_depth+1){
+	// 			neighbor->make_children();
+	// 			result = neighbor->is_gradiated();
+	// 		}
+	// 	}
 
 
-		neighbor_center = box.center() + Point3(0, 0, H[2]);
-		neighbor = _root->findleaf(neighbor_center);
-		if (neighbor!=NULL){
-			if (neighbor->_depth > this->_depth+1){
-				this->make_children();
-				result = this->is_gradiated();
-			}else if (this->_depth > neighbor->_depth+1){
-				neighbor->make_children();
-				result = neighbor->is_gradiated();
-			}
-		}
+	// 	neighbor_center = box.center() + Point3(0, 0, -H[2]);
+	// 	neighbor = _root->findleaf(neighbor_center);
+	// 	if (neighbor!=NULL){
+	// 		if (neighbor->_depth > this->_depth+1){
+	// 			this->make_children();
+	// 			result = this->is_gradiated();
+	// 		}else if (this->_depth > neighbor->_depth+1){
+	// 			neighbor->make_children();
+	// 			result = neighbor->is_gradiated();
+	// 		}
+	// 	}
 
-		return result;
-	}
+
+	// 	neighbor_center = box.center() + Point3(0, 0, H[2]);
+	// 	neighbor = _root->findleaf(neighbor_center);
+	// 	if (neighbor!=NULL){
+	// 		if (neighbor->_depth > this->_depth+1){
+	// 			this->make_children();
+	// 			result = this->is_gradiated();
+	// 		}else if (this->_depth > neighbor->_depth+1){
+	// 			neighbor->make_children();
+	// 			result = neighbor->is_gradiated();
+	// 		}
+	// 	}
+
+	// 	return result;
+	// }
 
 
 	void AssemblyNode::create_point_global_index_maps(std::vector<Point3>& points, std::map<long unsigned int, long unsigned int>& reduced_index) const{
@@ -413,21 +427,28 @@ namespace GeoVox::geometry{
 								reduced_index.at(global_index[5]),
 								reduced_index.at(global_index[6]),
 								reduced_index.at(global_index[7])});
-			elemMarkers.push_back(_nvert);
-		}
-	}
 
-	void Assembly::gradiate(){
-		if (!_isdivided){
-			return;
-		}
-
-		for (unsigned int i=0; i<_maxdepth+1; i++){ //should finish on loop 0
-			if (is_gradiated()){
-				break;
+			int nvert = 0;
+			for (int v_idx=0; v_idx<8; v_idx++){
+				if (in_particle(box[v_idx])){
+					nvert+=1;
+				}
 			}
+			elemMarkers.push_back(size());
 		}
 	}
+
+	// void Assembly::gradiate(){
+	// 	if (!_isdivided){
+	// 		return;
+	// 	}
+
+	// 	for (unsigned int i=0; i<_maxdepth+1; i++){ //should finish on loop 0
+	// 		if (is_gradiated()){
+	// 			break;
+	// 		}
+	// 	}
+	// }
 
 
 	//ASSEMBLY
@@ -465,7 +486,7 @@ namespace GeoVox::geometry{
 				// std::cout << rx << "\t" << ry << "\t"<< rz << "\t"<< eps1 << "\t"<< eps2 << "\t"<< x << "\t" << y << "\t" << z << "\t" << q0 << "\t"<< q1 << "\t" << q2 << "\t" << q3 << "\n";
 				SuperEllipsoid P = SuperEllipsoid(Point3(rx,ry,rz), eps1, eps2, Point3(x,y,z), Quaternion(q0,-q1,-q2,-q3));
 				_particles.push_back(P);
-				_particle_index.push_back(particle_number);
+				// _particle_index.push_back(particle_number);
 				particle_number += 1;
 			}
 		}
@@ -502,11 +523,13 @@ namespace GeoVox::geometry{
 		}
 		_isdivided = false;
 
-		_maxdepth = maxdepth;
+		// _maxdepth = maxdepth;
 		// divide();
 		for (long unsigned int p_idx=0; p_idx<_particles.size(); p_idx++){
-			// std::cout << "particle " << p_idx << " of " << _particles.size() << std::endl;
-			insert_particle(_particles[p_idx]);
+			std::cout << "particle " << p_idx << " of " << _particles.size() << " : ";
+			_particles[p_idx].print(std::cout);
+			std::cout << std::endl;
+			insert_data(_particles[p_idx]);
 		}
 	}
 
@@ -518,8 +541,8 @@ namespace GeoVox::geometry{
 		std::cout << "making point index\n";
 		create_point_global_index_maps(points, reduced_index);
 
-		std::cout << "putting points into a new octree\n";
-		GeoVox::mesh::MeshNode meshnodes(points);
+		// std::cout << "putting points into a new octree\n";
+		// GeoVox::mesh::MeshNode meshnodes(points);
 
 		// for (long unsigned int i=0; i<points.size(); i++){
 		// 	std::cout << "Point " << i << " Point3(";

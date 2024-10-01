@@ -27,33 +27,34 @@ using SuperEllipsoid = GeoVox::geometry::SuperEllipsoid;
 using Point3 = GeoVox::util::Point<3>;
 using Box = GeoVox::util::Box;
 using Mesh = GeoVox::mesh::Mesh;
-using Vertex = GeoVox::mesh::Vertex;
+// using Vertex = GeoVox::mesh::Vertex;
 
 namespace GeoVox::geometry{
 	class AssemblyNode;
 	class Assembly;
-	using OctreeNode = GeoVox::util::OctreeNode<Assembly, AssemblyNode>;
+	using OctreeNode = GeoVox::util::OctreeNode<Assembly, AssemblyNode, SuperEllipsoid>;
 
 	class AssemblyNode : public OctreeNode{
 	public:
-		AssemblyNode() : OctreeNode(), _nvert(0) {}
+		AssemblyNode() : OctreeNode(true) {}
 
-		AssemblyNode(const Box& box, const long unsigned int ID, unsigned int (&ijk)[3], unsigned int depth, Assembly* root) : 
-			OctreeNode(box, ID, ijk, depth, root), _nvert(0) {}
+		AssemblyNode(const Box& box, const long unsigned int ID, unsigned int (&ijk)[3], unsigned int depth, Assembly* root, bool multiple_data) : 
+			OctreeNode(box, ID, ijk, depth, root, true) {}
 		
 		// void make_children();
-		void new_make_children();
+		// void new_make_children();
 
-		bool is_gradiated();
+		// bool is_gradiated();
 		bool in_particle(const Point3& point) const;
+		bool data_valid(const SuperEllipsoid& P) const override;
 
-		void divide();
-		int _nvert; //maximum number of vertices contained by a SINGLE particle (leaves only)
+		// void divide();
+		// int _nvert; //maximum number of vertices contained by a SINGLE particle (leaves only)
 
-		void insert_particle(const SuperEllipsoid P);
-		std::vector<SuperEllipsoid> local_particles;
+		// void insert_particle(const SuperEllipsoid P);
+		// std::vector<SuperEllipsoid> local_particles;
 	protected:
-		std::vector<long unsigned int> _particle_index;
+		// std::vector<long unsigned int> _particle_index;
 		
 		void makeElements(const std::map<long unsigned int, long unsigned int>& reduced_index, std::vector<std::vector<long unsigned int>> &elem2node, std::vector<int> &elemMarkers) const;
 		void create_point_global_index_maps(std::vector<Point3>& points, std::map<long unsigned int, long unsigned int>& reduced_index) const;
@@ -62,17 +63,14 @@ namespace GeoVox::geometry{
 
 	class Assembly : public AssemblyNode {
 	public:
-		Assembly() : AssemblyNode(), _maxdepth(5), _nleaves(1), max_particles_per_node(2) {
+		Assembly() : AssemblyNode(), _nleaves(1), max_data_per_leaf(8) { //unsure why max_data_per_leaf can't be 2
 			_root = this;
 		}
 
-		Assembly(const std::string particle_file) : AssemblyNode(), _maxdepth(5), _nleaves(1), max_particles_per_node(2) {
+		Assembly(const std::string particle_file) : AssemblyNode(), _nleaves(1), max_data_per_leaf(8) {
 			_root = this;
 			readfile(particle_file);
 		}
-
-		unsigned int _maxdepth;
-		long unsigned int _nleaves;
 
 		void gradiate(); //ensure depth changes by at most one between neighbors
 
@@ -91,7 +89,9 @@ namespace GeoVox::geometry{
 
 		void _setbbox();
 
-		const long unsigned int max_particles_per_node;
+		static const unsigned int _maxdepth = 5;
+		long unsigned int _nleaves;
+		const long unsigned int max_data_per_leaf;
 	};
 
 
