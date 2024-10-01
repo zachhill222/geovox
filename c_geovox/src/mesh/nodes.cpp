@@ -131,7 +131,7 @@ namespace GeoVox::mesh{
 			std::cout << idx << std::endl;
 			std::invalid_argument("ERROR");
 		}
-
+		
 		return _points[idx];
 	}
 

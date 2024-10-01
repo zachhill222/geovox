@@ -34,6 +34,8 @@ namespace GeoVox::util{
 		node_t* findleaf(const Point3& point); //find leaf node that contains the given point. Return NULL if there is none.
 		node_t* findnode(unsigned int depth, const Point3& point); //find node that contains the given point at the given depth. Return NULL if there is none.
 		
+		node_t const* findleaf_const(const Point3& point) const;
+
 		inline bool isdivided() const {return _isdivided;}
 
 		Box box;
@@ -56,6 +58,7 @@ namespace GeoVox::util{
 	////////////////////// NODE IMPLEMENTATIONS //////////////////////////////
 	template<typename root_t, typename node_t>
 	void OctreeNode<root_t, node_t>::make_children(){
+
 		if (_isdivided){
 			return;
 		}
@@ -103,6 +106,24 @@ namespace GeoVox::util{
 
 		if (box.contains(point)){
 			return reinterpret_cast<node_t*>(this);
+		}
+
+		return NULL;
+	}
+
+
+	template<typename root_t, typename node_t>
+	node_t const* OctreeNode<root_t, node_t>::findleaf_const(const Point3& point) const{
+		if (_isdivided){
+			for (int c_idx=0; c_idx<8; c_idx++){
+				if (_children[c_idx]->box.contains(point)){
+					return _children[c_idx]->findleaf_const(point);
+				}
+			}
+		}
+
+		if (box.contains(point)){
+			return reinterpret_cast<node_t const*>(this);
 		}
 
 		return NULL;

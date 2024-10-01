@@ -8,38 +8,12 @@ double sgn(double x){
 }
 
 namespace GeoVox::geometry{
-	bool AssemblyNode::in_particle(const Point3& point) const{
+	void AssemblyNode::insert_particle(const SuperEllipsoid P){
+		// std::cout << "insert_particle\n";
+		std::cout << _isdivided << std::endl;
 		if (_isdivided){
-			for(int c_idx=0; c_idx<8; c_idx++){
-				if (_children[c_idx]->box.contains(point)){
-					return _children[c_idx]->in_particle(point);
-				}
-			}
-		}
-
-		for (long unsigned int p_idx=0; p_idx<_particle_index.size(); p_idx++){
-			long unsigned int _particle_number = _particle_index[p_idx];
-			const SuperEllipsoid &P = _root->_particles[_particle_number];
-			if (P.contains(point)){
-				return true;
-			}
-		}
-		
-		return false;
-	}
-
-
-	void AssemblyNode::make_children(){
-		OctreeNode::make_children();
-
-		//add particles to children
-		for (int c_idx=0; c_idx<8; c_idx++){
-
-			for (long unsigned int p_idx=0; p_idx<_particle_index.size(); p_idx++){
-				
-				long unsigned int _particle_number = _particle_index[p_idx];
-				const SuperEllipsoid &P = _root->_particles[_particle_number];
-				
+			// std::cout << "divided\n";
+			for (int c_idx=0; c_idx<8; c_idx++){
 				//coarse check if particle collides with child
 				if (!GeoVox::geometry::GJK(_children[c_idx]->box, P.bbox())){
 					continue;
@@ -50,25 +24,121 @@ namespace GeoVox::geometry{
 					continue;
 				}
 
-				//add index to child particle index list
-				_children[c_idx]->_particle_index.push_back(_particle_number);
-				int temp_vert = 0;
+				_children[c_idx]->insert_particle(P);
+				return;
+			}
+		}else{
+			if (local_particles.size() >= _root->max_particles_per_node){
+				// std::cout << "ID= " << ID << " local_particles.size()= " << local_particles.size() << std::endl;
+				new_make_children();
+				// std::cout << "ID= " << ID << " local_particles.size()= " << local_particles.size() << std::endl;
+				for (int c_idx=0; c_idx<8; c_idx++){
+					// std::cout << "child " << c_idx << std::endl;
+					_children[c_idx]->insert_particle(P);
+				}
+				return;
+			}else{
+				// std::cout << "inserted particle\n";
+				local_particles.push_back(P);
+				std::cout << ID << ": " << local_particles.size() << std::endl;
+				int temp_nvert = 0;
 				for (int v_idx=0; v_idx<8; v_idx++){
-					// _children[c_idx]->box[v_idx].print(std::cout);
-					// std::cout << "\n contained= " << P.contains(_children[c_idx]->box[v_idx]) << std::endl;
-
-					if (P.contains(_children[c_idx]->box[v_idx])){
-						temp_vert += 1;
+					if (P.contains(box[v_idx])){
+						temp_nvert+=1;
 					}
 				}
-				_children[c_idx]->_nvert = std::max(_children[c_idx]->_nvert, temp_vert);
-				// _children[c_idx]->box.print(std::cout);
-				// std::cout << std::endl;
-
-				// std::cout << "element marker _nvert= " << _nvert << std::endl;
+				_nvert = std::max(_nvert, temp_nvert);
+				return;
 			}
 		}
 	}
+
+
+	void AssemblyNode::new_make_children(){
+		// std::cout << "new_make_children\n";
+		if (_depth >= _root->_maxdepth){
+			return;
+		}
+
+		OctreeNode::make_children();
+		// std::cout << "AssemblyNode::make_children: _isdivided= " << _isdivided << std::endl;
+		for (long unsigned int p_idx=0; p_idx<local_particles.size(); p_idx++){
+			insert_particle(local_particles[p_idx]);
+		}
+
+		local_particles.clear();
+	}
+
+
+	bool AssemblyNode::in_particle(const Point3& point) const{
+		// if (_isdivided){
+		// 	for(int c_idx=0; c_idx<8; c_idx++){
+		// 		if (_children[c_idx]->box.contains(point)){
+		// 			return _children[c_idx]->in_particle(point);
+		// 		}
+		// 	}
+		// }
+
+		// for (long unsigned int p_idx=0; p_idx<_particle_index.size(); p_idx++){
+		// 	long unsigned int _particle_number = _particle_index[p_idx];
+		// 	const SuperEllipsoid &P = _root->_particles[_particle_number];
+		// 	if (P.contains(point)){
+		// 		return true;
+		// 	}
+		// }
+		
+		// return false;
+		// std::cout << "in_particle\n";
+		AssemblyNode const* leaf = findleaf_const(point);
+		for (long unsigned int p_idx=0; p_idx<leaf->local_particles.size(); p_idx++){
+			if (local_particles[p_idx].contains(point)){
+				return true;
+			}
+		}
+		return false;
+	}
+
+
+	// void AssemblyNode::make_children(){
+	// 	OctreeNode::make_children();
+
+	// 	//add particles to children
+	// 	for (int c_idx=0; c_idx<8; c_idx++){
+
+	// 		for (long unsigned int p_idx=0; p_idx<_particle_index.size(); p_idx++){
+				
+	// 			long unsigned int _particle_number = _particle_index[p_idx];
+	// 			const SuperEllipsoid &P = _root->_particles[_particle_number];
+				
+	// 			//coarse check if particle collides with child
+	// 			if (!GeoVox::geometry::GJK(_children[c_idx]->box, P.bbox())){
+	// 				continue;
+	// 			}
+
+	// 			//fine check if particle collides with child
+	// 			if (!GeoVox::geometry::GJK(_children[c_idx]->box, P)){
+	// 				continue;
+	// 			}
+
+	// 			//add index to child particle index list
+	// 			_children[c_idx]->_particle_index.push_back(_particle_number);
+	// 			int temp_vert = 0;
+	// 			for (int v_idx=0; v_idx<8; v_idx++){
+	// 				// _children[c_idx]->box[v_idx].print(std::cout);
+	// 				// std::cout << "\n contained= " << P.contains(_children[c_idx]->box[v_idx]) << std::endl;
+
+	// 				if (P.contains(_children[c_idx]->box[v_idx])){
+	// 					temp_vert += 1;
+	// 				}
+	// 			}
+	// 			_children[c_idx]->_nvert = std::max(_children[c_idx]->_nvert, temp_vert);
+	// 			// _children[c_idx]->box.print(std::cout);
+	// 			// std::cout << std::endl;
+
+	// 			// std::cout << "element marker _nvert= " << _nvert << std::endl;
+	// 		}
+	// 	}
+	// }
 
 	void AssemblyNode::divide(){
 		//TRAVERSE TO LEAF
@@ -433,7 +503,11 @@ namespace GeoVox::geometry{
 		_isdivided = false;
 
 		_maxdepth = maxdepth;
-		divide();
+		// divide();
+		for (long unsigned int p_idx=0; p_idx<_particles.size(); p_idx++){
+			// std::cout << "particle " << p_idx << " of " << _particles.size() << std::endl;
+			insert_particle(_particles[p_idx]);
+		}
 	}
 
 

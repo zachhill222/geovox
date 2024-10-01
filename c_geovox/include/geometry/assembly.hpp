@@ -41,14 +41,18 @@ namespace GeoVox::geometry{
 		AssemblyNode(const Box& box, const long unsigned int ID, unsigned int (&ijk)[3], unsigned int depth, Assembly* root) : 
 			OctreeNode(box, ID, ijk, depth, root), _nvert(0) {}
 		
-		void make_children();
+		// void make_children();
+		void new_make_children();
+
 		bool is_gradiated();
 		bool in_particle(const Point3& point) const;
 
 		void divide();
 		int _nvert; //maximum number of vertices contained by a SINGLE particle (leaves only)
+
+		void insert_particle(const SuperEllipsoid P);
+		std::vector<SuperEllipsoid> local_particles;
 	protected:
-		
 		std::vector<long unsigned int> _particle_index;
 		
 		void makeElements(const std::map<long unsigned int, long unsigned int>& reduced_index, std::vector<std::vector<long unsigned int>> &elem2node, std::vector<int> &elemMarkers) const;
@@ -58,11 +62,11 @@ namespace GeoVox::geometry{
 
 	class Assembly : public AssemblyNode {
 	public:
-		Assembly() : AssemblyNode(), _maxdepth(5), _nleaves(1) {
+		Assembly() : AssemblyNode(), _maxdepth(5), _nleaves(1), max_particles_per_node(2) {
 			_root = this;
 		}
 
-		Assembly(const std::string particle_file) : AssemblyNode(), _maxdepth(5), _nleaves(1) {
+		Assembly(const std::string particle_file) : AssemblyNode(), _maxdepth(5), _nleaves(1), max_particles_per_node(2) {
 			_root = this;
 			readfile(particle_file);
 		}
@@ -86,6 +90,8 @@ namespace GeoVox::geometry{
 		std::vector<SuperEllipsoid> _particles;
 
 		void _setbbox();
+
+		const long unsigned int max_particles_per_node;
 	};
 
 

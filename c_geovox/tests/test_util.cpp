@@ -11,7 +11,7 @@ using Mesh = mesh::Mesh;
 
 
 int test_assembly(){
-	Assembly A = Assembly("particles_1.txt");
+	Assembly A = Assembly("particles_1000.txt");
 
 	// A.print(std::cout);
 
@@ -30,10 +30,10 @@ int test_assembly(){
 	Mesh M = A.make_voxel_mesh();
 	M.saveas("voxel_mesh.vtk");
 	
-	std::cout << "GRADIATING\n";
-	A.gradiate();
-	M = A.make_voxel_mesh();
-	M.saveas("voxel_gradiated_mesh.vtk");
+	// std::cout << "GRADIATING\n";
+	// A.gradiate();
+	// M = A.make_voxel_mesh();
+	// M.saveas("voxel_gradiated_mesh.vtk");
 
 	// std::cout << "MAKING SURFACE MESH\n"; //SURFACE MESH IS SLOW
 	// Mesh S = M.extract_boundary_mesh();
