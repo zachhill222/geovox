@@ -1,7 +1,7 @@
 #ifndef VTK_CONVEX_CELL_H
 #define VTK_CONVEX_CELL_H
 
-#include "mesh/vtk_linear.hpp"
+#include "mesh/vtk_linear_elements.hpp"
 #include "util/box.hpp"
 
 #include <vector>

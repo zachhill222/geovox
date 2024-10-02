@@ -11,16 +11,18 @@ using Mesh = mesh::Mesh;
 
 int test_assembly(){
 	Assembly A = Assembly("particles_1000.txt");
-	// for (int i=0; i<7; i++){
-	// 	A.divide();
-	// }
-	// A.divide();
-	A.divide(8);
-	// A.print(std::cout);
+	A.divide(4);
+	
+	std::cout << "SAVING GEOMETRY\n";
+	int N[3] {200, 200, 200};
+	A.save_geometry("Geometry.dat", A.box, N);
 
-	// std::cout << "SAVING GEOMETRY\n";
-	// int N[3] {100, 100, 100};
-	// A.save_geometry("Geometry.dat", A.box, N);
+	std::cout << "READING GEOMETRY\n";
+	GeoVox::mesh::StructuredPoints SP(A.box, "Geometry.dat");
+
+	std::cout << "SAVING STRUCTURED POINTS\n";
+	SP.saveas("structured_points.vtk");
+
 
 	// std::cout << "MAKING MIXED MESH\n";
 	// Mesh M = A.make_mixed_mesh();

@@ -5,7 +5,7 @@
 #include "util/box.hpp"
 
 // #include "mesh/nodes.hpp"
-#include "mesh/vtk_linear.hpp"
+#include "mesh/vtk_linear_elements.hpp"
 
 #include <vector>
 #include <algorithm>

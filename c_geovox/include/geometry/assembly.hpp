@@ -8,7 +8,7 @@
 #include "geometry/particles.hpp"
 #include "geometry/collisions.hpp"
 
-#include "mesh/vtk_linear.hpp"
+#include "mesh/vtk_linear_elements.hpp"
 #include "mesh/vtk_convex_cell.hpp"
 #include "mesh/mesh.hpp"
 #include "mesh/nodes.hpp"

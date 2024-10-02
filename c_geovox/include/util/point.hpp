@@ -5,6 +5,8 @@
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
+#include <string>
+#include <sstream>
 
 namespace GeoVox::util{
 	template<size_t size>
@@ -108,7 +110,7 @@ namespace GeoVox::util{
 		double sum() const; //sum all elements
 		Point normalize() const; //normalize NOT in-place to a Euclidean norm of 1
 		void print(std::ostream &stream) const; //print coordinate to ostream
-
+		std::string tostring() const;
 
 
 		//////////////////////////////////////////////////////////////////
@@ -453,6 +455,15 @@ namespace GeoVox::util{
 			stream << _data[i] << " ";
 		}
 		// stream << "\n";
+	}
+
+	template<size_t size>
+	std::string Point<size>::tostring() const{
+		std::stringstream stream;
+		for (int i=0; i<_len; i++){
+			stream << _data[i] << " ";
+		}
+		return stream.str();
 	}
 
 
