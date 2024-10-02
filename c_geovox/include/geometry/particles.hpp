@@ -67,6 +67,10 @@ namespace GeoVox::geometry{
 		SuperEllipsoid* operator*=(const double& other);
 		SuperEllipsoid  operator*(const double& other) const;
 
+		//comparison
+		bool operator==(const SuperEllipsoid& other) const;
+		inline bool operator!=(const SuperEllipsoid& other) const {return !(operator==(other));}
+
 		//coordinate system changes
 		Point3 tolocal(const Point3& point) const;
 		Point3 toglobal(const Point3& point) const;
@@ -90,7 +94,8 @@ namespace GeoVox::geometry{
 		Point3 normal_parametric(const double eta, const double omega) const; //get normal vector from parametric coordinates
 
 		double neldermeadfun(GeoVox::util::Point<2> coords,  GeoVox::util::Point<3> localpoint) const;
-	
+		
+
 
 	private:
 		Point3 _r;

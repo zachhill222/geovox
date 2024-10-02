@@ -1,0 +1,147 @@
+#include "geometry/assembly.hpp"
+
+namespace GeoVox::geometry{
+	int AssemblyNode::nvert() const{
+			int _nvert = 0;
+			for (long unsigned int d_idx=0; d_idx<_data.size(); d_idx++){
+				int temp_nvert = 0;
+				for (int v_idx=0; v_idx<8; v_idx++){
+					if (_root->particles[_data[d_idx]].contains(box[v_idx])){
+						temp_nvert += 1;
+					}
+				}
+				_nvert = std::max(_nvert, temp_nvert);
+			}
+			// std::cout << "nvert=" << _nvert << std::endl;
+			return _nvert;
+		}
+
+	bool AssemblyNode::data_valid(const long unsigned int& p_idx) const{
+		//particles are convex. If the entire region is contained in a single particle, no need to add more.
+		if (nvert() == 8){
+			return false;
+		}
+
+		//coarse check if particle collides with child
+		if (!GeoVox::geometry::GJK(box, _root->particles[p_idx].bbox())){
+			return false;
+		}
+
+		//fine check if particle collides with child
+		if (!GeoVox::geometry::GJK(box, _root->particles[p_idx].bbox())){
+			return false;
+		}
+
+		return true;
+	}
+
+
+	bool Assembly::in_particle(const Point3& point) const{
+		AssemblyNode const* leaf = findleaf_const(point);
+		for (long unsigned int d_idx=0; d_idx<leaf->_data.size(); d_idx++){
+			if (_root->particles[_data[d_idx]].contains(point)){
+				return true;
+			}
+		}
+		return false;
+	}
+
+
+	void Assembly::readfile(const std::string fullfile){
+		std::ifstream _file(fullfile);
+		std::string line;
+
+		if( not _file.is_open() )
+		{
+			std::cout << "Could not open " << fullfile << std::endl;
+			return;
+		}
+
+		//READ FILE
+		double rx, ry, rz, eps1, eps2, x, y, z, q0, q1, q2, q3;
+		while (getline(_file, line)){
+			if (!line.empty() && line[0] != '#'){
+				std::istringstream iss(line);
+				iss >> rx;
+				iss >> ry;
+				iss >> rz;
+				iss >> eps1;
+				iss >> eps2;
+				iss >> x;
+				iss >> y;
+				iss >> z;
+				iss >> q0;
+				iss >> q1;
+				iss >> q2;
+				iss >> q3;
+
+				SuperEllipsoid P = SuperEllipsoid(Point3(rx,ry,rz), eps1, eps2, Point3(x,y,z), Quaternion(q0,-q1,-q2,-q3));
+				particles.push_back(P);
+			}
+		}
+		_setbbox();
+	}
+
+
+	void Assembly::_setbbox() {
+			if (particles.size() == 0){
+				box = Box(Point3(0,0,0), Point3(1,1,1));
+			}
+			else{
+				box = particles[0].axis_alligned_bbox();
+				for (unsigned int i=1; i<particles.size(); i++){
+					box.combine(particles[i].axis_alligned_bbox());
+				}
+			}
+		}
+
+
+	void Assembly::save_geometry(const std::string filename, const Box& box, const int N[3]) const{
+		//////////////// OPEN FILE ////////////////
+		std::ofstream geofile(filename);
+
+		if (not geofile.is_open()){
+			std::cout << "Couldn't write to " << filename << std::endl;
+			geofile.close();
+			return;
+		}
+
+
+		//////////////// WRITE FILE ////////////////
+		std::stringstream buffer;
+
+		//HEADER
+		buffer << "nx= " << N[0] << std::endl;
+		buffer << "ny= " << N[1] << std::endl;
+		buffer << "nz= " << N[2] << std::endl;
+
+
+		//DATA
+		Point3 centroid = Point3(0,0,0);
+		Point3 H = box.high()-box.low();
+		H[0]/=N[0];
+		H[1]/=N[1];
+		H[2]/=N[2];
+
+		for (int k=0; k<N[2]; k++){
+			centroid[2] = box.low()[2] + H[2]*(0.5+k);
+			for (int j=0; j<N[1]; j++){
+				centroid[1] = box.low()[1] + H[1]*(0.5+j);
+				for (int i=0; i<N[0]; i++){
+					centroid[0] = box.low()[0] + H[0]*(0.5+i);
+					buffer << in_particle(centroid) << " ";
+				}
+				buffer << std::endl;
+			}
+			buffer << std::endl;
+
+			geofile << buffer.rdbuf();
+			buffer.str("");
+		}
+
+
+		//////////////// CLOSE FILE ////////////////
+		geofile.close();
+	}
+
+}

@@ -78,6 +78,20 @@ namespace GeoVox::util{
 	Quaternion Quaternion::operator/(const Quaternion& other) const{
 		return operator*(other.inv());
 	}
+	
+	bool Quaternion::operator==(const Quaternion& other) const{
+		if (_q0 != other.q0()){
+			return false;
+		}
+
+		if (_qv != other.qv()){
+			return false;
+		}
+
+		return true;
+	}
+
+	
 
 
 }

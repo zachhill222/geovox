@@ -37,7 +37,8 @@ namespace GeoVox::util{
 		Quaternion operator*(const Quaternion& other) const;
 		Quaternion* operator/=(const Quaternion& other);
 		Quaternion operator/(const Quaternion& other) const;
-
+		bool operator==(const Quaternion& other) const;
+		inline bool operator!=(const Quaternion& other) const { return !(operator==(other));}
 
 	private:
 		double _q0;

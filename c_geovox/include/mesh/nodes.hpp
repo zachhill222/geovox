@@ -29,10 +29,10 @@ namespace GeoVox::mesh{
 
 	class MeshNodeNode : public OctreeNode{
 		public:
-			MeshNodeNode() : OctreeNode(false) {}
+			MeshNodeNode() : OctreeNode() {}
 
-			MeshNodeNode(const Box& box, const long unsigned int ID, unsigned int (&ijk)[3], unsigned int depth, MeshNode* root, bool multiple_data) : 
-				OctreeNode(box, ID, ijk, depth, root, false) {}
+			MeshNodeNode(const Box& box, const long unsigned int ID, unsigned int (&ijk)[3], unsigned int depth, MeshNode* root) : 
+				OctreeNode(box, ID, ijk, depth, root) {}
 			
 			bool data_valid(const Point3& point) const override;
 
@@ -54,11 +54,11 @@ namespace GeoVox::mesh{
 
 	class MeshNode : public MeshNodeNode {
 	public:
-		MeshNode() : MeshNodeNode(), _nleaves(1), max_data_per_leaf(16) {
+		MeshNode() : MeshNodeNode(), _nleaves(1), _maxdepth(0), max_data_per_leaf(16) {
 			_root = this;
 		}
 
-		MeshNode(const std::vector<Point3>& list) : MeshNodeNode(), _nleaves(1), max_data_per_leaf(16) {
+		MeshNode(const std::vector<Point3>& list) : MeshNodeNode(), _nleaves(1), _maxdepth(0), max_data_per_leaf(16) {
 			_root = this;
 
 			//get bounding box
@@ -78,6 +78,7 @@ namespace GeoVox::mesh{
 		}
 
 		long unsigned int _nleaves;
+		unsigned int _maxdepth;
 		const long unsigned int max_data_per_leaf; //maximum number of points per leaf
 	};
 

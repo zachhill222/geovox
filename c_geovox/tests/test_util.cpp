@@ -9,18 +9,18 @@ using Assembly = geometry::Assembly;
 using Mesh = mesh::Mesh;
 
 
-
 int test_assembly(){
 	Assembly A = Assembly("particles_1000.txt");
-
+	// for (int i=0; i<7; i++){
+	// 	A.divide();
+	// }
+	// A.divide();
+	A.divide(8);
 	// A.print(std::cout);
 
-	std::cout << "BUILDING TREE\n";
-	A.make_tree(7);
-
-	std::cout << "SAVING GEOMETRY\n";
-	int N[3] {50, 50, 50};
-	A.save_geometry("Geometry.dat", 0.875*A.box, N);
+	// std::cout << "SAVING GEOMETRY\n";
+	// int N[3] {100, 100, 100};
+	// A.save_geometry("Geometry.dat", A.box, N);
 
 	// std::cout << "MAKING MIXED MESH\n";
 	// Mesh M = A.make_mixed_mesh();

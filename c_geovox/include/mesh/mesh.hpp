@@ -78,7 +78,5 @@ namespace GeoVox::mesh{
 		std::vector<int> _nodeMarkers; //track types of nodes (e.g., interior boundary, exterior boundary, ...)
 		std::vector<int> _elemMarkers; //track types of elements (e.g., material type, subdomain numbers)
 	};
-
-
 }
 #endif

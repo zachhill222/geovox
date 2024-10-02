@@ -104,6 +104,31 @@ namespace GeoVox::geometry{
 		return result;
 	}
 
+	//comparison
+	bool SuperEllipsoid::operator==(const SuperEllipsoid& other) const{
+		if (_r != other.radius()){
+			return false;
+		}
+
+		if (_center != other.center()){
+			return false;
+		}
+
+		if (_eps1 != other.eps1()){
+			return false;
+		}
+
+		if (_eps2 != other.eps2()){
+			return false;
+		}
+
+		if (_Q != other.quaternion()){
+			return false;
+		}
+
+		return true;
+	}
+
 	Point3 SuperEllipsoid::tolocal(const Point3& point) const{
 		Point3 result = _Q.rotate(point - _center);
 		return result;

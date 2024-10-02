@@ -1,7 +1,6 @@
 #include "mesh/mesh.hpp"
 
 namespace GeoVox::mesh{
-
 	long unsigned int Mesh::nTrackedNodes() const{
 		long unsigned int total = 0;
 		for (long unsigned int e_idx=0; e_idx<nElems(); e_idx++){

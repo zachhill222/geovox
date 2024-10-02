@@ -36,10 +36,10 @@ namespace GeoVox::geometry{
 
 	class AssemblyNode : public OctreeNode{
 	public:
-		AssemblyNode() : OctreeNode(true) {}
+		AssemblyNode() : OctreeNode() {}
 
-		AssemblyNode(const Box& box, const long unsigned int ID, unsigned int (&ijk)[3], unsigned int depth, Assembly* root, bool multiple_data) : 
-			OctreeNode(box, ID, ijk, depth, root, true) {}
+		AssemblyNode(const Box& box, const long unsigned int ID, unsigned int (&ijk)[3], unsigned int depth, Assembly* root) : 
+			OctreeNode(box, ID, ijk, depth, root) {}
 		
 		// void make_children();
 		// void new_make_children();
@@ -47,15 +47,22 @@ namespace GeoVox::geometry{
 		// bool is_gradiated();
 		bool in_particle(const Point3& point) const;
 		bool data_valid(const SuperEllipsoid& P) const override;
+		void push_data_to_children() override;
 
-		// void divide();
+		int nvert() const;
+		int nvert(long unsigned int d_idx) const;
+
+		void get_global_vertex_index(long unsigned int (&global_index)[8]) const;
+		void divide(const int n_divisions);
+		void divide(); //divide to balance max_data_per_leaf
 		// int _nvert; //maximum number of vertices contained by a SINGLE particle (leaves only)
 
 		// void insert_particle(const SuperEllipsoid P);
 		// std::vector<SuperEllipsoid> local_particles;
+
 	protected:
 		// std::vector<long unsigned int> _particle_index;
-		
+		// int _nvert;
 		void makeElements(const std::map<long unsigned int, long unsigned int>& reduced_index, std::vector<std::vector<long unsigned int>> &elem2node, std::vector<int> &elemMarkers) const;
 		void create_point_global_index_maps(std::vector<Point3>& points, std::map<long unsigned int, long unsigned int>& reduced_index) const;
 	};
@@ -63,21 +70,22 @@ namespace GeoVox::geometry{
 
 	class Assembly : public AssemblyNode {
 	public:
-		Assembly() : AssemblyNode(), _nleaves(1), max_data_per_leaf(8) { //unsure why max_data_per_leaf can't be 2
+		Assembly() : AssemblyNode(), _nleaves(1), _maxdepth(0), max_data_per_leaf(8) {
 			_root = this;
 		}
 
-		Assembly(const std::string particle_file) : AssemblyNode(), _nleaves(1), max_data_per_leaf(8) {
+		Assembly(const std::string particle_file) : AssemblyNode(), _nleaves(1), _maxdepth(0), max_data_per_leaf(8) {
 			_root = this;
 			readfile(particle_file);
+			for (long unsigned int i=0; i<_particles.size(); i++){
+				_data.push_back(_particles[i]);
+			}
 		}
 
 		void gradiate(); //ensure depth changes by at most one between neighbors
 
 		void readfile(const std::string fullfile);
 		void print(std::ostream &stream) const;
-		// void print_tree(std::ostream &stream) const;
-		void make_tree(int maxdepth);
 
 		Mesh make_voxel_mesh() const; //turn octree into a voxel mesh
 		Mesh make_mixed_mesh() const; //turn octree into a mesh with voxels and hexahedrons. Points near the boundary of a particle are moved to the boundary.
@@ -89,8 +97,8 @@ namespace GeoVox::geometry{
 
 		void _setbbox();
 
-		static const unsigned int _maxdepth = 5;
 		long unsigned int _nleaves;
+		unsigned int _maxdepth;
 		const long unsigned int max_data_per_leaf;
 	};
 
