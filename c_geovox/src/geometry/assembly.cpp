@@ -8,39 +8,32 @@ double sgn(double x){
 }
 
 namespace GeoVox::geometry{
-	int AssemblyNode::nvert(long unsigned int d_idx) const{
-		int result = 0;
-		for (int v_idx=0; v_idx<8; v_idx++){
-			if (_data[d_idx].contains(box[v_idx])){
-				result += 1;
-			}
-		}
-		return result;
-	}
-
-	int AssemblyNode::nvert() const{
-		int _nvert = 0;
-		for (long unsigned int d_idx=0; d_idx<_data.size(); d_idx++){
-			_nvert = std::max(_nvert, nvert(d_idx));
-		}
-		// std::cout << "nvert=" << _nvert << std::endl;
-		return _nvert;
-	}
-
 	void AssemblyNode::push_data_to_children(){
 		//push data to children and clear current data
 		for (long unsigned int d_idx=0; d_idx<_data.size(); d_idx++){
 			for (int c_idx=0; c_idx<8; c_idx++){
 				if (_children[c_idx]->data_valid(_data[d_idx])){
 					_children[c_idx]->_data.push_back(_data[d_idx]);
+
+					//update nvert
+					int temp_nvert = 0;
+					for (int v_idx=0; v_idx<8; v_idx++){
+						if (_data[d_idx].contains(_children[c_idx]->box[v_idx])){
+							temp_nvert += 1;
+						}
+					}
+					_children[c_idx]->_nvert = std::max(_children[c_idx]->_nvert, temp_nvert);
 				}
 			}
 		}
+
+		//set current _nvert to be invalid
+		_nvert = -1;
 	}
 
 	bool AssemblyNode::data_valid(const SuperEllipsoid& P) const{
 		//particles are convex. If the entire region is contained in a single particle, no need to add more.
-		if (nvert() == 8){
+		if (_nvert == 8){
 			return false;
 		}
 
@@ -67,6 +60,10 @@ namespace GeoVox::geometry{
 			}
 		}
 
+		if (_nvert==8){
+			return true;
+		}
+
 		for (long unsigned int d_idx=0; d_idx<_data.size(); d_idx++){
 			if (_data[d_idx].contains(point)){
 				return true;
@@ -74,16 +71,6 @@ namespace GeoVox::geometry{
 		}
 		
 		return false;
-
-		//TODO: Fix below.
-		// std::cout << "in_particle\n";
-		// AssemblyNode const* leaf = findleaf_const(point);
-		// for (long unsigned int p_idx=0; p_idx<leaf->_data.size(); p_idx++){
-		// 	if (_data[p_idx].contains(point)){
-		// 		return true;
-		// 	}
-		// }
-		// return false;
 	}
 
 
@@ -100,22 +87,13 @@ namespace GeoVox::geometry{
 			return;
 		}
 
-		//ONLY DIVIDE IF THERE ARE PARTICLES
-		if (_data.size() == 0){
+		//ONLY DIVIDE IF THERE ARE PARTICLES MULTIPLE
+		if (_data.size() <= MIN_ASSEMBLY_NUMBER_OF_PARTICLES){
 			return;
 		}
 
 		//PARTICLES ARE CONVEX, ALL CHILDREN WOULD HAVE _nvert=8
-		if (nvert() == 8){
-			// if (_data.size()>1){
-			// 	for (long unsigned int d_idx=0; d_idx<_data.size(); d_idx++){
-			// 		if (nvert(d_idx)==8){
-			// 			// std::cout << "Node(" << ID << ") removeing " << _data.size()-1 << " particles\n";
-			// 			_data = std::vector<SuperEllipsoid> {_data[d_idx]};
-			// 			return;
-			// 		}
-			// 	}
-			// }
+		if (_nvert == 8){
 			return;
 		}
 
@@ -140,16 +118,12 @@ namespace GeoVox::geometry{
 		}
 
 		//PARTICLES ARE CONVEX, ALL CHILDREN WOULD HAVE _nvert=8
-		if (nvert() == 8){
-			// if (_data.size()>1){
-			// 	for (long unsigned int d_idx=0; d_idx<_data.size(); d_idx++){
-			// 		if (nvert(d_idx)==8){
-			// 			// std::cout << "Node(" << ID << ") removeing " << _data.size()-1 << " particles\n";
-			// 			_data = std::vector<SuperEllipsoid> {_data[d_idx]};
-			// 			return;
-			// 		}
-			// 	}
-			// }
+		if (_nvert == 8){
+			return;
+		}
+
+		//ONLY DIVIDE IF THERE ARE PARTICLES MULTIPLE (unnecessary?)
+		if (_data.size() <= MIN_ASSEMBLY_NUMBER_OF_PARTICLES){
 			return;
 		}
 
@@ -157,12 +131,9 @@ namespace GeoVox::geometry{
 		if (_data.size()>=_root->max_data_per_leaf){
 			make_children();
 			for (int c_idx=0; c_idx<8; c_idx++){
-				// std::cout << "\tfrom Node(" << ID << ") to " << _children[c_idx]->ID << " (child " << c_idx << ")" << std::endl;
 				_children[c_idx]->divide();
 			}
 		}
-
-		
 	}
 
 	// bool AssemblyNode::is_gradiated(){
@@ -259,129 +230,106 @@ namespace GeoVox::geometry{
 	// }
 
 
-	void AssemblyNode::create_point_global_index_maps(std::vector<Point3>& points, std::map<long unsigned int, long unsigned int>& reduced_index) const{
-		if (_isdivided){
-			for (int c_idx=0; c_idx<8; c_idx++){
-				// std::cout << "recurse from " << _ID << " to " << _children[i]->_ID << std::endl;
-				_children[c_idx]->create_point_global_index_maps(points, reduced_index);
-			}
-		}
-		else{
-			//compute global index
-			long unsigned int global_index[8];
-			get_global_vertex_index(global_index);
-
-			//populate maps
-			for (int i=0; i<8; i++){
-				// std::cout << point_map.count(global_index[i]) << std::endl;
-				if (!reduced_index.count(global_index[i])){
-
-					// std::cout << "Added global_index " << global_index[i] << " with reduced_index " << reduced_index.size() << std::endl;
-					points.push_back(box[i]); //important that this is VTK_VOXEL ordering
-					reduced_index[global_index[i]] = reduced_index.size();
-				}
-			}
-		}
-	}
+	
 
 
-	void AssemblyNode::makeElements(const std::map<long unsigned int, long unsigned int>& reduced_index, std::vector<std::vector<long unsigned int>> &elem2node, std::vector<int> &elemMarkers) const{
-		if (_isdivided){
-			for (int i=0; i<8; i++){
-				_children[i]->makeElements(reduced_index, elem2node, elemMarkers);
-			}
-		}else{
-			//set nodes
-			// unsigned int vtkID = 11; //voxel default
-			// bool used_nodes[26] {1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+	// void AssemblyNode::makeElements(const std::map<long unsigned int, long unsigned int>& reduced_index, std::vector<std::vector<long unsigned int>> &elem2node, std::vector<int> &elemMarkers) const{
+	// 	if (_isdivided){
+	// 		for (int i=0; i<8; i++){
+	// 			_children[i]->makeElements(reduced_index, elem2node, elemMarkers);
+	// 		}
+	// 	}else{
+	// 		//set nodes
+	// 		// unsigned int vtkID = 11; //voxel default
+	// 		// bool used_nodes[26] {1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
-			// //check if this element is non-conforming (ASSUMES MESH IS GRADATED)
-			// Point3 H = box.high() - box.low();
-			// Point3 neighbor_center;
-			// Node* neighbor;
+	// 		// //check if this element is non-conforming (ASSUMES MESH IS GRADATED)
+	// 		// Point3 H = box.high() - box.low();
+	// 		// Point3 neighbor_center;
+	// 		// Node* neighbor;
 
-			// neighbor_center = box.center() + Point3(-H[0], 0, 0);
-			// neighbor = _root->findnode(_depth, neighbor_center);
-			// if (neighbor!=NULL){
-			// 	if (neighbor->_isdivided){
-			// 		used_nodes[20] = 1;
-			// 		used_nodes[11] = 1;
-			// 		used_nodes[15] = 1;
-			// 		used_nodes[16] = 1;
-			// 		used_nodes[19] = 1;
-			// 		vtkID = 41; //OctCell (Convex Cell)
-			// 	}
-			// }
+	// 		// neighbor_center = box.center() + Point3(-H[0], 0, 0);
+	// 		// neighbor = _root->findnode(_depth, neighbor_center);
+	// 		// if (neighbor!=NULL){
+	// 		// 	if (neighbor->_isdivided){
+	// 		// 		used_nodes[20] = 1;
+	// 		// 		used_nodes[11] = 1;
+	// 		// 		used_nodes[15] = 1;
+	// 		// 		used_nodes[16] = 1;
+	// 		// 		used_nodes[19] = 1;
+	// 		// 		vtkID = 41; //OctCell (Convex Cell)
+	// 		// 	}
+	// 		// }
 
-			// neighbor_center = box.center() + Point3(H[0], 0, 0);
-			// neighbor = _root->findnode(_depth, neighbor_center);
-			// neighbor = _root->findnode(_depth, neighbor_center);
-			// if (neighbor!=NULL){
-			// 		if (neighbor->_isdivided){
-			// 		used_nodes[21] = 1;
-			// 		used_nodes[9]  = 1;
-			// 		used_nodes[13] = 1;
-			// 		used_nodes[17] = 1;
-			// 		used_nodes[18] = 1;
-			// 		vtkID = 41; //OctCell (Convex Cell)
-			// 	}
-			// }
+	// 		// neighbor_center = box.center() + Point3(H[0], 0, 0);
+	// 		// neighbor = _root->findnode(_depth, neighbor_center);
+	// 		// neighbor = _root->findnode(_depth, neighbor_center);
+	// 		// if (neighbor!=NULL){
+	// 		// 		if (neighbor->_isdivided){
+	// 		// 		used_nodes[21] = 1;
+	// 		// 		used_nodes[9]  = 1;
+	// 		// 		used_nodes[13] = 1;
+	// 		// 		used_nodes[17] = 1;
+	// 		// 		used_nodes[18] = 1;
+	// 		// 		vtkID = 41; //OctCell (Convex Cell)
+	// 		// 	}
+	// 		// }
 
-			// neighbor_center = box.center() + Point3(0, -H[1], 0);
-			// neighbor = _root->findnode(_depth, neighbor_center);
-			// neighbor = _root->findnode(_depth, neighbor_center);
-			// if (neighbor!=NULL){
-			// 	if (neighbor->_isdivided){
-			// 		used_nodes[22] = 1;
-			// 		used_nodes[8]  = 1;
-			// 		used_nodes[12] = 1;
-			// 		used_nodes[16] = 1;
-			// 		used_nodes[17] = 1;
-			// 		vtkID = 41; //OctCell (Convex Cell)
-			// 	}
-			// }
+	// 		// neighbor_center = box.center() + Point3(0, -H[1], 0);
+	// 		// neighbor = _root->findnode(_depth, neighbor_center);
+	// 		// neighbor = _root->findnode(_depth, neighbor_center);
+	// 		// if (neighbor!=NULL){
+	// 		// 	if (neighbor->_isdivided){
+	// 		// 		used_nodes[22] = 1;
+	// 		// 		used_nodes[8]  = 1;
+	// 		// 		used_nodes[12] = 1;
+	// 		// 		used_nodes[16] = 1;
+	// 		// 		used_nodes[17] = 1;
+	// 		// 		vtkID = 41; //OctCell (Convex Cell)
+	// 		// 	}
+	// 		// }
 
-			// neighbor_center = box.center() + Point3(0, H[1], 0);
-			// neighbor = _root->findnode(_depth, neighbor_center);
-			// neighbor = _root->findnode(_depth, neighbor_center);
-			// if (neighbor!=NULL){
-			// 	if (neighbor->_isdivided){
-			// 		used_nodes[21] = 1;
-			// 		used_nodes[9]  = 1;
-			// 		used_nodes[13] = 1;
-			// 		used_nodes[17] = 1;
-			// 		used_nodes[18] = 1;
-			// 		vtkID = 41; //OctCell (Convex Cell)
-			// 	}
-			// }
+	// 		// neighbor_center = box.center() + Point3(0, H[1], 0);
+	// 		// neighbor = _root->findnode(_depth, neighbor_center);
+	// 		// neighbor = _root->findnode(_depth, neighbor_center);
+	// 		// if (neighbor!=NULL){
+	// 		// 	if (neighbor->_isdivided){
+	// 		// 		used_nodes[21] = 1;
+	// 		// 		used_nodes[9]  = 1;
+	// 		// 		used_nodes[13] = 1;
+	// 		// 		used_nodes[17] = 1;
+	// 		// 		used_nodes[18] = 1;
+	// 		// 		vtkID = 41; //OctCell (Convex Cell)
+	// 		// 	}
+	// 		// }
 
-			// neighbor_center = box.center() + Point3(0, 0, -H[2]);
-			// neighbor = _root->findnode(_depth, neighbor_center);
-			// neighbor = _root->findnode(_depth, neighbor_center);
-			// if (neighbor!=NULL){
-			// 	if (neighbor->_isdivided){
-			// 		used_nodes[24] = 1;
-			// 		used_nodes[8]  = 1;
-			// 		used_nodes[9]  = 1;
-			// 		used_nodes[10] = 1;
-			// 		used_nodes[11] = 1;
-			// 		vtkID = 41; //OctCell (Convex Cell)
-			// 	}
-			// }
+	// 		// neighbor_center = box.center() + Point3(0, 0, -H[2]);
+	// 		// neighbor = _root->findnode(_depth, neighbor_center);
+	// 		// neighbor = _root->findnode(_depth, neighbor_center);
+	// 		// if (neighbor!=NULL){
+	// 		// 	if (neighbor->_isdivided){
+	// 		// 		used_nodes[24] = 1;
+	// 		// 		used_nodes[8]  = 1;
+	// 		// 		used_nodes[9]  = 1;
+	// 		// 		used_nodes[10] = 1;
+	// 		// 		used_nodes[11] = 1;
+	// 		// 		vtkID = 41; //OctCell (Convex Cell)
+	// 		// 	}
+	// 		// }
 
-			// neighbor_center = box.center() + Point3(0, 0, H[2]);
-			// neighbor = _root->findnode(_depth, neighbor_center);
-			// neighbor = _root->findnode(_depth, neighbor_center);
-			// if (neighbor!=NULL){
-			// 	if (neighbor->_isdivided){
-			// 		used_nodes[25] = 1;
-			// 		used_nodes[12] = 1;
-			// 		used_nodes[13] = 1;
-			// 		used_nodes[14] = 1;
-			// 		used_nodes[15] = 1;
-			// 		vtkID = 41; //OctCell (Convex Cell)
-			// 	}
-			// }
+	// 		// neighbor_center = box.center() + Point3(0, 0, H[2]);
+	// 		// neighbor = _root->findnode(_depth, neighbor_center);
+	// 		// neighbor = _root->findnode(_depth, neighbor_center);
+	// 		// if (neighbor!=NULL){
+	// 		// 	if (neighbor->_isdivided){
+	// 		// 		used_nodes[25] = 1;
+	// 		// 		used_nodes[12] = 1;
+	// 		// 		used_nodes[13] = 1;
+	// 		// 		used_nodes[14] = 1;
+	// 		// 		used_nodes[15] = 1;
+	// 		// 		vtkID = 41; //OctCell (Convex Cell)
+	// 		// 	}
+	// 		// }
 
 
 
@@ -391,28 +339,28 @@ namespace GeoVox::geometry{
 
 
 
-			long unsigned int global_index[8];
-			get_global_vertex_index(global_index);
+	// 		long unsigned int global_index[8];
+	// 		get_global_vertex_index(global_index);
 
-			elem2node.push_back({reduced_index.at(global_index[0]),
-								reduced_index.at(global_index[1]), 
-								reduced_index.at(global_index[2]), 
-								reduced_index.at(global_index[3]),
-								reduced_index.at(global_index[4]),
-								reduced_index.at(global_index[5]),
-								reduced_index.at(global_index[6]),
-								reduced_index.at(global_index[7])});
+	// 		elem2node.push_back({reduced_index.at(global_index[0]),
+	// 							reduced_index.at(global_index[1]), 
+	// 							reduced_index.at(global_index[2]), 
+	// 							reduced_index.at(global_index[3]),
+	// 							reduced_index.at(global_index[4]),
+	// 							reduced_index.at(global_index[5]),
+	// 							reduced_index.at(global_index[6]),
+	// 							reduced_index.at(global_index[7])});
 
-			// int nvert = 0;
-			// for (int v_idx=0; v_idx<8; v_idx++){
-			// 	if (in_particle(box[v_idx])){
-			// 		nvert+=1;
-			// 	}
-			// }
-			// elemMarkers.push_back(_data.size());
-			elemMarkers.push_back(nvert());
-		}
-	}
+	// 		// int nvert = 0;
+	// 		// for (int v_idx=0; v_idx<8; v_idx++){
+	// 		// 	if (in_particle(box[v_idx])){
+	// 		// 		nvert+=1;
+	// 		// 	}
+	// 		// }
+	// 		// elemMarkers.push_back(_data.size());
+	// 		elemMarkers.push_back(nvert());
+	// 	}
+	// }
 
 	// void Assembly::gradiate(){
 	// 	if (!_isdivided){
@@ -491,73 +439,8 @@ namespace GeoVox::geometry{
 
 
 
-	Mesh Assembly::make_voxel_mesh() const{
-		//ASSEMBLE REDUCED GLOBAL INDICES
-		std::vector<Point3> points;
-		std::map<long unsigned int, long unsigned int> reduced_index;
-		std::cout << "making point index\n";
-		create_point_global_index_maps(points, reduced_index);
 
-		// std::cout << "putting points into a new octree\n";
-		// GeoVox::mesh::MeshNode meshnodes(points);
-
-		// for (long unsigned int i=0; i<points.size(); i++){
-		// 	std::cout << "Point " << i << " Point3(";
-		// 	points[i].print(std::cout);
-			
-		// 	long unsigned int new_idx = meshnodes.find(points[i]);
-		// 	std::cout << ") -> " << new_idx << " Point3(" ;
-		// 	meshnodes[new_idx].print(std::cout);
-		// 	std::cout << ") : difference: " << (points[i]-meshnodes[new_idx]).norm() << std::endl;
-		// }
-
-
-		//MAKE ELEMENTS
-		std::vector<std::vector<long unsigned int>> elem2node;
-		elem2node.reserve(_nleaves);
-
-		std::vector<int> elemMarkers;
-		elemMarkers.reserve(_nleaves);
-
-		std::cout << "making elements\n";
-		makeElements(reduced_index, elem2node, elemMarkers);
-
-		//MAKE NODE MARKERS
-		std::vector<int> nodeMarkers;
-		nodeMarkers.reserve(points.size());
-		for (long unsigned int n=0; n<points.size(); n++){
-			nodeMarkers.push_back(in_particle(points[n]));
-		}
-
-		//MAKE VTK_ID
-		std::vector<unsigned int> vtkElemID(_nleaves, 11);
-		
-		//MAKE MESH
-		Mesh mesh(points, elem2node, vtkElemID, nodeMarkers, elemMarkers);
-
-
-
-		return mesh;
-	}
-
-
-	void AssemblyNode::get_global_vertex_index(long unsigned int (&global_index)[8]) const{
-		//compute global index
-		long unsigned int M2 = pow(2,_root->_maxdepth) + 1; //maximum number of vertices in side length
-		long unsigned int Mm2 = pow(2, _root->_maxdepth-_depth); //conversion factor from current depth to _maxdepth
-
-		global_index[0] = Mm2*(ijk[0]   + M2*(ijk[1]   + M2*(ijk[2]  )));
-		global_index[1] = Mm2*(ijk[0]+1 + M2*(ijk[1]   + M2*(ijk[2]  )));
-		global_index[2] = Mm2*(ijk[0]   + M2*(ijk[1]+1 + M2*(ijk[2]  )));
-		global_index[3] = Mm2*(ijk[0]+1 + M2*(ijk[1]+1 + M2*(ijk[2]  )));
-		global_index[4] = Mm2*(ijk[0]   + M2*(ijk[1]   + M2*(ijk[2]+1)));
-		global_index[5] = Mm2*(ijk[0]+1 + M2*(ijk[1]   + M2*(ijk[2]+1)));
-		global_index[6] = Mm2*(ijk[0]   + M2*(ijk[1]+1 + M2*(ijk[2]+1)));
-		global_index[7] = Mm2*(ijk[0]+1 + M2*(ijk[1]+1 + M2*(ijk[2]+1)));
-	}
-
-
-	void Assembly::save_geometry(const std::string filename, const Box& box, const int N[3]) const{
+	void Assembly::save_geometry(const std::string filename, const Box& box, const long unsigned int N[3]) const{
 		//////////////// OPEN FILE ////////////////
 		std::ofstream geofile(filename);
 
@@ -584,11 +467,11 @@ namespace GeoVox::geometry{
 		H[1]/=N[1];
 		H[2]/=N[2];
 
-		for (int k=0; k<N[2]; k++){
+		for (long unsigned int  k=0; k<N[2]; k++){
 			centroid[2] = box.low()[2] + H[2]*(0.5+k);
-			for (int j=0; j<N[1]; j++){
+			for (long unsigned int  j=0; j<N[1]; j++){
 				centroid[1] = box.low()[1] + H[1]*(0.5+j);
-				for (int i=0; i<N[0]; i++){
+				for (long unsigned int  i=0; i<N[0]; i++){
 					centroid[0] = box.low()[0] + H[0]*(0.5+i);
 					buffer << in_particle(centroid) << " ";
 				}
@@ -605,9 +488,26 @@ namespace GeoVox::geometry{
 		geofile.close();
 	}
 
-	void Assembly::save_geometry(const std::string filename, const int N[3]) const{
-		save_geometry(filename, box, N);
+	StructuredPoints Assembly::make_structured_mesh(const Box& subbox, const long unsigned int N[3]) const{
+		StructuredPoints mesh(subbox, N);
+		mesh.pointMarkers.reserve(N[0]*N[1]*N[2]);
+
+		for (long unsigned int k=0; k<N[2]; k++){
+			for (long unsigned int j=0; j<N[1]; j++){
+				for (long unsigned int i=0; i<N[0]; i++){
+					mesh.pointMarkers.push_back(this->in_particle(mesh.vertex(i,j,k)));
+				}
+			}
+		}
+		return mesh;
 	}
+
+	StructuredPoints Assembly::make_structured_mesh(const long unsigned int N[3]) const{
+		Point3 H = (box.high()-box.low())/Point3(N[0],N[1],N[2]);
+		Box subbox = Box(box.low()+0.5*H, box.high()-0.5*H);
+		return make_structured_mesh(subbox, N);
+	}
+
 
 
 	void Assembly::_setbbox() {

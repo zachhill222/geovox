@@ -1,3 +1,6 @@
+#ifndef VTK_STRUCTURED_H
+#define VTK_STRUCTURED_H
+
 #include "util/box.hpp"
 #include "util/point.hpp"
 
@@ -15,15 +18,14 @@ using Box = GeoVox::util::Box;
 
 
 namespace GeoVox::mesh{
-
 	class StructuredPoints{
 	public:
-		StructuredPoints(const Box& box, long unsigned int N[3]) :  box(box), N{N[0], N[1], N[2]}, H(((box.high()-box.low())/Point3(N[0], N[1], N[2]))) {}
-		StructuredPoints(const Point3& low, const Point3& high, long unsigned int N[3]) :  box(Box(low, high)), N{N[0], N[1], N[2]}, H(((box.high()-box.low())/Point3(N[0], N[1], N[2]))) {}
+		StructuredPoints(const Box& box, const long unsigned int N[3]) :  box(box), N{N[0], N[1], N[2]}, H(((box.high()-box.low())/Point3(N[0], N[1], N[2]))) {}
+		StructuredPoints(const Point3& low, const Point3& high, const long unsigned int N[3]) :  box(Box(low, high)), N{N[0], N[1], N[2]}, H(((box.high()-box.low())/Point3(N[0], N[1], N[2]))) {}
 		StructuredPoints(const Box& box, const std::string geofile) : box(box) {readfile(geofile);};
 
 		//mesh information
-		std::vector<int> pointMarkers;
+		std::vector<bool> pointMarkers;
 		Box box;
 		inline Point3 spacing() const {return H;}
 		inline Box bounds() const {return box;}
@@ -43,3 +45,5 @@ namespace GeoVox::mesh{
 	
 	
 }
+
+#endif

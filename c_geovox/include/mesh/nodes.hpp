@@ -6,15 +6,7 @@
 #include "util/octree.hpp"
 
 #include <vector>
-// #include <algorithm>
-// #include <map>
-// #include <set>
 #include <iostream>
-// #include <fstream>
-// #include <string>
-// #include <sstream>
-
-// #include <stdexcept>
 
 using Point3 = GeoVox::util::Point<3>;
 using Box = GeoVox::util::Box;
@@ -35,20 +27,6 @@ namespace GeoVox::mesh{
 				OctreeNode(box, ID, ijk, depth, root) {}
 			
 			bool data_valid(const Point3& point) const override;
-
-			// void make_children();
-			// long unsigned int npoints() const {return _npoints;} //number of points in children nodes //change to a stored quantity to make operator[] faster.
-
-			// void insert_point(const Point3 newpoint);
-			// void insert_point(std::vector<Point3> newpoints);
-
-			// Point3 operator[](const long unsigned int idx) const;
-
-			// long unsigned int find(const Point3& point) const;
-
-		// 	long unsigned int _npoints;
-		// protected:
-		// 	std::vector<Point3> _points;
 	};
 
 

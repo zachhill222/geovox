@@ -4,7 +4,7 @@
 #include "util/point.hpp"
 #include "util/box.hpp"
 
-// #include "mesh/nodes.hpp"
+#include "mesh/nodes.hpp"
 #include "mesh/vtk_linear_elements.hpp"
 
 #include <vector>
@@ -20,19 +20,21 @@
 
 using Point3 = GeoVox::util::Point<3>;
 using Box = GeoVox::util::Box;
-
+using MeshNode = GeoVox::mesh::MeshNode;
 
 namespace GeoVox::mesh{
 	class Mesh{
 	public:
+		Mesh() {}
+
 		Mesh(long unsigned int nNodes, long unsigned int nElems){
-			_node.reserve(nNodes);
+			// _node.reserve(nNodes);
 			_elem2node.reserve(nElems);
 			_vtkElemID.reserve(nElems);
 			_node2elem.reserve(nNodes);
 		}
 
-		Mesh(const std::vector<Point3> &node, const std::vector<std::vector<long unsigned int>> &elem2node, const std::vector<unsigned int> &vtkElemID): _node(node), _elem2node(elem2node), _vtkElemID(vtkElemID) {
+		Mesh(const MeshNode &node, const std::vector<std::vector<long unsigned int>> &elem2node, const std::vector<unsigned int> &vtkElemID): _node(node), _elem2node(elem2node), _vtkElemID(vtkElemID) {
 			make_node2elem();
 		}
 
@@ -61,11 +63,12 @@ namespace GeoVox::mesh{
 
 		//subdomains
 		Mesh mesh_subdomain(const std::set<int>& eMarker) const;
-		Mesh boundary_mesh(const std::set<int>& eMarker) const;
-		Mesh extract_boundary_mesh();
+		// Mesh boundary_mesh(const std::set<int>& eMarker) const;
+		// Mesh extract_boundary_mesh();
 
 		//essential data
-		std::vector<Point3> _node; //point locations for each node
+		// std::vector<Point3> _node; //point locations for each node
+		MeshNode _node;
 		std::vector<std::vector<long unsigned int>> _elem2node; //could be slow, but will allow different types of elements in the same mesh
 		std::vector<std::vector<long unsigned int>> _node2elem;
 		std::vector<unsigned int> _vtkElemID; //element type

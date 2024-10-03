@@ -23,7 +23,7 @@ namespace GeoVox::mesh{
 		//POINTS (CENTROIDS)
 		buffer << "DATASET STRUCTURED_POINTS\n";
 		buffer << "DIMENSIONS " << N[0] << " " << N[1] << " " << N[2] << "\n";
-		buffer << "ORIGIN " << (box.low()+0.5*H).tostring() << "\n";
+		buffer << "ORIGIN " << box.low().tostring() << "\n";
 		buffer << "SPACING " << H.tostring() << "\n\n";
 
 		meshfile << buffer.rdbuf();

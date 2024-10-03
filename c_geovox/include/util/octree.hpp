@@ -8,7 +8,6 @@
 #include "util/box.hpp"
 
 #include <vector>
-#include <map>
 #include <stdexcept>
 
 using Point3 = GeoVox::util::Point<3>;
@@ -35,9 +34,15 @@ namespace GeoVox::util{
 		}
 
 		//data access
+		// long unsigned int size() const;
 		inline long unsigned int size() const {return _ndata;} //return number of stored data in this node and below
-		inline void set_ndata() {_ndata = _data.size();}
+		void set_ndata();
 		data_t operator[](long unsigned int idx) const;
+		inline unsigned int depth() const {return _depth;}
+
+		inline bool isdivided() const {return _isdivided;}
+		inline node_t const* child_const(int c_idx) const {return reinterpret_cast<node_t const*>(_children[c_idx]);}
+
 
 		long unsigned int find(const data_t& value) const; //return index of first instance of stored value. Raises an error if value cannot be found.
 
@@ -51,7 +56,6 @@ namespace GeoVox::util{
 		node_t* findleaf(const Point3& point); //find leaf node that contains the given point. Return NULL if there is none.
 		node_t* findnode(unsigned int depth, const Point3& point); //find node that contains the given point at the given depth. Return NULL if there is none.
 		node_t const* findleaf_const(const Point3& point) const; //same as findnode, can be used in const member functions.
-
 
 		Box box; //TODO: this should be const, but have trouble in _root
 		const long unsigned int ID;
@@ -78,6 +82,34 @@ namespace GeoVox::util{
 	bool OctreeNode<root_t, node_t, data_t>::data_valid(const data_t& value) const{
 		throw std::invalid_argument("This function should never be called. Each octree class must implement a method: bool data_valid(const data_t& value) const override");
 		return false;
+	}
+
+
+	// template<typename root_t, typename node_t, typename data_t>
+	// long unsigned int OctreeNode<root_t, node_t, data_t>::size() const{
+	// 	if (_isdivided){
+	// 		long unsigned int result = 0;
+	// 		for (int c_idx=0; c_idx<8; c_idx++){
+	// 			result += _children[c_idx]->size();
+	// 		}
+	// 		return result;
+	// 	}
+
+	// 	return _data.size();
+	// }
+
+
+	template<typename root_t, typename node_t, typename data_t>
+	void OctreeNode<root_t, node_t, data_t>::set_ndata(){
+		if (_isdivided){
+			_ndata = 0;
+			for (int c_idx=0; c_idx<8; c_idx++){
+				_ndata += _children[c_idx]->size();
+			}
+			return;
+		}
+
+		_ndata = _data.size();
 	}
 
 
@@ -211,7 +243,6 @@ namespace GeoVox::util{
 
 		throw std::invalid_argument("Couldn't find specified value.");
 		return 0;
-
 	}
 
 
@@ -268,6 +299,9 @@ namespace GeoVox::util{
 
 		return NULL;
 	}
+
+
+
 }
 
 
