@@ -242,7 +242,7 @@ namespace GeoVox::geometry{
 		std::function<double(GeoVox::util::Point<2>, GeoVox::util::Point<3>)> myfun = std::bind(&SuperEllipsoid::neldermeadfun, this, std::placeholders::_1, std::placeholders::_2);
 
 		Point3 localpoint = tolocal(point);
-		GeoVox::util::Point<2> coords = GeoVox::util::neldermead(myfun, simplex, localpoint);
+		GeoVox::util::Point<2> coords = GeoVox::solvers::neldermead(myfun, simplex, localpoint);
 		return toglobal(parametric(coords[0], coords[1]));
 	}
 

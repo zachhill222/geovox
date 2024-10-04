@@ -1,7 +1,10 @@
 #include "util_module.hpp"
 #include "geometry_module.hpp"
 #include "mesh_module.hpp"
+#include "mac/mac.hpp"
+
 #include <iostream>
+#include <vector>
 
 
 using namespace GeoVox;
@@ -11,15 +14,14 @@ using Point3 = util::Point<3>;
 using Box = util::Box;
 
 int test_assembly(){
-
 	std::cout << "READING PARTICLES\n";
-	Assembly A = Assembly("particles_1000.txt");
+	Assembly A = Assembly("particles_1.txt");
 
 	std::cout << "MAKING PARTICLE OCTREE\n";
-	A.divide(7);
+	A.divide(5);
 	
 	// std::cout << "SAVING GEOMETRY\n";
-	long unsigned int  N[3] {256, 256, 256};
+	long unsigned int  N[3] {50, 50, 50};
 	// A.save_geometry("Geometry.dat", A.box, N);
 
 	// std::cout << "READING GEOMETRY\n";
@@ -39,22 +41,19 @@ int test_assembly(){
 	std::cout << "SAVING OCTREE STRUCTURE AS VTK MESH\n";
 	octree_structure.saveas("octree_structure.vtk");
 
-	// std::cout << "MAKING MIXED MESH\n";
-	// Mesh M = A.make_mixed_mesh();
-	// M.saveas("mixed_mesh_from_mesh.vtk");
+	std::cout << "SETTING UP MAC\n";
+	GeoVox::mac::MacMesh mac(SP.box, SP.N, A);
+	mac.f1 = std::vector<double>(mac.u.size(), 1.0);
 
-	// std::cout << "MAKING VOXEL MESH\n";
-	// Mesh M = A.make_voxel_mesh();
-	// M.saveas("voxel_mesh.vtk");
-	
-	// std::cout << "GRADIATING\n";
-	// A.gradiate();
-	// M = A.make_voxel_mesh();
-	// M.saveas("voxel_gradiated_mesh.vtk");
+	// std::cout << "SOLVING MAC\n";
+	// for (int i=0; i<10; i++){
+	// 	std::cout << "\titeration " << i << std::endl;
+	// 	mac.DGS();
+	// }
 
-	// std::cout << "MAKING SURFACE MESH\n"; //SURFACE MESH IS SLOW
-	// Mesh S = M.extract_boundary_mesh();
-	// S.saveas("surface_mesh.vtk");
+	std::cout << "SAVING MAC SOLUTION\n";
+	mac.saveas("mac_solution.vtk");
+
 
 	return 1;
 }

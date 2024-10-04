@@ -30,7 +30,7 @@ namespace GeoVox::mesh{
 		buffer.str("");
 
 
-		//ELEMENT_MARKERS
+		//POINT_MARKERS
 		buffer << "POINT_DATA " << N[0]*N[1]*N[2] << "\n";
 		buffer << "SCALARS pointMarkers integer\n";
 		buffer << "LOOKUP_TABLE default\n";

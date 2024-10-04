@@ -14,6 +14,14 @@ GEO_OBJECTS := $(GEO_SOURCES:.cpp=.o)
 MESH_SOURCES := $(wildcard src/mesh/*.cpp)
 MESH_OBJECTS := $(MESH_SOURCES:.cpp=.o)
 
+#solver module
+SOLVER_SOURCES := $(wildcard src/solver/*.cpp)
+SOLVER_OBJECTS := $(SOLVER_SOURCES:.cpp=.o)
+
+#MAC module
+MAC_SOURCES := $(wildcard src/mac/*.cpp)
+MAC_OBJECTS := $(MAC_SOURCES:.cpp=.o)
+
 CC        := g++
 CFLAGS    := -O2 -Wall
 
@@ -26,7 +34,7 @@ TARGET    := $(BUILD_DIR)/libcgeovox.a
 ##############################################
 ######### BUILD LIBRARY ######################
 ##############################################
-$(TARGET): $(UTIL_OBJECTS) $(GEO_OBJECTS) $(MESH_OBJECTS) | $(BUILD_DIR)
+$(TARGET): $(UTIL_OBJECTS) $(GEO_OBJECTS) $(MESH_OBJECTS) $(SOLVER_OBJECTS) $(MAC_OBJECTS)| $(BUILD_DIR)
 	ar rcs $@ $^
 	ranlib $@
 

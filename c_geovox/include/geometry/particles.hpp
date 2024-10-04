@@ -5,7 +5,7 @@
 #include "util/quaternion.hpp"
 #include "util/box.hpp"
 #include "util/polytope.hpp"
-#include "util/neldermead.hpp"
+#include "solvers/neldermead.hpp"
 
 #include <functional>
 #include <cmath>

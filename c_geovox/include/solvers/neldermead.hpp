@@ -12,7 +12,9 @@
 #define NELDERMEAD_SIGMA 0.125
 #define NELDERMEAD_MAXITER 2
 
-namespace GeoVox::util{
+
+
+namespace GeoVox::solvers{
 	template<size_t dim, typename F, typename Args>
 	GeoVox::util::Point<dim> neldermead(F fun, GeoVox::util::Simplex<dim>& simplex, const Args& args);
 
