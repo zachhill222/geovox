@@ -24,6 +24,7 @@ MAC_OBJECTS := $(MAC_SOURCES:.cpp=.o)
 
 CC        := g++
 CFLAGS    := -O2 -Wall
+LIBS      := 
 
 TARGET    := $(BUILD_DIR)/libcgeovox.a
 
@@ -34,7 +35,7 @@ TARGET    := $(BUILD_DIR)/libcgeovox.a
 ##############################################
 ######### BUILD LIBRARY ######################
 ##############################################
-$(TARGET): $(UTIL_OBJECTS) $(GEO_OBJECTS) $(MESH_OBJECTS) $(SOLVER_OBJECTS) $(MAC_OBJECTS)| $(BUILD_DIR)
+$(TARGET): $(UTIL_OBJECTS) $(GEO_OBJECTS) $(MESH_OBJECTS) $(SOLVER_OBJECTS) $(MAC_OBJECTS) | $(BUILD_DIR)
 	ar rcs $@ $^
 	ranlib $@
 
@@ -46,7 +47,7 @@ $(TARGET): $(UTIL_OBJECTS) $(GEO_OBJECTS) $(MESH_OBJECTS) $(SOLVER_OBJECTS) $(MA
 ######### BUILD OBJECTS ######################
 ##############################################
 .cpp.o:
-	$(CC) $(CFLAGS) -I$(INC_DIR) -c $< -o $@
+	$(CC) $(CFLAGS) -I$(INC_DIR) -c $< -o $@ $(LIBS)
 
 
 

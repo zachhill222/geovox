@@ -292,7 +292,7 @@ namespace GeoVox::util{
 		}
 
 		if (_len != other.len()){
-			std::out_of_range("Vectors must be the same size");
+			throw std::out_of_range("Vectors must be the same size");
 		}
 
 		for (int i=0; i<_len; i++){
