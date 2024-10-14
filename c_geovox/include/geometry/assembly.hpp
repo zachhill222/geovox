@@ -28,11 +28,9 @@
 
 
 using SuperEllipsoid = GeoVox::geometry::SuperEllipsoid;
-using Point3 = GeoVox::util::Point<3>;
 using Box = GeoVox::util::Box;
 using Mesh = GeoVox::mesh::Mesh;
 using StructuredPoints = GeoVox::mesh::StructuredPoints;
-// using Vertex = GeoVox::mesh::Vertex;
 
 namespace GeoVox::geometry{
 	class AssemblyNode;

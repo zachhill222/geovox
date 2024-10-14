@@ -21,7 +21,7 @@ bool lineCase(Polytope3& simplex, Point3& direction){
 		direction = AB.cross(AO.cross(AB));
 
 		//check if line segment contained the origin. AB and AO are co-linear.
-		if (direction.norm2() <= DBL_EPSILON){
+		if (direction.squaredNorm() <= DBL_EPSILON){
 			return true;
 		}
 		// simplex = Polytope3({B, A}); //no change to simplex

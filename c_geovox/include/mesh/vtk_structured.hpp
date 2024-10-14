@@ -21,12 +21,12 @@ namespace GeoVox::mesh{
 	class StructuredPoints{
 	public:
 		StructuredPoints () {}
-		StructuredPoints(const Box& box, const long unsigned int N[3]) :  box(box), N{N[0], N[1], N[2]}, H(((box.high()-box.low())/Point3(N[0], N[1], N[2]))) {}
-		StructuredPoints(const Point3& low, const Point3& high, const long unsigned int N[3]) :  box(Box(low, high)), N{N[0], N[1], N[2]}, H(((box.high()-box.low())/Point3(N[0], N[1], N[2]))) {}
+		StructuredPoints(const Box& box, const long unsigned int N[3]) :  box(box), N{N[0], N[1], N[2]}, H(GeoVox::util::div((box.high()-box.low()).eval(),Point3(N[0], N[1], N[2]))) {}
+		StructuredPoints(const Point3& low, const Point3& high, const long unsigned int N[3]) :  box(Box(low, high)), N{N[0], N[1], N[2]}, H(GeoVox::util::div((box.high()-box.low()).eval(),Point3(N[0], N[1], N[2]))) {}
 		StructuredPoints(const Box& box, const std::string geofile) : box(box) {readfile(geofile);};
 		
 		//access methods
-		inline Point3 vertex(long unsigned int i, long unsigned int j, long unsigned int k) const {return box.low() + H*Point3(i,j,k);}
+		inline Point3 vertex(long unsigned int i, long unsigned int j, long unsigned int k) const {return box.low() + GeoVox::util::times(H,Point3(i,j,k));}
 		inline long unsigned int index(long unsigned int i, long unsigned int j, long unsigned int k) const {return i + N[0]*( j + N[1]*k);}
 
 		//fileio

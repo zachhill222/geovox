@@ -191,12 +191,12 @@ namespace GeoVox::util{
 	}
 
 
-	void Box::print(std::ostream &stream) const{
+	std::string Box::tostr() const{
+		std::stringstream stream;
 		for (int i=0; i<8; i++){
-			stream << i << ": ";
-			operator[](i).print(stream);
-			stream << std::endl;
+			stream << i << ": " << operator[](i) << std::endl;
 		}
+		return stream.str();
 	}
 
 

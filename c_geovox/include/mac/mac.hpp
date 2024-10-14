@@ -25,7 +25,7 @@ namespace GeoVox::mac{
 		
 		MacMesh(const Box& box, const long unsigned int N[3], const Assembly &assembly){
 			//get spacing between DOFs
-			Point3 H = (box.high()-box.low())/Point3(N[0], N[1], N[2]);
+			Point3 H = GeoVox::util::div((box.high()-box.low()).eval(),Point3(N[0], N[1], N[2]));
 			long unsigned int M[3];
 
 			//create masks
@@ -64,7 +64,7 @@ namespace GeoVox::mac{
 
 		MacMesh(const Box& box, const long unsigned int N[3]){
 			//get spacing between DOFs
-			Point3 H = (box.high()-box.low())/Point3(N[0], N[1], N[2]);
+			Point3 H = GeoVox::util::div((box.high()-box.low()).eval(),Point3(N[0], N[1], N[2]));
 			long unsigned int M[3];
 
 			//create masks

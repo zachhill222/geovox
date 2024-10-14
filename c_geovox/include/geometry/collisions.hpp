@@ -4,14 +4,16 @@
 #include "util/polytope.hpp"
 #include "util/point.hpp"
 #include "util/plane.hpp"
+
 #include <cfloat> //need DBL_EPSILON
 
 #define MAX_GJK_ITERATIONS 64
 
-namespace GeoVox::geometry{
-using Point3 = GeoVox::util::Point<3>;
-using Polytope3 = GeoVox::util::Polytope<3>;
+using Point3 = GeoVox::util::Point3;
+using Polytope3 = GeoVox::util::Polytope3;
 using Plane = GeoVox::util::Plane;
+
+namespace GeoVox::geometry{
 
 
 //SA and SB are two classes that represent convex shapes with a methods:

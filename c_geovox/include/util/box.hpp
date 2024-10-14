@@ -1,11 +1,13 @@
 #ifndef BOX_H
 #define BOX_H
 
+#include "Eigen/Core"
 #include "util/point.hpp"
+
 #include <stdexcept>
+#include <string>
+#include <sstream>
 
-
-using Point3 = GeoVox::util::Point<3>;
 
 namespace GeoVox::util{
 	class Box{
@@ -73,7 +75,7 @@ namespace GeoVox::util{
 
 		Box* combine(const Box& other); //combine this box with other (same thing as the Box(Box,Box) initializer)
 
-		void print(std::ostream &stream) const;
+		std::string tostr() const;
 
 	private:
 		Point3 _low;

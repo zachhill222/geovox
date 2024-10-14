@@ -144,9 +144,8 @@ namespace GeoVox::geometry{
 	}
 
 	double SuperEllipsoid::levelval(const Point3& point) const{
-		Point3 localpoint = tolocal(point);
-		localpoint/=_r;
-		localpoint*=localpoint;
+		Point3 localpoint = GeoVox::util::div(tolocal(point),_r);
+		localpoint = GeoVox::util::times(localpoint,localpoint);
 		localpoint[0] = std::pow(localpoint[0], _POWERS[1]);
 		localpoint[1] = std::pow(localpoint[1], _POWERS[1]);
 		localpoint[2] = std::pow(localpoint[2], _POWERS[0]);
@@ -248,7 +247,7 @@ namespace GeoVox::geometry{
 
 
 	double SuperEllipsoid::neldermeadfun(GeoVox::util::Point<2> coords, Point3 localpoint) const{
-		return (parametric(coords[0], coords[1])-localpoint).norm2();
+		return (parametric(coords[0], coords[1])-localpoint).squaredNorm();
 	}
 
 
@@ -309,11 +308,11 @@ namespace GeoVox::geometry{
 	}
 
 	double Sphere::levelval(const Point3& point) const{
-		return tolocal(point).norm2()*_1r2;
+		return tolocal(point).squaredNorm()*_1r2;
 	}
 
 	Point3 Sphere::support(const Point3& direction) const{
-		return _center + _r*direction.normalize();
+		return _center + _r*direction.normalized();
 	}
 
 

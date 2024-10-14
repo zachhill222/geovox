@@ -23,8 +23,8 @@ namespace GeoVox::mesh{
 		//POINTS (CENTROIDS)
 		buffer << "DATASET STRUCTURED_POINTS\n";
 		buffer << "DIMENSIONS " << N[0] << " " << N[1] << " " << N[2] << "\n";
-		buffer << "ORIGIN " << box.low().tostring() << "\n";
-		buffer << "SPACING " << H.tostring() << "\n\n";
+		buffer << "ORIGIN " << box.low() << "\n";
+		buffer << "SPACING " << H << "\n\n";
 
 		meshfile << buffer.rdbuf();
 		buffer.str("");
@@ -66,7 +66,7 @@ namespace GeoVox::mesh{
 		geofile >> str >> N[1];
 		geofile >> str >> N[2];
 
-		H = ((box.high()-box.low())/Point3(N[0], N[1], N[2]));
+		H = GeoVox::util::div((box.high()-box.low()).eval(),Point3(N[0], N[1], N[2]));
 
 		//READ BODY
 		int mkr;

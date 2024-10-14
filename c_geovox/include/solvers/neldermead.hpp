@@ -15,14 +15,14 @@
 
 
 namespace GeoVox::solvers{
-	template<size_t dim, typename F, typename Args>
+	template<int dim, typename F, typename Args>
 	GeoVox::util::Point<dim> neldermead(F fun, GeoVox::util::Simplex<dim>& simplex, const Args& args);
 
-	template<size_t dim>
+	template<int dim>
 	void sortSimplex(double (&fvals)[dim+1], GeoVox::util::Simplex<dim>& simplex);
 
 
-	template<size_t dim, typename F, typename Args>
+	template<int dim, typename F, typename Args>
 	GeoVox::util::Point<dim> neldermead(F fun, GeoVox::util::Simplex<dim>& simplex, const Args& args){
 		// std::cout << "starting neldermead\n";
 		//INITIALIZE SIMPLEX AND FVALS
@@ -114,7 +114,7 @@ namespace GeoVox::solvers{
 
 
 
-	template<size_t dim>
+	template<int dim>
 	void sortSimplex(double (&fvals)[dim+1], GeoVox::util::Simplex<dim>& simplex){
 		bool ordered = false;
 		for (long unsigned int n=0; n<dim+1; n++){

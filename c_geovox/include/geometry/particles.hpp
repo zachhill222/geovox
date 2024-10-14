@@ -12,10 +12,10 @@
 
 
 
-using Point3 = GeoVox::util::Point<3>;
+using Point3 = GeoVox::util::Point3;
 using Quaternion = GeoVox::util::Quaternion;
 using Box = GeoVox::util::Box;
-using Polytope3 = GeoVox::util::Polytope<3>;
+using Polytope3 = GeoVox::util::Polytope3;
 
 typedef double (*NelderMeadFun_t)(GeoVox::util::Point<2>, GeoVox::util::Point<3>);
 

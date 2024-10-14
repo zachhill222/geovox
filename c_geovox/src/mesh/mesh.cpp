@@ -171,7 +171,7 @@ namespace GeoVox::mesh{
 		buffer << "POINTS " << nNodes() << " float\n";
 		for (long unsigned int n_idx=0; n_idx<nNodes(); n_idx++){
 			// _node[n_idx].print(buffer);
-			buffer << _node[n_idx].tostring() << std::endl;
+			buffer << _node[n_idx] << std::endl;
 		}
 		buffer << std::endl;
 

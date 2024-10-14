@@ -219,8 +219,8 @@ namespace GeoVox::mac{
 		//POINTS (CENTROIDS)
 		buffer << "DATASET STRUCTURED_POINTS\n";
 		buffer << "DIMENSIONS " << p_mask.N[0] << " " << p_mask.N[1] << " " << p_mask.N[2] << "\n";
-		buffer << "ORIGIN " << p_mask.box.low().tostring() << "\n";
-		buffer << "SPACING " << p_mask.H.tostring() << "\n\n";
+		buffer << "ORIGIN " << p_mask.box.low() << "\n";
+		buffer << "SPACING " << p_mask.H << "\n\n";
 
 		solutionfile << buffer.rdbuf();
 		buffer.str("");

@@ -503,7 +503,7 @@ namespace GeoVox::geometry{
 	}
 
 	StructuredPoints Assembly::make_structured_mesh(const long unsigned int N[3]) const{
-		Point3 H = (box.high()-box.low())/Point3(N[0],N[1],N[2]);
+		Point3 H = (box.high()-box.low()).array()/Point3(N[0],N[1],N[2]).array();
 		Box subbox = Box(box.low()+0.5*H, box.high()-0.5*H);
 		return make_structured_mesh(subbox, N);
 	}

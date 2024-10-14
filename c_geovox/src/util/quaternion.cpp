@@ -16,14 +16,14 @@ namespace GeoVox::util{
 		return Quaternion(_q0, -_qv);
 	}
 	Quaternion Quaternion::inv() const{
-		double C = 1.0/norm2();
+		double C = 1.0/squaredNorm();
 		return Quaternion(C*_q0, (-C)*_qv);
 	}
-	double Quaternion::norm2() const{
-		return _q0*_q0 + _qv.norm2();
+	double Quaternion::squaredNorm() const{
+		return _q0*_q0 + _qv.squaredNorm();
 	}
 	double Quaternion::norm() const{
-		return std::sqrt(norm2());
+		return std::sqrt(squaredNorm());
 	}
 
 	Quaternion* Quaternion::normalize(){
@@ -34,7 +34,7 @@ namespace GeoVox::util{
 	}
 	Quaternion* Quaternion::setrotation(const double& theta, const Point3& axis){
 		_q0 = std::cos(0.5*theta);
-		_qv = std::sin(0.5*theta)*axis.normalize();
+		_qv = std::sin(0.5*theta)*axis.normalized();
 		return this;
 	}
 	Point3 Quaternion::rotate(const Point3& point) const {

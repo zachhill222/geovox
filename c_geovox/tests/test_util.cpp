@@ -15,13 +15,13 @@ using Box = util::Box;
 
 int test_assembly(){
 	std::cout << "READING PARTICLES\n";
-	Assembly A = Assembly("particles_1.txt");
+	Assembly A = Assembly("particles_1000.txt");
 
 	std::cout << "MAKING PARTICLE OCTREE\n";
 	A.divide(5);
 	
 	// std::cout << "SAVING GEOMETRY\n";
-	long unsigned int  N[3] {50, 50, 50};
+	long unsigned int  N[3] {256, 256, 256};
 	// A.save_geometry("Geometry.dat", A.box, N);
 
 	// std::cout << "READING GEOMETRY\n";
@@ -41,9 +41,9 @@ int test_assembly(){
 	std::cout << "SAVING OCTREE STRUCTURE AS VTK MESH\n";
 	octree_structure.saveas("octree_structure.vtk");
 
-	std::cout << "SETTING UP MAC\n";
-	GeoVox::mac::MacMesh mac(SP.box, SP.N, A);
-	mac.f1 = std::vector<double>(mac.u.size(), 1.0);
+	// std::cout << "SETTING UP MAC\n";
+	// GeoVox::mac::MacMesh mac(SP.box, SP.N, A);
+	// mac.f1 = std::vector<double>(mac.u.size(), 1.0);
 
 	// std::cout << "SOLVING MAC\n";
 	// for (int i=0; i<10; i++){
@@ -51,8 +51,8 @@ int test_assembly(){
 	// 	mac.DGS();
 	// }
 
-	std::cout << "SAVING MAC SOLUTION\n";
-	mac.saveas("mac_solution.vtk");
+	// std::cout << "SAVING MAC SOLUTION\n";
+	// mac.saveas("mac_solution.vtk");
 
 
 	return 1;

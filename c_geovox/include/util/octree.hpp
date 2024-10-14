@@ -10,8 +10,6 @@
 #include <vector>
 #include <stdexcept>
 
-using Point3 = GeoVox::util::Point<3>;
-using Box = GeoVox::util::Box;
 
 namespace GeoVox::util{
 

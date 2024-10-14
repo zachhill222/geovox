@@ -1,12 +1,11 @@
 #ifndef QUATERNION_H
 #define QUATERNION_H
 
-#include "util/box.hpp"
 #include "util/point.hpp"
 #include <cmath>
 
+
 namespace GeoVox::util{
-	using Point3 = Point<3>;
 	class Quaternion{
 	public:
 		//// INITIALIZERS
@@ -22,7 +21,7 @@ namespace GeoVox::util{
 		//// ROTATIONS
 		Quaternion conj() const;
 		Quaternion inv() const;
-		double norm2() const;
+		double squaredNorm() const;
 		double norm() const;
 		Quaternion* normalize(); //normalize this quaternion to a rotation quaternion
 		Quaternion* setrotation(const double& theta, const Point3& axis);
