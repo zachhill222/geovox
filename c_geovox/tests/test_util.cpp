@@ -3,6 +3,8 @@
 #include "mesh_module.hpp"
 #include "mac/mac.hpp"
 
+#include "Eigen/Core"
+
 #include <iostream>
 #include <vector>
 
@@ -15,19 +17,25 @@ using Box = util::Box;
 
 int test_assembly(){
 	std::cout << "READING PARTICLES\n";
-	Assembly A = Assembly("particles_1000.txt");
+	Assembly A = Assembly("particles_100.txt");
 
 	std::cout << "MAKING PARTICLE OCTREE\n";
-	A.divide(5);
+	A.divide(7);
+
+	std::cout << "MAKING OCTREE STRUCTURE VTK MESH\n";
+	Mesh octree_structure = GeoVox::util::visualize_octree_structure<Assembly, GeoVox::geometry::AssemblyNode, GeoVox::geometry::SuperEllipsoid>(&A);
+
+	std::cout << "SAVING OCTREE STRUCTURE AS VTK MESH\n";
+	octree_structure.saveas("octree_structure.vtk");
 	
+
+	long unsigned int  N[3] {128, 128, 128};
+
 	// std::cout << "SAVING GEOMETRY\n";
-	long unsigned int  N[3] {256, 256, 256};
 	// A.save_geometry("Geometry.dat", A.box, N);
 
 	// std::cout << "READING GEOMETRY\n";
 	// Point3 H = (A.box.high()-A.box.low())/Point3(N[0], N[1], N[2]);
-
-	// GeoVox::mesh::StructuredPoints SP(Box(A.box.low()+0.5*H, A.box.high()-0.5*H), "Geometry.dat");
 
 	std::cout << "MAKING STRUCTURED POINTS\n";
 	GeoVox::mesh::StructuredPoints SP = A.make_structured_mesh(N);
@@ -35,21 +43,15 @@ int test_assembly(){
 	std::cout << "SAVING STRUCTURED POINTS\n";
 	SP.saveas("structured_points.vtk");
 
-	std::cout << "MAKING OCTREE STRUCTURE VTK MESH\n";
-	Mesh octree_structure = GeoVox::util::visualize_octree_structure<Assembly, GeoVox::geometry::AssemblyNode, GeoVox::geometry::SuperEllipsoid>(&A);
-
-	std::cout << "SAVING OCTREE STRUCTURE AS VTK MESH\n";
-	octree_structure.saveas("octree_structure.vtk");
-
 	// std::cout << "SETTING UP MAC\n";
-	// GeoVox::mac::MacMesh mac(SP.box, SP.N, A);
-	// mac.f1 = std::vector<double>(mac.u.size(), 1.0);
+	// GeoVox::mac::MacMesh mac(A.box, SP.N, A);
+	// mac.f1 = Eigen::VectorXd::Ones(mac.u.size());
 
-	// std::cout << "SOLVING MAC\n";
-	// for (int i=0; i<10; i++){
-	// 	std::cout << "\titeration " << i << std::endl;
-	// 	mac.DGS();
-	// }
+	// // std::cout << "SOLVING MAC\n";
+	// // for (int i=0; i<10; i++){
+	// // 	std::cout << "\titeration " << i << std::endl;
+	// // 	mac.DGS();
+	// // }
 
 	// std::cout << "SAVING MAC SOLUTION\n";
 	// mac.saveas("mac_solution.vtk");

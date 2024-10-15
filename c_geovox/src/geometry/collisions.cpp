@@ -21,7 +21,7 @@ bool lineCase(Polytope3& simplex, Point3& direction){
 		direction = AB.cross(AO.cross(AB));
 
 		//check if line segment contained the origin. AB and AO are co-linear.
-		if (direction.squaredNorm() <= DBL_EPSILON){
+		if (direction.squaredNorm() <= GJK_DBL_TOL){
 			return true;
 		}
 		// simplex = Polytope3({B, A}); //no change to simplex
@@ -99,13 +99,13 @@ bool triangleCase(Polytope3& simplex, Point3& direction){
 			DOT = ABC_normal.dot(AO);
 			// std::cout << DOT << std::endl;
 			//above, below, or on triangle
-			if (DOT>DBL_EPSILON ){
+			if (DOT>GJK_DBL_TOL ){
 				direction = ABC_normal;
 				// simplex = Polytope3({C,B,A}); //no change to simplex
 
 				// std::cout << "REGION 4\n";
 			}
-			else if (DOT<-DBL_EPSILON){
+			else if (DOT<-GJK_DBL_TOL){
 				direction = -ABC_normal;
 				simplex = Polytope3({B, C, A}); //orientation matters
 

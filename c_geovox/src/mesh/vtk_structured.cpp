@@ -30,14 +30,14 @@ namespace GeoVox::mesh{
 		buffer.str("");
 
 
-		//POINT_MARKERS
+		//POINT_MARKERS (CENTROIDS OF CELLS)
 		buffer << "POINT_DATA " << N[0]*N[1]*N[2] << "\n";
-		buffer << "SCALARS pointMarkers integer\n";
+		buffer << "SCALARS markers integer\n";
 		buffer << "LOOKUP_TABLE default\n";
 		for (long unsigned int k=0; k<N[2]; k++){
 			long unsigned int start_idx = N[0]*N[1]*k;
 			for (long unsigned int ij=0; ij<N[0]*N[1]; ij++){
-				buffer << pointMarkers[start_idx+ij] << " ";
+				buffer << markers[start_idx+ij] << " ";
 			}
 			buffer << "\n";
 		}
@@ -70,13 +70,13 @@ namespace GeoVox::mesh{
 
 		//READ BODY
 		int mkr;
-		pointMarkers.reserve(N[0]*N[1]*N[2]);
+		markers.reserve(N[0]*N[1]*N[2]);
 
 		for (long unsigned int k=0; k<N[2]; k++){
 			for (long unsigned int j=0; j<N[1]; j++){
 				for (long unsigned int i=0; i<N[0]; i++){
 					geofile >> mkr;
-					pointMarkers.push_back(mkr);
+					markers.push_back(mkr);
 				}
 			}
 		}

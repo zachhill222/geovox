@@ -7,7 +7,8 @@
 
 #include <cfloat> //need DBL_EPSILON
 
-#define MAX_GJK_ITERATIONS 64
+#define GJK_DBL_TOL 0
+#define MAX_GJK_ITERATIONS 16
 
 using Point3 = GeoVox::util::Point3;
 using Polytope3 = GeoVox::util::Polytope3;
@@ -77,6 +78,7 @@ bool GJK(const SA& S1, const SB& S2){
 		// std::cout << "\n====================\n";
 	}
 
+	// std::cout << "GJK failed to converge in " << MAX_GJK_ITERATIONS << " iterations\n";
 	return true; //failed to converge, return collision to be safe.
 }
 

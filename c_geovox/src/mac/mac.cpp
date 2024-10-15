@@ -1,9 +1,9 @@
 #include "mac/mac.hpp"
 
 namespace GeoVox::mac{
-	std::vector<double> MacMesh::discrete_laplacian(const StructuredPoints &mask, const std::vector<double> &vals) const{
+	VectorXd MacMesh::discrete_laplacian(const StructuredPoints& mask, const VectorXd& vals) const{
 		//mask corresponds to vals
-		std::vector<double> result(mask.N[0]*mask.N[1]*mask.N[2], 0);
+		VectorXd result = VectorXd::Zero(mask.N[0]*mask.N[1]*mask.N[2]);
 		Point3 H_2 = Point3(1.0/(mask.H[0]*mask.H[0]), 1.0/(mask.H[1]*mask.H[1]), 1.0/(mask.H[2]*mask.H[2])); //  1/(h*h)
 
 		for (long unsigned int k=0; k<mask.N[2]; k++){
@@ -11,7 +11,7 @@ namespace GeoVox::mac{
 				for (long unsigned int i=0; i<mask.N[0]; i++){
 					
 					long unsigned int P = mask.index(i  , j  , k  );
-					if (mask.pointMarkers[P] != MAC_DOMAIN_MARKER){
+					if (mask.markers[P] != MAC_DOMAIN_MARKER){
 						continue;
 					}
 
@@ -37,8 +37,8 @@ namespace GeoVox::mac{
 
 
 
-	std::vector<double> MacMesh::discrete_partial_t(const StructuredPoints &eval_dof_mask, const StructuredPoints &given_dof_mask, const std::vector<double> &vals, const int direction) const{
-		std::vector<double> result(eval_dof_mask.N[0]*eval_dof_mask.N[1]*eval_dof_mask.N[2], 0);
+	VectorXd MacMesh::discrete_partial_t(const StructuredPoints& eval_dof_mask, const StructuredPoints& given_dof_mask, const VectorXd& vals, const int direction) const{
+		VectorXd result = VectorXd::Zero(eval_dof_mask.N[0]*eval_dof_mask.N[1]*eval_dof_mask.N[2]);
 		Point3 H_2 = Point3(1.0/(given_dof_mask.H[0]), 1.0/(given_dof_mask.H[1]), 1.0/(given_dof_mask.H[2])); //  1/h
 
 		for (long unsigned int k=0; k<eval_dof_mask.N[2]; k++){
@@ -48,7 +48,7 @@ namespace GeoVox::mac{
 					long unsigned int P = eval_dof_mask.index(i  , j  , k  );
 					long unsigned int B;
 					double h_2;
-					if (eval_dof_mask.pointMarkers[P] != MAC_DOMAIN_MARKER){
+					if (eval_dof_mask.markers[P] != MAC_DOMAIN_MARKER){
 						continue;
 					}
 
@@ -81,8 +81,8 @@ namespace GeoVox::mac{
 
 
 
-	std::vector<double> MacMesh::discrete_partial(const StructuredPoints &eval_dof_mask, const StructuredPoints &given_dof_mask, const std::vector<double> &vals, const int direction) const{
-		std::vector<double> result(eval_dof_mask.N[0]*eval_dof_mask.N[1]*eval_dof_mask.N[2], 0);
+	VectorXd MacMesh::discrete_partial(const StructuredPoints& eval_dof_mask, const StructuredPoints& given_dof_mask, const VectorXd& vals, const int direction) const{
+		VectorXd result = VectorXd::Zero(eval_dof_mask.N[0]*eval_dof_mask.N[1]*eval_dof_mask.N[2]);
 		Point3 H_2 = Point3(1.0/(given_dof_mask.H[0]), 1.0/(given_dof_mask.H[1]), 1.0/(given_dof_mask.H[2])); //  1/h
 
 		for (long unsigned int k=0; k<eval_dof_mask.N[2]; k++){
@@ -90,7 +90,7 @@ namespace GeoVox::mac{
 				for (long unsigned int i=0; i<eval_dof_mask.N[0]; i++){
 					
 					long unsigned int P = eval_dof_mask.index(i  , j  , k  );
-					if (eval_dof_mask.pointMarkers[P] != MAC_DOMAIN_MARKER){
+					if (eval_dof_mask.markers[P] != MAC_DOMAIN_MARKER){
 						continue;
 					}
 
@@ -125,78 +125,78 @@ namespace GeoVox::mac{
 	}
 
 
-	std::vector<double> MacMesh::BB_t(const std::vector<double> &vals) const{
-		std::vector<double> result = Bz(Bz_t(vals));
+	// VectorXd MacMesh::BB_t(const VectorXd& vals) const{
+	// 	VectorXd result = Bz(Bz_t(vals));
 		
-		std::vector<double> temp = By(By_t(vals));
-		GeoVox::solvers::sum(result, temp);
+	// 	VectorXd temp = By(By_t(vals));
+	// 	GeoVox::solvers::sum(result, temp);
 
-		temp = Bx(Bx_t(vals));
-		GeoVox::solvers::sum(result, temp);
-		return result;
-	}
+	// 	temp = Bx(Bx_t(vals));
+	// 	GeoVox::solvers::sum(result, temp);
+	// 	return result;
+	// }
 
-	void MacMesh::DGS(){
-		//RELAX X-VELOCITY
-		std::vector<double> temp = Bx_t(p);
-		std::vector<double> rhs = GeoVox::solvers::sum_times(f1, temp, -1.0);
-		rhs = GeoVox::solvers::sum_times(rhs, Au(u), -1.0);
+	// void MacMesh::DGS(){
+	// 	//RELAX X-VELOCITY
+	// 	VectorXd temp = Bx_t(p);
+	// 	VectorXd rhs = GeoVox::solvers::sum_times(f1, temp, -1.0);
+	// 	rhs = GeoVox::solvers::sum_times(rhs, Au(u), -1.0);
 
-		std::function<std::vector<double>(std::vector<double>)> times_mat = std::bind(&MacMesh::Au, this, std::placeholders::_1);
-		std::vector<double> step(u.size(),0);
-		GeoVox::solvers::cg(step, times_mat, rhs, 10);
+	// 	std::function<VectorXd(VectorXd)> times_mat = std::bind(&MacMesh::Au, this, std::placeholders::_1);
+	// 	VectorXd step(u.size(),0);
+	// 	GeoVox::solvers::cg(step, times_mat, rhs, 10);
 
-		GeoVox::solvers::sum(u, step);
+	// 	GeoVox::solvers::sum(u, step);
 
-		//RElAX Y-VELOCITY
-		temp = By_t(p);
-		rhs = GeoVox::solvers::sum_times(f2, temp, -1.0);
-		temp = Av(v);
-		rhs = GeoVox::solvers::sum_times(rhs, temp, -1.0);
+	// 	//RElAX Y-VELOCITY
+	// 	temp = By_t(p);
+	// 	rhs = GeoVox::solvers::sum_times(f2, temp, -1.0);
+	// 	temp = Av(v);
+	// 	rhs = GeoVox::solvers::sum_times(rhs, temp, -1.0);
 
 		
-		times_mat = std::bind(&MacMesh::Av, this, std::placeholders::_1);
-		step = std::vector<double>(v.size(),0);
-		GeoVox::solvers::cg(step, times_mat, rhs, 10);
+	// 	times_mat = std::bind(&MacMesh::Av, this, std::placeholders::_1);
+	// 	step = VectorXd(v.size(),0);
+	// 	GeoVox::solvers::cg(step, times_mat, rhs, 10);
 
-		GeoVox::solvers::sum(v, step);
+	// 	GeoVox::solvers::sum(v, step);
 
-		//RElAX Z-VELOCITY
-		temp = Bz_t(p);
-		rhs = GeoVox::solvers::sum_times(f3, temp, -1.0);
-		temp = Aw(w);
-		rhs = GeoVox::solvers::sum_times(rhs, temp, -1.0);
+	// 	//RElAX Z-VELOCITY
+	// 	temp = Bz_t(p);
+	// 	rhs = GeoVox::solvers::sum_times(f3, temp, -1.0);
+	// 	temp = Aw(w);
+	// 	rhs = GeoVox::solvers::sum_times(rhs, temp, -1.0);
 
-		times_mat = std::bind(&MacMesh::Aw, this, std::placeholders::_1);
-		step = std::vector<double>(w.size(),0);
-		GeoVox::solvers::cg(step, times_mat, rhs, 10);
+	// 	times_mat = std::bind(&MacMesh::Aw, this, std::placeholders::_1);
+	// 	step = VectorXd(w.size(),0);
+	// 	GeoVox::solvers::cg(step, times_mat, rhs, 10);
 
-		GeoVox::solvers::sum(w, step);
+	// 	GeoVox::solvers::sum(w, step);
 
 
-		//RELAX MASS
-		temp = Bx(u);
-		rhs = GeoVox::solvers::sum_times(g, temp, -1.0);
-		temp = By(v);
-		rhs = GeoVox::solvers::sum_times(rhs, temp, -1.0);
-		temp = Bz(w);
-		rhs = GeoVox::solvers::sum_times(rhs, temp, -1.0);
-		times_mat = std::bind(&MacMesh::BB_t, this, std::placeholders::_1);
+	// 	//RELAX MASS
+	// 	temp = Bx(u);
+	// 	rhs = GeoVox::solvers::sum_times(g, temp, -1.0);
+	// 	temp = By(v);
+	// 	rhs = GeoVox::solvers::sum_times(rhs, temp, -1.0);
+	// 	temp = Bz(w);
+	// 	rhs = GeoVox::solvers::sum_times(rhs, temp, -1.0);
+	// 	times_mat = std::bind(&MacMesh::BB_t, this, std::placeholders::_1);
 		
-		std::vector<double> ep(p.size(),0);
-		GeoVox::solvers::cg(ep, times_mat, rhs, 10);
+	// 	VectorXd ep(p.size(),0);
+	// 	GeoVox::solvers::cg(ep, times_mat, rhs, 10);
 
 
-		//UPDATE VELOCITY AND PRESSURE
-		temp = Bx_t(ep);
-		GeoVox::solvers::sum(u, temp);
-		temp = By_t(ep);
-		GeoVox::solvers::sum(v, temp);
-		temp = Bz_t(ep);
-		GeoVox::solvers::sum(w, temp);
-		temp = BB_t(ep);
-		p = GeoVox::solvers::sum_times(p, temp, -1.0);
-	}
+	// 	//UPDATE VELOCITY AND PRESSURE
+	// 	temp = Bx_t(ep);
+	// 	GeoVox::solvers::sum(u, temp);
+	// 	temp = By_t(ep);
+	// 	GeoVox::solvers::sum(v, temp);
+	// 	temp = Bz_t(ep);
+	// 	GeoVox::solvers::sum(w, temp);
+	// 	temp = BB_t(ep);
+	// 	p = GeoVox::solvers::sum_times(p, temp, -1.0);
+	// }
 
 	void MacMesh::saveas(const std::string filename) const{
 		//////////////// OPEN FILE ////////////////
@@ -218,8 +218,8 @@ namespace GeoVox::mac{
 
 		//POINTS (CENTROIDS)
 		buffer << "DATASET STRUCTURED_POINTS\n";
-		buffer << "DIMENSIONS " << p_mask.N[0] << " " << p_mask.N[1] << " " << p_mask.N[2] << "\n";
-		buffer << "ORIGIN " << p_mask.box.low() << "\n";
+		buffer << "DIMENSIONS " << p_mask.N[0]+1 << " " << p_mask.N[1]+1 << " " << p_mask.N[2]+1 << "\n";
+		buffer << "ORIGIN " << p_mask.box.low()-0.5*p_mask.H << "\n";
 		buffer << "SPACING " << p_mask.H << "\n\n";
 
 		solutionfile << buffer.rdbuf();
@@ -227,21 +227,24 @@ namespace GeoVox::mac{
 
 
 		//PRESSURE
-		buffer << "POINT_DATA " << p_mask.N[0]*p_mask.N[1]*p_mask.N[2] << "\n";
-		buffer << "SCALARS pressure float\n";
+		buffer << "CELL_DATA " << p_mask.N[0]*p_mask.N[1]*p_mask.N[2] << "\n";
+		buffer << "SCALARS pressure double\n";
 		buffer << "LOOKUP_TABLE default\n";
 		for (long unsigned int k=0; k<p_mask.N[2]; k++){
-			long unsigned int start_idx = p_mask.N[0]*p_mask.N[1]*k;
-			for (long unsigned int ij=0; ij<p_mask.N[0]*p_mask.N[1]; ij++){
-				switch (p_mask.pointMarkers[start_idx+ij]){
-				case MAC_DOMAIN_MARKER:
-					buffer << p[start_idx+ij] << " ";
-					break;
-				default:
-					buffer << 0 << " ";
+			for (long unsigned int j=0; j<p_mask.N[1]; j++){
+				for (long unsigned int i=0; i<p_mask.N[0]; i++){
+					// switch (p_mask(i,j,k)){
+					// case MAC_DOMAIN_MARKER:
+					// 	buffer << p[p_mask.index(i,j,k)] << " ";
+					// 	break;
+					// default:
+					// 	buffer << 0 << " ";
+					// }
+					// buffer << "\n";
+					buffer << p_mask.index(i,j,k) << "\n";
 				}
 			}
-			buffer << "\n";
+			// buffer << "\n";
 		}
 		buffer << "\n";
 		
@@ -250,20 +253,47 @@ namespace GeoVox::mac{
 
 
 		//VELOCITY
-		buffer << "POINT_DATA " << p_mask.N[0]*p_mask.N[1]*p_mask.N[2] << "\n";
-		buffer << "VECTORS pressure float\n";
+		// buffer << "POINT_DATA " << p_mask.N[0]*p_mask.N[1]*p_mask.N[2] << "\n";
+		buffer << "VECTORS colocated_velocity double\n";
+		// buffer << "LOOKUP_TABLE default\n";
+		for (long unsigned int k=0; k<p_mask.N[2]; k++){
+			for (long unsigned int j=0; j<p_mask.N[1]; j++){
+				for (long unsigned int i=0; i<p_mask.N[0]; i++){
+					// double vx = 0.5*(u[p_mask.index(i,j,k)+u[p_mask.index(i+1,j,k)]]);
+					// double vy = 0.5*(v[p_mask.index(i,j,k)+v[p_mask.index(i,j+1,k)]]);
+					// double vz = 0.5*(w[p_mask.index(i,j,k)+w[p_mask.index(i,j,k+1)]]);
+					
+					// buffer << vx << " " << vy << " " << vz << " \t";
+					buffer << i << "\t" << j << "\t" << k << "\n";
+				}
+			}
+			// buffer << "\n";
+		}
+		buffer << "\n";
+		
+		solutionfile << buffer.rdbuf();
+		buffer.str("");
+
+
+		//MASK
+		// buffer << "POINT_DATA " << p_mask.N[0]*p_mask.N[1]*p_mask.N[2] << "\n";
+		buffer << "SCALARS mask integer\n";
 		buffer << "LOOKUP_TABLE default\n";
 		for (long unsigned int k=0; k<p_mask.N[2]; k++){
 			for (long unsigned int j=0; j<p_mask.N[1]; j++){
 				for (long unsigned int i=0; i<p_mask.N[0]; i++){
-					double vx = 0.5*(u[p_mask.index(i,j,k)+u[p_mask.index(i+1,j,k)]]);
-					double vy = 0.5*(v[p_mask.index(i,j,k)+v[p_mask.index(i,j+1,k)]]);
-					double vz = 0.5*(w[p_mask.index(i,j,k)+w[p_mask.index(i,j,k+1)]]);
-					
-					buffer << vx << " " << vy << " " << vz << " \t";
+					// switch (p_mask(i,j,k)){
+					// case MAC_DOMAIN_MARKER:
+					// 	buffer << p[p_mask.index(i,j,k)] << " ";
+					// 	break;
+					// default:
+					// 	buffer << 0 << " ";
+					// }
+					// buffer << "\n";
+					buffer << p_mask(i,j,k) << "\n";
 				}
 			}
-			buffer << "\n";
+			// buffer << "\n";
 		}
 		buffer << "\n";
 		

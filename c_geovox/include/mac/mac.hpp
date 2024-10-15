@@ -7,9 +7,9 @@
 #include "geometry/assembly.hpp"
 #include "util/point.hpp"
 #include "util/box.hpp"
-#include "solvers/conjugate_gradient.hpp"
 
-#include <vector>
+#include "Eigen/Core"
+
 #include <string>
 #include <sstream>
 #include <fstream>
@@ -17,13 +17,15 @@
 
 using StructuredPoints = GeoVox::mesh::StructuredPoints;
 using Assembly = GeoVox::geometry::Assembly;
+using VectorXd = Eigen::VectorXd;
+
 
 namespace GeoVox::mac{
 	class MacMesh{
 	public:
-		MacMesh() {}
+		MacMesh() : mu(1.0) {}
 		
-		MacMesh(const Box& box, const long unsigned int N[3], const Assembly &assembly){
+		MacMesh(const Box& box, const long unsigned int N[3], const Assembly& assembly) : mu(1.0) {
 			//get spacing between DOFs
 			Point3 H = GeoVox::util::div((box.high()-box.low()).eval(),Point3(N[0], N[1], N[2]));
 			long unsigned int M[3];
@@ -31,7 +33,6 @@ namespace GeoVox::mac{
 			//create masks
 			Point3 offset = 0.5*H;
 			Box subbox = Box(box.low()+offset, box.high()-offset);
-
 			p_mask = assembly.make_structured_mesh(subbox, N);
 
 			offset = Point3(0, 0.5*H[1], 0.5*H[2]); 
@@ -50,16 +51,16 @@ namespace GeoVox::mac{
 			w_mask = assembly.make_structured_mesh(subbox, M);
 
 			//initialize unkowns to 0
-			p = std::vector<double>( N[0]    *  N[1]    *  N[2]    , 0);
-			u = std::vector<double>((N[0]+1) *  N[1]    *  N[2]    , 0);
-			v = std::vector<double>( N[0]    * (N[1]+1) *  N[2]    , 0);
-			w = std::vector<double>( N[0]    *  N[1]    * (N[2]+1) , 0);
+			p = VectorXd::Zero( N[0]    *  N[1]    *  N[2]    );
+			u = VectorXd::Zero((N[0]+1) *  N[1]    *  N[2]    );
+			v = VectorXd::Zero( N[0]    * (N[1]+1) *  N[2]    );
+			w = VectorXd::Zero( N[0]    *  N[1]    * (N[2]+1) );
 
 			//initialize forcing terms to 0
-			f1 = std::vector<double>(u.size(), 0);
-			f2 = std::vector<double>(v.size(), 0);
-			f3 = std::vector<double>(w.size(), 0);
-			g  = std::vector<double>(p.size(), 0);
+			f1 = VectorXd::Zero(u.size());
+			f2 = VectorXd::Zero(v.size());
+			f3 = VectorXd::Zero(w.size());
+			g  = VectorXd::Zero(p.size());
 		}
 
 		MacMesh(const Box& box, const long unsigned int N[3]){
@@ -89,11 +90,20 @@ namespace GeoVox::mac{
 			w_mask = StructuredPoints(subbox, M);
 
 			//initialize unkowns to 0
-			p = std::vector<double>( N[0]    *  N[1]    *  N[2]   );
-			u = std::vector<double>((N[0]+1) *  N[1]    *  N[2]   );
-			v = std::vector<double>( N[0]    * (N[1]+1) *  N[2]   );
-			w = std::vector<double>( N[0]    *  N[1]    * (N[2]+1));
+			p = VectorXd::Zero( N[0]    *  N[1]    *  N[2]   );
+			u = VectorXd::Zero((N[0]+1) *  N[1]    *  N[2]   );
+			v = VectorXd::Zero( N[0]    * (N[1]+1) *  N[2]   );
+			w = VectorXd::Zero( N[0]    *  N[1]    * (N[2]+1));
+
+			//initialize forcing terms to 0
+			f1 = VectorXd::Zero(u.size());
+			f2 = VectorXd::Zero(v.size());
+			f3 = VectorXd::Zero(w.size());
+			g  = VectorXd::Zero(p.size());
 		}
+
+		//Viscosity
+		double mu;
 
 		//DOF masks
 		StructuredPoints p_mask; //pressure mask (global indexing): Nx by Ny by Nz
@@ -102,39 +112,43 @@ namespace GeoVox::mac{
 		StructuredPoints w_mask; //z-velocity mask (global indexing): Nx by Ny by (Nz+1)
 
 		//DOF values
-		std::vector<double> p; //pressure values (reduced indexing): number of nonzeros in p_mask
-		std::vector<double> u; //x-velocity values (reduced indexing): number of nonzeros in
-		std::vector<double> v; //y-velocity values (reduced indexing)
-		std::vector<double> w; //z-velocity values (reduced indexing)
+		VectorXd p; //pressure values (reduced indexing): number of nonzeros in p_mask
+		VectorXd u; //x-velocity values (reduced indexing): number of nonzeros in
+		VectorXd v; //y-velocity values (reduced indexing)
+		VectorXd w; //z-velocity values (reduced indexing)
 
 		//RHS values
-		std::vector<double> f1; //forcing term in x-direction at x-DOFs
-		std::vector<double> f2; //forcing term in y-direction at y-DOFs
-		std::vector<double> f3; //forcing term in z-direction at z-DOFsS
-		std::vector<double> g;  //forcing term for p at p-DOFs
+		VectorXd f1; //forcing term in x-direction at x-DOFs
+		VectorXd f2; //forcing term in y-direction at y-DOFs
+		VectorXd f3; //forcing term in z-direction at z-DOFsS
+		VectorXd g;  //forcing term for p at p-DOFs
 		
-
-		//laplacians
-		std::vector<double> discrete_laplacian(const StructuredPoints &mask, const std::vector<double> &vals) const;
-		inline std::vector<double> Au(const std::vector<double> &u) const {return discrete_laplacian(u_mask, u);} //discrete laplacian on u-DOFs
-		inline std::vector<double> Av(const std::vector<double> &v) const {return discrete_laplacian(v_mask, v);} //discrete laplacian on u-DOFs
-		inline std::vector<double> Aw(const std::vector<double> &w) const {return discrete_laplacian(w_mask, w);} //discrete laplacian on u-DOFs
-
 		//gradients of pressure
-		std::vector<double> discrete_partial_t(const StructuredPoints &eval_dof_mask, const StructuredPoints &given_dof_mask, const std::vector<double> &vals, const int direction) const;
-		inline std::vector<double> Bx_t(const std::vector<double> &p) const {return discrete_partial(u_mask, p_mask, p, 0);} //discrete partial_x (row-vector)
-		inline std::vector<double> By_t(const std::vector<double> &p) const {return discrete_partial(v_mask, p_mask, p, 1);} //discrete partial_y (row-vector)
-		inline std::vector<double> Bz_t(const std::vector<double> &p) const {return discrete_partial(w_mask, p_mask, p, 2);} //discrete partial_z (row-vector)
+		VectorXd discrete_partial_t(const StructuredPoints& eval_dof_mask, const StructuredPoints& given_dof_mask, const VectorXd& vals, const int direction) const;
+		inline VectorXd Bx_t(const VectorXd& p) const {return discrete_partial(u_mask, p_mask, p, 0);} //discrete partial_x (row-vector)
+		inline VectorXd By_t(const VectorXd& p) const {return discrete_partial(v_mask, p_mask, p, 1);} //discrete partial_y (row-vector)
+		inline VectorXd Bz_t(const VectorXd& p) const {return discrete_partial(w_mask, p_mask, p, 2);} //discrete partial_z (row-vector)
 
 		//divergence of velocity
-		std::vector<double> discrete_partial(const StructuredPoints &eval_dof_mask, const StructuredPoints &given_dof_mask, const std::vector<double> &vals, const int direction) const;
-		inline std::vector<double> Bx(const std::vector<double> &u) const {return discrete_partial(p_mask, u_mask, u, 0);} //discrete partial_x (col-vector)
-		inline std::vector<double> By(const std::vector<double> &v) const {return discrete_partial(p_mask, v_mask, v, 1);} //discrete partial_y (col-vector)
-		inline std::vector<double> Bz(const std::vector<double> &w) const {return discrete_partial(p_mask, w_mask, w, 2);} //discrete partial_z (col-vector)
+		VectorXd discrete_partial(const StructuredPoints& eval_dof_mask, const StructuredPoints& given_dof_mask, const VectorXd& vals, const int direction) const;
+		inline VectorXd Bx(const VectorXd& u) const {return discrete_partial(p_mask, u_mask, u, 0);} //discrete partial_x (col-vector)
+		inline VectorXd By(const VectorXd& v) const {return discrete_partial(p_mask, v_mask, v, 1);} //discrete partial_y (col-vector)
+		inline VectorXd Bz(const VectorXd& w) const {return discrete_partial(p_mask, w_mask, w, 2);} //discrete partial_z (col-vector)
 
+		//laplacians
+		VectorXd discrete_laplacian(const StructuredPoints& mask, const VectorXd& vals) const;
+		inline VectorXd Au(const VectorXd& u) const {return discrete_laplacian(u_mask, u);} //discrete laplacian on u-DOFs
+		inline VectorXd Av(const VectorXd& v) const {return discrete_laplacian(v_mask, v);} //discrete laplacian on u-DOFs
+		inline VectorXd Aw(const VectorXd& w) const {return discrete_laplacian(w_mask, w);} //discrete laplacian on u-DOFs
+		inline VectorXd BB_t(const VectorXd& vals) const {return Bx(Bx_t(vals))+By(By_t(vals))+Bz(Bz_t(vals));}
+
+		
 		//update variables by Distributive Gauss-Seidel Relaxation (DGS)
-		std::vector<double> BB_t(const std::vector<double> &vals) const;
-		void DGS();
+		void GS_discrete_laplacian(const StructuredPoints& mask, VectorXd& x, const VectorXd& b);
+
+
+
+		// void DGS();
 
 		//save solution interpolated to pressure DOFs
 		void saveas(const std::string filename) const;

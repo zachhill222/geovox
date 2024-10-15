@@ -176,6 +176,7 @@ namespace GeoVox::geometry{
 		//get normal in global coordinates
 		Point3 result = parametric(eta, omega);
 		
+
 		return toglobal(result);
 	}
 
@@ -226,7 +227,7 @@ namespace GeoVox::geometry{
 		//get eta
 		x = pow(fabs(_r[0]*d[0]), _INVPOWERS[0]);
 		y = sgn(d[2]) * pow( fabs( _r[2]*d[2]*cos_pow(omega,2.0-_eps2) ) , _INVPOWERS[0]);
-
+		
 		double eta = atan2(y, x); //in [-pi/2,pi/2] because x >= 0
 		
 
@@ -321,22 +322,12 @@ namespace GeoVox::geometry{
 
 	double cos_pow(const double theta, const double eps){
 		double C = cos(theta);
-		if (C<0){
-			return -pow(-C,eps);
-		}
-		else{
-			return pow(C,eps);
-		}
+		return sgn(C)*pow(fabs(C), eps);
 	}
 
 	double sin_pow(const double theta, const double eps){
 		double S = sin(theta);
-		if (S<0){
-			return -pow(-S,eps);
-		}
-		else{
-			return pow(S,eps);
-		}
+		return sgn(S)*pow(fabs(S), eps);
 	}
 
 }
