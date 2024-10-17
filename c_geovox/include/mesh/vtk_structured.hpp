@@ -4,6 +4,7 @@
 #include "util/box.hpp"
 #include "util/point.hpp"
 
+#include "Eigen/Core"
 
 #include <vector>
 #include <iostream>
@@ -21,8 +22,8 @@ namespace GeoVox::mesh{
 	class StructuredPoints{
 	public:
 		StructuredPoints () {}
-		StructuredPoints(const Box& box, const long unsigned int N[3]) :  box(box), N{N[0], N[1], N[2]}, H(GeoVox::util::div((box.high()-box.low()).eval(),Point3(N[0]-1, N[1]-1, N[2]-1))) {}
-		StructuredPoints(const Point3& low, const Point3& high, const long unsigned int N[3]) :  box(Box(low, high)), N{N[0], N[1], N[2]}, H(GeoVox::util::div((box.high()-box.low()).eval(),Point3(N[0]-1, N[1]-1, N[2]-1))) {}
+		StructuredPoints(const Box& box, const long unsigned int N[3]) :  box(box), N{N[0], N[1], N[2]}, H(GeoVox::util::div((box.high()-box.low()).eval(),Point3(N[0]-1, N[1]-1, N[2]-1))) {markers = std::vector<bool>(N[0]*N[1]*N[2], false);}
+		StructuredPoints(const Point3& low, const Point3& high, const long unsigned int N[3]) :  box(Box(low, high)), N{N[0], N[1], N[2]}, H(GeoVox::util::div((box.high()-box.low()).eval(),Point3(N[0]-1, N[1]-1, N[2]-1))) {markers = std::vector<bool>(N[0]*N[1]*N[2], false);}
 		StructuredPoints(const Box& box, const std::string geofile) : box(box) {readfile(geofile);};
 		
 		//access methods
@@ -37,7 +38,7 @@ namespace GeoVox::mesh{
 		//mesh information
 		std::vector<bool> markers; //MARK CENTROID OF CELLS
 		Box box;
-		long unsigned int N[3];
+		Eigen::Array<long unsigned int, 1, 3> N;
 		Point3 H;
 	};
 	

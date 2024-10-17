@@ -6,8 +6,7 @@ TARGET     = test
 SRC        = $(wildcard *.cpp)
 OBJ        = $(SRC:.cpp=.o)
 
-CC         = g++
-CPPFLAGS   = -I$(INC_DIR)
+CC         = g++ -fopenmp
 CFLAGS     = -O2 -Wall
 LDFLAGS    = -L$(LIB_DIR)
 LDLIBS     = -lcgeovox
@@ -20,8 +19,8 @@ $(TARGET): $(OBJ) $(LIB_DIR)/libcgeovox.a
 	$(CC) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
 
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+.cpp.o:
+	$(CC) $(CFLAGS) -I$(INC_DIR) -c $< -o $@
 
 .PHONY: clean
 clean:

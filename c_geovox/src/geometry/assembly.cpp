@@ -490,12 +490,11 @@ namespace GeoVox::geometry{
 
 	StructuredPoints Assembly::make_structured_mesh(const Box& subbox, const long unsigned int N[3]) const{
 		StructuredPoints mesh(subbox, N);
-		mesh.markers.reserve(N[0]*N[1]*N[2]);
 
 		for (long unsigned int k=0; k<N[2]; k++){
 			for (long unsigned int j=0; j<N[1]; j++){
 				for (long unsigned int i=0; i<N[0]; i++){
-					mesh.markers.push_back(in_particle(mesh.idx2point(i,j,k)));
+					mesh.markers[mesh.index(i,j,k)] = in_particle(mesh.idx2point(i,j,k));
 				}
 			}
 		}

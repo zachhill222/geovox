@@ -7,7 +7,9 @@
 
 #include <iostream>
 #include <vector>
+#include <cmath>
 
+#include <omp.h>
 
 using namespace GeoVox;
 using Assembly = geometry::Assembly;
@@ -17,10 +19,10 @@ using Box = util::Box;
 
 int test_assembly(){
 	std::cout << "READING PARTICLES\n";
-	Assembly A = Assembly("particles_100.txt");
+	Assembly A = Assembly("particles_1.txt");
 
 	std::cout << "MAKING PARTICLE OCTREE\n";
-	A.divide(7);
+	A.divide(5);
 
 	std::cout << "MAKING OCTREE STRUCTURE VTK MESH\n";
 	Mesh octree_structure = GeoVox::util::visualize_octree_structure<Assembly, GeoVox::geometry::AssemblyNode, GeoVox::geometry::SuperEllipsoid>(&A);
@@ -29,7 +31,9 @@ int test_assembly(){
 	octree_structure.saveas("octree_structure.vtk");
 	
 
-	long unsigned int  N[3] {128, 128, 128};
+	Box geobox = 1.0*A.box;
+	long unsigned int  N[3] {32, 32, 32};
+
 
 	// std::cout << "SAVING GEOMETRY\n";
 	// A.save_geometry("Geometry.dat", A.box, N);
@@ -37,25 +41,24 @@ int test_assembly(){
 	// std::cout << "READING GEOMETRY\n";
 	// Point3 H = (A.box.high()-A.box.low())/Point3(N[0], N[1], N[2]);
 
-	std::cout << "MAKING STRUCTURED POINTS\n";
-	GeoVox::mesh::StructuredPoints SP = A.make_structured_mesh(N);
+	// std::cout << "MAKING STRUCTURED POINTS\n";
+	// GeoVox::mesh::StructuredPoints SP = A.make_structured_mesh(geobox,N);
 	
-	std::cout << "SAVING STRUCTURED POINTS\n";
-	SP.saveas("structured_points.vtk");
+	// std::cout << "SAVING STRUCTURED POINTS\n";
+	// SP.saveas("structured_points.vtk");
 
-	// std::cout << "SETTING UP MAC\n";
-	// GeoVox::mac::MacMesh mac(A.box, SP.N, A);
-	// mac.f1 = Eigen::VectorXd::Ones(mac.u.size());
+	std::cout << "SETTING UP MAC\n";
+	GeoVox::mac::MacMesh mac(geobox, N, A);
+	// GeoVox::mac::MacMesh mac(geobox, N);
+	mac.f1 = 1*Eigen::VectorXd::Ones(mac.u.size());
+	mac.f2 = 1*Eigen::VectorXd::Ones(mac.v.size());
 
-	// // std::cout << "SOLVING MAC\n";
-	// // for (int i=0; i<10; i++){
-	// // 	std::cout << "\titeration " << i << std::endl;
-	// // 	mac.DGS();
-	// // }
+	mac.mu = 1E-3;
+	std::cout << "SOLVING MAC\n";
+	mac.solve(10000);
 
-	// std::cout << "SAVING MAC SOLUTION\n";
-	// mac.saveas("mac_solution.vtk");
-
+	std::cout << "SAVING MAC SOLUTION\n";
+	mac.saveas("mac_solution.vtk");
 
 	return 1;
 }

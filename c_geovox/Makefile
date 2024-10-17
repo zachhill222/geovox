@@ -22,7 +22,7 @@ SOLVER_OBJECTS := $(SOLVER_SOURCES:.cpp=.o)
 MAC_SOURCES := $(wildcard src/mac/*.cpp)
 MAC_OBJECTS := $(MAC_SOURCES:.cpp=.o)
 
-CC        := g++
+CC        := g++ -fopenmp
 CFLAGS    := -O2 -Wall
 LIBS      := 
 

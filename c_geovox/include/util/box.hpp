@@ -44,6 +44,8 @@ namespace GeoVox::util{
 		Point3 low() const;//get low
 		Point3 high() const; //get high
 		Point3 center() const; //get center of the box
+		inline Point3 sidelength() const {return _high-_low;}
+
 		Point3 operator[](const int idx) const; //GET idx-TH VERTEX IN VTK-VOXEL ORDERING 
 		void setlow(const Point3& newlow);
 		void sethigh(const Point3& newhigh);
