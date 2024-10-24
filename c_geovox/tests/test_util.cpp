@@ -19,7 +19,7 @@ using Box = util::Box;
 
 int test_assembly(){
 	std::cout << "READING PARTICLES\n";
-	Assembly A = Assembly("particles_1.txt");
+	Assembly A = Assembly("particles_50.txt");
 
 	std::cout << "MAKING PARTICLE OCTREE\n";
 	A.divide(5);
@@ -31,8 +31,8 @@ int test_assembly(){
 	octree_structure.saveas("octree_structure.vtk");
 	
 
-	Box geobox = 1.0*A.box;
-	long unsigned int  N[3] {32, 32, 32};
+	Box geobox = 1.05*A.box;
+	long unsigned int  N[3] {128, 128, 128};
 
 
 	// std::cout << "SAVING GEOMETRY\n";
@@ -48,14 +48,14 @@ int test_assembly(){
 	// SP.saveas("structured_points.vtk");
 
 	std::cout << "SETTING UP MAC\n";
-	GeoVox::mac::MacMesh mac(geobox, N, A);
+	GeoVox::mac::MacMesh mac(geobox, N, &A);
 	// GeoVox::mac::MacMesh mac(geobox, N);
 	mac.f1 = 1*Eigen::VectorXd::Ones(mac.u.size());
-	mac.f2 = 1*Eigen::VectorXd::Ones(mac.v.size());
+	// mac.f2 = 1*Eigen::VectorXd::Ones(mac.v.size());
 
 	mac.mu = 1E-3;
 	std::cout << "SOLVING MAC\n";
-	mac.solve(10000);
+	mac.solve(101);
 
 	std::cout << "SAVING MAC SOLUTION\n";
 	mac.saveas("mac_solution.vtk");

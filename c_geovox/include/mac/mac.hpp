@@ -29,72 +29,39 @@ using VectorXd = Eigen::VectorXd;
 namespace GeoVox::mac{
 	class MacMesh{
 	public:
-		MacMesh() : mu(1.0) {}
+		MacMesh(const Box& box, const long unsigned int N[3], const Assembly* const assembly) : mu(1.0), tol(MAC_DEFAULT_TOL), N(N), assembly(assembly), box(box) {
+			//get spacing between DOFs
+			H = box.sidelength().array()/Point3(N[0], N[1], N[2]).array();
+
+			//create masks
+			Point3 offset = 0.5*H;
+			Box subbox = Box(box.low()+offset, box.high()-offset);
+
+			p_mask = assembly->make_structured_mesh(subbox, N);
+
+			offset = Point3(0.5*H[0], 0, 0);
+			u_mask = assembly->make_structured_mesh(subbox-offset, N);
+
+			offset = Point3(0, 0.5*H[1], 0);
+			v_mask = assembly->make_structured_mesh(subbox-offset, N);
+
+			offset = Point3(0, 0, 0.5*H[2]);
+			w_mask = assembly->make_structured_mesh(subbox-offset, N);
+
+			//initialize unkowns to 0
+			p = VectorXd::Zero(p_mask.N.prod());
+			u = VectorXd::Zero(u_mask.N.prod());
+			v = VectorXd::Zero(v_mask.N.prod());
+			w = VectorXd::Zero(w_mask.N.prod());
+
+			//initialize forcing terms to 0
+			f1 = VectorXd::Zero(u.size());
+			f2 = VectorXd::Zero(v.size());
+			f3 = VectorXd::Zero(w.size());
+			g  = VectorXd::Zero(p.size());
+		}
+
 		
-		MacMesh(const Box& box, const long unsigned int N[3], const Assembly& assembly) : mu(1.0), tol(MAC_DEFAULT_TOL), N(N) {
-			//get spacing between DOFs
-			H = GeoVox::util::div(box.sidelength(),Point3(N[0], N[1], N[2]));
-
-			//create masks
-			Point3 offset = 0.5*H;
-			Box subbox = Box(box.low()+offset, box.high()-offset);
-
-			p_mask = assembly.make_structured_mesh(subbox, N);
-
-			offset = Point3(0.5*H[0], 0, 0);
-			u_mask = assembly.make_structured_mesh(subbox-offset, N);
-
-			offset = Point3(0, 0.5*H[1], 0);
-			v_mask = assembly.make_structured_mesh(subbox-offset, N);
-
-			offset = Point3(0, 0, 0.5*H[2]);
-			w_mask = assembly.make_structured_mesh(subbox-offset, N);
-
-			//initialize unkowns to 0
-			p = VectorXd::Zero(p_mask.N.prod());
-			u = VectorXd::Zero(u_mask.N.prod());
-			v = VectorXd::Zero(v_mask.N.prod());
-			w = VectorXd::Zero(w_mask.N.prod());
-
-			//initialize forcing terms to 0
-			f1 = VectorXd::Zero(u.size());
-			f2 = VectorXd::Zero(v.size());
-			f3 = VectorXd::Zero(w.size());
-			g  = VectorXd::Zero(p.size());
-		}
-
-		MacMesh(const Box& box, const long unsigned int N[3]) : mu(1.0), tol(MAC_DEFAULT_TOL), N(N) {
-			//get spacing between DOFs
-			H = GeoVox::util::div(box.sidelength(),Point3(N[0], N[1], N[2]));
-
-			//create masks
-			Point3 offset = 0.5*H;
-			Box subbox = Box(box.low()+offset, box.high()-offset);
-
-			p_mask = StructuredPoints(subbox, N);
-
-			offset = Point3(0.5*H[0], 0, 0);
-			u_mask = StructuredPoints(subbox-offset, N);
-
-			offset = Point3(0, 0.5*H[1], 0);
-			v_mask = StructuredPoints(subbox-offset, N);
-
-			offset = Point3(0, 0, 0.5*H[2]);
-			w_mask = StructuredPoints(subbox-offset, N);
-
-			//initialize unkowns to 0
-			p = VectorXd::Zero(p_mask.N.prod());
-			u = VectorXd::Zero(u_mask.N.prod());
-			v = VectorXd::Zero(v_mask.N.prod());
-			w = VectorXd::Zero(w_mask.N.prod());
-
-			//initialize forcing terms to 0
-			f1 = VectorXd::Zero(u.size());
-			f2 = VectorXd::Zero(v.size());
-			f3 = VectorXd::Zero(w.size());
-			g  = VectorXd::Zero(p.size());
-		}
-
 		//Viscosity
 		double mu;
 
@@ -125,6 +92,10 @@ namespace GeoVox::mac{
 		VectorXd f3; //forcing term in z-direction at z-DOFsS
 		VectorXd g;  //forcing term for p at p-DOFs
 		
+		//Geometry
+		const Assembly* const assembly;
+		const Box box;
+
 		//FIRST DERIVATIVES
 		VectorXd dPdX(const VectorXd& variable) const;
 		VectorXd dPdY(const VectorXd& variable) const;
@@ -142,10 +113,14 @@ namespace GeoVox::mac{
 		//SOLUTION
 		void GS_relax_velocity();
 		VectorXd GS_relax_p() const; //Return ep = Ap_inv(g-Bx(u)-By(v)-Bz(w))
+		void setRockVelocity();
+
 		void DGS();
 		void solve(const int max_iter=MAC_DEFAULT_MAX_OUTER_ITERATIONS);
-
-
+		
+		void solve_multigrid(int m);
+		void coarsen(VectorXd& U, VectorXd& V, VectorXd& W, VectorXd& P);
+		void refine(VectorXd& U, VectorXd& V, VectorXd& W, VectorXd& P);
 
 		//save solution interpolated to pressure DOFs
 		void saveas(const std::string filename) const;

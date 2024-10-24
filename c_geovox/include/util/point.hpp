@@ -65,15 +65,15 @@ namespace GeoVox::util{
 	//////////////////////////////////////////////////////////////////
 	////////////////// ELEMENT-WISE FUNCTIONS ////////////////////////
 	//////////////////////////////////////////////////////////////////
-	template <typename Derived>
-	typename Derived::PlainObject times(const Eigen::MatrixBase<Derived>& A, const Eigen::MatrixBase<Derived>& B){
-		return (A.array()*B.array()).matrix();
-	}
+	// template <typename Derived>
+	// typename Derived::PlainObject times(const Eigen::MatrixBase<Derived>& A, const Eigen::MatrixBase<Derived>& B){
+	// 	return (A.array()*B.array()).matrix();
+	// }
 
-	template <typename Derived>
-	typename Derived::PlainObject div(const Eigen::MatrixBase<Derived>& A, const Eigen::MatrixBase<Derived>& B){
-		return (A.array()/B.array()).matrix();
-	}
+	// template <typename Derived>
+	// typename Derived::PlainObject div(const Eigen::MatrixBase<Derived>& A, const Eigen::MatrixBase<Derived>& B){
+	// 	return (A.array()/B.array()).matrix();
+	// }
 
 
 	//////////////////////////////////////////////////////////////////

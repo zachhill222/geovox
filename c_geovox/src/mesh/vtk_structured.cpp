@@ -66,7 +66,7 @@ namespace GeoVox::mesh{
 		geofile >> str >> N[1];
 		geofile >> str >> N[2];
 
-		H = GeoVox::util::div((box.high()-box.low()).eval(),Point3(N[0], N[1], N[2]));
+		H = (box.high()-box.low()).array()/Point3(N[0], N[1], N[2]).array();
 
 		//READ BODY
 		int mkr;

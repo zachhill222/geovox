@@ -152,13 +152,9 @@ namespace GeoVox::mac{
 		Point3 H_2 = 2.0*(H.array()*H.array()).inverse(); //  2/(h*h)
 		double C   = 1.0/H_2.sum();
 
-		
-		#pragma omp parallel for collapse(2)
 		for (long unsigned int k=0; k<N[2]; k++){
-			// std::cout << "thread " << omp_get_thread_num() << std::endl;
 			for (long unsigned int j=0; j<N[1]; j++){
-				//BLACK GROUP
-				for (long unsigned int i=(j+k)%2; i<N[0]; i+=2){
+				for (long unsigned int i=0; i<N[0]; i++){
 
 					//VELOCITY INDICES
 					long unsigned int P = index(i,j,k);
@@ -171,38 +167,17 @@ namespace GeoVox::mac{
 
 
 					//UPDATE VELOCITY
-					u[P] = C*( f1[P] + mu*(H_2[0]*(u[E]+u[W]) + H_2[1]*(u[N]+u[S]) + H_2[2]*(u[T]+u[B])) + h_1[0]*(p[W]-p[P]) );
-					v[P] = C*( f2[P] + mu*(H_2[0]*(v[E]+v[W]) + H_2[1]*(v[N]+v[S]) + H_2[2]*(v[T]+v[B])) + h_1[1]*(p[S]-p[P]) );
-					w[P] = C*( f3[P] + mu*(H_2[0]*(w[E]+w[W]) + H_2[1]*(w[N]+w[S]) + H_2[2]*(w[T]+w[B])) + h_1[2]*(p[B]-p[P]) );
-
-					//APPLY NO-SLIP BC
-					u[P]*= (u_mask(i,j,k)==MAC_DOMAIN_MARKER);
-					v[P]*= (v_mask(i,j,k)==MAC_DOMAIN_MARKER);
-					w[P]*= (w_mask(i,j,k)==MAC_DOMAIN_MARKER);
-				}
-
-				//RED GROUP
-				for (long unsigned int i=(j+k+1)%2; i<N[0]; i+=2){
-
-					//VELOCITY INDICES
-					long unsigned int P = index(i,j,k);
-					long unsigned int W = index(i-1,j,k);
-					long unsigned int E = index(i+1,j,k);
-					long unsigned int S = index(i,j-1,k);
-					long unsigned int N = index(i,j+1,k);
-					long unsigned int B = index(i,j,k-1);
-					long unsigned int T = index(i,j,k+1);
-
-
-					//UPDATE VELOCITY
-					u[P] = C*( f1[P] + mu*(H_2[0]*(u[E]+u[W]) + H_2[1]*(u[N]+u[S]) + H_2[2]*(u[T]+u[B])) + h_1[0]*(p[W]-p[P]) );
-					v[P] = C*( f2[P] + mu*(H_2[0]*(v[E]+v[W]) + H_2[1]*(v[N]+v[S]) + H_2[2]*(v[T]+v[B])) + h_1[1]*(p[S]-p[P]) );
-					w[P] = C*( f3[P] + mu*(H_2[0]*(w[E]+w[W]) + H_2[1]*(w[N]+w[S]) + H_2[2]*(w[T]+w[B])) + h_1[2]*(p[B]-p[P]) );
-
-					//APPLY NO-SLIP BC
-					u[P]*= (u_mask(i,j,k)==MAC_DOMAIN_MARKER);
-					v[P]*= (v_mask(i,j,k)==MAC_DOMAIN_MARKER);
-					w[P]*= (w_mask(i,j,k)==MAC_DOMAIN_MARKER);
+					if (u_mask(i,j,k)==MAC_DOMAIN_MARKER){
+						u[P] = C*( f1[P] + mu*(H_2[0]*(u[E]+u[W]) + H_2[1]*(u[N]+u[S]) + H_2[2]*(u[T]+u[B])) + h_1[0]*(p[W]-p[P]) );
+					}
+					
+					if (v_mask(i,j,k)==MAC_DOMAIN_MARKER){
+						v[P] = C*( f2[P] + mu*(H_2[0]*(v[E]+v[W]) + H_2[1]*(v[N]+v[S]) + H_2[2]*(v[T]+v[B])) + h_1[1]*(p[S]-p[P]) );
+					}
+					
+					if (w_mask(i,j,k)==MAC_DOMAIN_MARKER){
+						w[P] = C*( f3[P] + mu*(H_2[0]*(w[E]+w[W]) + H_2[1]*(w[N]+w[S]) + H_2[2]*(w[T]+w[B])) + h_1[2]*(p[B]-p[P]) );
+					}
 				}
 			}
 		}
@@ -222,13 +197,11 @@ namespace GeoVox::mac{
 		Point3 H_2 = 2.0*(H.array()*H.array()).inverse(); //  2/(h*h)
 		double C   = 1.0/H_2.sum();
 
-		// #pragma omp parallel for collapse(2)
 		for (long unsigned int k=0; k<N[2]; k++){
 			for (long unsigned int j=0; j<N[1]; j++){
 
 				//BLACK GROUP
 				for (long unsigned int i=0; i<N[0]; i++){
-				// for (long unsigned int i=(j+k)%2; i<N[0]; i+=2){
 
 					long unsigned int P = index(i,j,k);
 					long unsigned int W = index(i-1,j,k);
@@ -239,23 +212,7 @@ namespace GeoVox::mac{
 					long unsigned int T = index(i,j,k+1);
 					
 					Ep[P] = C*( res[P] + H_2[0]*(Ep[E]+Ep[W]) + H_2[1]*(Ep[N]+Ep[S]) + H_2[2]*(Ep[T]+Ep[B]) );
-					// Ep[P]*= (p_mask(i,j,k)==MAC_DOMAIN_MARKER);
 				}
-
-				//RED GROUP
-				// for (long unsigned int i=(j+k+1)%2; i<N[0]; i+=2){
-
-				// 	long unsigned int P = index(i,j,k);
-				// 	long unsigned int W = index(i-1,j,k);
-				// 	long unsigned int E = index(i+1,j,k);
-				// 	long unsigned int S = index(i,j-1,k);
-				// 	long unsigned int N = index(i,j+1,k);
-				// 	long unsigned int B = index(i,j,k-1);
-				// 	long unsigned int T = index(i,j,k+1);
-					
-				// 	Ep[P] = C*(res[P] + H_2[0]*(Ep[E]+Ep[W]) + H_2[1]*(Ep[N]+Ep[S]) + H_2[2]*(Ep[T]+Ep[B]) );
-				// 	Ep[P]*= (p_mask(i,j,k)==MAC_DOMAIN_MARKER);
-				// }
 			}
 		}
 
@@ -280,18 +237,21 @@ namespace GeoVox::mac{
 
 
 		//SET SOLUTION TO ZERO IN ROCK DOMAIN
-		// #pragma omp parallel for collapse(3)
-		// for (long unsigned int k=0; k<N[2]; k++){
-		// 	for (long unsigned int j=0; j<N[1]; j++){
-		// 		for (long unsigned int i=0; i<N[0]; i++){
-		// 			long unsigned int P = index(i,j,k);
-		// 			if (!u_mask.markers[P]==MAC_DOMAIN_MARKER) {u[P]=0;}
-		// 			if (!v_mask.markers[P]==MAC_DOMAIN_MARKER) {v[P]=0;}
-		// 			if (!w_mask.markers[P]==MAC_DOMAIN_MARKER) {w[P]=0;}
-		// 			if (!p_mask.markers[P]==MAC_DOMAIN_MARKER) {p[P]=0;}
-		// 		}
-		// 	}
-		// }
+		setRockVelocity();
+	}
+	
+	void MacMesh::setRockVelocity(){
+		#pragma omp parallel for collapse(3)
+		for (long unsigned int k=0; k<N[2]; k++){
+			for (long unsigned int j=0; j<N[1]; j++){
+				for (long unsigned int i=0; i<N[0]; i++){
+					long unsigned int P = index(i,j,k);
+					if (!u_mask.markers[P]==MAC_DOMAIN_MARKER) {u[P]=0;}
+					if (!v_mask.markers[P]==MAC_DOMAIN_MARKER) {v[P]=0;}
+					if (!w_mask.markers[P]==MAC_DOMAIN_MARKER) {w[P]=0;}
+				}
+			}
+		}
 	}
 
 	void MacMesh::solve(const int max_iter){
@@ -300,37 +260,209 @@ namespace GeoVox::mac{
 			DGS();
 
 
-			if (iter_count%100 == 0){
-				//COMPUTE RESIDUALS
-				VectorXd res = VectorXd::Zero(4);
+			// if (iter_count%100 == 0){
+			// 	//COMPUTE RESIDUALS
+			// 	VectorXd res = VectorXd::Zero(4);
 
-				VectorXd res_u = A(u)+dPdX(p)-f1;
-				VectorXd res_v = A(v)+dPdY(p)-f2;
-				VectorXd res_w = A(w)+dPdZ(p)-f3;
-				VectorXd res_p = dUdX(u)+dVdY(v)+dWdZ(w)-g;
+			// 	VectorXd res_u = A(u)+dPdX(p)-f1;
+			// 	VectorXd res_v = A(v)+dPdY(p)-f2;
+			// 	VectorXd res_w = A(w)+dPdZ(p)-f3;
+			// 	VectorXd res_p = dUdX(u)+dVdY(v)+dWdZ(w)-g;
 
 
-				#pragma omp parallel for collapse(3)
-				for (long unsigned int k=0; k<N[2]; k++){
-					for (long unsigned int j=0; j<N[1]; j++){
-						for (long unsigned int i=0; i<N[0]; i++){
-							long unsigned int P = index(i,j,k);
-							if (!u_mask.markers[P]==MAC_DOMAIN_MARKER) {res[0] += res_u[P]*res_u[P];}
-							if (!v_mask.markers[P]==MAC_DOMAIN_MARKER) {res[1] += res_v[P]*res_v[P];}
-							if (!w_mask.markers[P]==MAC_DOMAIN_MARKER) {res[2] += res_w[P]*res_w[P];}
-							if (!p_mask.markers[P]==MAC_DOMAIN_MARKER) {res[3] += res_p[P]*res_p[P];}
-						}
-					}
+			// 	#pragma omp parallel for collapse(3)
+			// 	for (long unsigned int k=0; k<N[2]; k++){
+			// 		for (long unsigned int j=0; j<N[1]; j++){
+			// 			for (long unsigned int i=0; i<N[0]; i++){
+			// 				long unsigned int P = index(i,j,k);
+			// 				if (!u_mask.markers[P]==MAC_DOMAIN_MARKER) {res[0] += res_u[P]*res_u[P];}
+			// 				if (!v_mask.markers[P]==MAC_DOMAIN_MARKER) {res[1] += res_v[P]*res_v[P];}
+			// 				if (!w_mask.markers[P]==MAC_DOMAIN_MARKER) {res[2] += res_w[P]*res_w[P];}
+			// 				if (!p_mask.markers[P]==MAC_DOMAIN_MARKER) {res[3] += res_p[P]*res_p[P];}
+			// 			}
+			// 		}
+			// 	}
+
+			// 	for (int i=0; i<4; i++){
+			// 		res[i] = sqrt(res[i]);
+			// 	}
+
+			// 	std::cout << "DGS iteration " << iter_count << ": res=" << res.transpose() << std::endl;
+			// }
+		}
+	}
+
+	void MacMesh::solve_multigrid(int m){
+		//check to see if mesh can be coarsened
+		bool coarsest = false;
+		if (N[0]%2 or N[1]%2 or N[2]%2==0){
+			coarsest = true;
+		}
+
+		if (N[0]<16 or N[1]<16 or N[2]<16){
+			coarsest = true;
+		}
+
+		if (coarsest){
+			solve(100);
+			return;
+		}
+
+		//presmooth
+		for (int i=0; i<m; i++){
+			DGS();
+		}
+
+		//compute residual
+		VectorXd res_u = A(u)+dPdX(p)-f1;
+		VectorXd res_v = A(v)+dPdY(p)-f2;
+		VectorXd res_w = A(w)+dPdZ(p)-f3;
+		VectorXd res_p = dUdX(u)+dVdY(v)+dWdZ(w)-g;
+
+		//setup problem on coarse mesh
+		long unsigned int M[3] = {N[0]/2, N[1]/2, N[2]/2};
+		MacMesh coarse_mesh(box, M, assembly);
+		coarse_mesh.mu = mu;
+		coarsen(coarse_mesh.f1,coarse_mesh.f2,coarse_mesh.f3,coarse_mesh.g);
+
+		//solve problem on coarse mesh
+		coarse_mesh.solve_multigrid(m);
+
+		//prolongation
+		VectorXd dU = VectorXd::Zero(p.size());
+		VectorXd dV = VectorXd::Zero(p.size());
+		VectorXd dW = VectorXd::Zero(p.size());
+		VectorXd dP = VectorXd::Zero(p.size());
+
+		coarse_mesh.refine(dU,dV,dW,dP);
+		u+=dU;
+		v+=dV;
+		w+=dW;
+		p+=dP;
+
+		//postsmooth
+		solve(m); //should write GS in reverse order
+	}
+
+	void MacMesh::coarsen(VectorXd& U, VectorXd& V, VectorXd& W, VectorXd& P){
+		long unsigned int N_2[3] {N[0]/2, N[1]/2, N[2]/2};
+
+		#pragma omp parallel for collapse(3)
+		for (long unsigned int k=0; k<N_2[2]; k++){
+			for (long unsigned int j=0; j<N_2[1]; j++){
+				for (long unsigned int i=0; i<N_2[0]; i++){
+					long unsigned int idx = i + N_2[0]*(j + N_2[1]*k);
+
+					long unsigned int ii = 2*i;
+					long unsigned int jj = 2*j;
+					long unsigned int kk = 2*k;
+
+					U[idx] =    u[index(ii-1,jj,kk)] + u[index(ii-1,jj+1,kk)] + u[index(ii-1,jj+1,kk+1)] + u[index(ii-1,jj,kk+1)];
+					U[idx]+= 2*(u[index(ii  ,jj,kk)] + u[index(ii  ,jj+1,kk)] + u[index(ii  ,jj+1,kk+1)] + u[index(ii  ,jj,kk+1)]);
+					U[idx]+=    u[index(ii+1,jj,kk)] + u[index(ii+1,jj+1,kk)] + u[index(ii+1,jj+1,kk+1)] + u[index(ii+1,jj,kk+1)];
+					U[idx]*=0.0625; // 1/16
+
+					V[idx] =    v[index(ii-1,jj,kk)] + v[index(ii-1,jj+1,kk)] + v[index(ii-1,jj+1,kk+1)] + v[index(ii-1,jj,kk+1)];
+					V[idx]+= 2*(v[index(ii  ,jj,kk)] + v[index(ii  ,jj+1,kk)] + v[index(ii  ,jj+1,kk+1)] + v[index(ii  ,jj,kk+1)]);
+					V[idx]+=    v[index(ii+1,jj,kk)] + v[index(ii+1,jj+1,kk)] + v[index(ii+1,jj+1,kk+1)] + v[index(ii+1,jj,kk+1)];
+					V[idx]*=0.0625; // 1/16
+
+					W[idx] =    w[index(ii-1,jj,kk)] + w[index(ii-1,jj+1,kk)] + w[index(ii-1,jj+1,kk+1)] + w[index(ii-1,jj,kk+1)];
+					W[idx]+= 2*(w[index(ii  ,jj,kk)] + w[index(ii  ,jj+1,kk)] + w[index(ii  ,jj+1,kk+1)] + w[index(ii  ,jj,kk+1)]);
+					W[idx]+=    w[index(ii+1,jj,kk)] + w[index(ii+1,jj+1,kk)] + w[index(ii+1,jj+1,kk+1)] + w[index(ii+1,jj,kk+1)];
+					W[idx]*=0.0625; // 1/16
+
+					P[idx] = 0.125*(p[index(ii,jj,kk)]       + p[index(ii+1,jj,kk)]   + p[index(ii,jj+1,kk)]   + p[index(ii,jj,kk+1)] /
+						          + p[index(ii+1,jj+1,kk+1)] + p[index(ii,jj+1,kk+1)] + p[index(ii+1,jj,kk+1)] + p[index(ii+1,jj+1,kk)]);
 				}
-
-				for (int i=0; i<4; i++){
-					res[i] = sqrt(res[i]);
-				}
-
-				std::cout << "DGS iteration " << iter_count << ": res=" << res.transpose() << std::endl;
 			}
 		}
 	}
+
+	void MacMesh::refine(VectorXd& U, VectorXd& V, VectorXd& W, VectorXd& P){
+		long unsigned int N2[3] {N[0]*2, N[1]*2, N[2]*2};
+
+
+		//PRESSURE AND FIRST INTERPOLATIONS
+		#pragma omp parallel for collapse(3)
+		for (long unsigned int k=0; k<N[2]; k++){
+			for (long unsigned int j=0; j<N[1]; j++){
+				for (long unsigned int i=0; i<N[0]; i++){
+
+					long unsigned int idx;
+					long unsigned int ii = 2*i;
+					long unsigned int jj = 2*j;
+					long unsigned int kk = 2*k;
+					
+					
+
+					idx = ii + N2[0]*(jj  +N[1]*(kk  ));
+					U[idx] = 0.75*u[index(i,j,k)] + 0.25*u[index(i,j-1,k-1)];
+					V[idx] = 0.75*v[index(i,j,k)] + 0.25*v[index(i-1,j,k-1)];
+					W[idx] = 0.75*w[index(i,j,k)] + 0.25*w[index(i-1,j-1,k)];
+					P[idx] = p[index(i,j,k)];
+					P[idx+1] = p[index(i,j,k)];
+
+					idx = ii + N2[0]*(jj+1+N[1]*(kk  ));
+					U[idx] = 0.75*u[index(i,j,k)] + 0.25*u[index(i,j+1,k-1)];
+					V[idx] = 0.75*v[index(i,j,k)] + 0.25*v[index(i+1,j,k-1)];
+					W[idx] = 0.75*w[index(i,j,k)] + 0.25*w[index(i-1,j+1,k)];
+					P[idx] = p[index(i,j,k)];
+					P[idx+1] = p[index(i,j,k)];
+					
+					idx = ii + N2[0]*(jj  +N[1]*(kk+1));
+					U[idx] = 0.75*u[index(i,j,k)] + 0.25*u[index(i,j-1,k+1)];
+					V[idx] = 0.75*v[index(i,j,k)] + 0.25*v[index(i-1,j,k+1)];
+					W[idx] = 0.75*w[index(i,j,k)] + 0.25*w[index(i+1,j-1,k)];
+					P[idx] = p[index(i,j,k)];
+					P[idx+1] = p[index(i,j,k)];
+					
+					idx = ii + N2[0]*(jj+1+N[1]*(kk+1));
+					U[idx] = 0.75*u[index(i,j,k)] + 0.25*u[index(i,j+1,k+1)];
+					V[idx] = 0.75*v[index(i,j,k)] + 0.25*v[index(i+1,j,k+1)];
+					W[idx] = 0.75*w[index(i,j,k)] + 0.25*w[index(i+1,j+1,k)];
+					P[idx] = p[index(i,j,k)];
+					P[idx+1] = p[index(i,j,k)];
+				}
+			}
+		}
+
+		//SECOND INTERPOLATIONS
+		#pragma omp parallel for collapse(3)
+		for (long unsigned int k=0; k<N[2]; k++){
+			for (long unsigned int j=0; j<N[1]; j++){
+				for (long unsigned int i=0; i<N[0]; i++){
+
+					long unsigned int idx;
+					long unsigned int ii = 2*i;
+					long unsigned int jj = 2*j;
+					long unsigned int kk = 2*k;
+					
+					idx = ii + N2[0]*(jj  +N[1]*(kk  ));
+					U[idx+1] = 0.5*(U[idx]+U[idx+2]);
+					V[idx+1] = 0.5*(V[idx]+V[idx+2]);
+					W[idx+1] = 0.5*(W[idx]+W[idx+2]);
+
+					idx = ii + N2[0]*(jj+1+N[1]*(kk  ));
+					U[idx+1] = 0.5*(U[idx]+U[idx+2]);
+					V[idx+1] = 0.5*(V[idx]+V[idx+2]);
+					W[idx+1] = 0.5*(W[idx]+W[idx+2]);
+					
+					idx = ii + N2[0]*(jj  +N[1]*(kk+1));
+					U[idx+1] = 0.5*(U[idx]+U[idx+2]);
+					V[idx+1] = 0.5*(V[idx]+V[idx+2]);
+					W[idx+1] = 0.5*(W[idx]+W[idx+2]);
+					
+					idx = ii + N2[0]*(jj+1+N[1]*(kk+1));
+					U[idx+1] = 0.5*(U[idx]+U[idx+2]);
+					V[idx+1] = 0.5*(V[idx]+V[idx+2]);
+					W[idx+1] = 0.5*(W[idx]+W[idx+2]);
+				}
+			}
+		}
+	}
+
+
 
 
 	void MacMesh::saveas(const std::string filename) const{

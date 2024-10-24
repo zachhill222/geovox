@@ -144,8 +144,8 @@ namespace GeoVox::geometry{
 	}
 
 	double SuperEllipsoid::levelval(const Point3& point) const{
-		Point3 localpoint = GeoVox::util::div(tolocal(point),_r);
-		localpoint = GeoVox::util::times(localpoint,localpoint);
+		Point3 localpoint = tolocal(point).array()/_r.array();
+		localpoint = localpoint.array()*localpoint.array();
 		localpoint[0] = std::pow(localpoint[0], _POWERS[1]);
 		localpoint[1] = std::pow(localpoint[1], _POWERS[1]);
 		localpoint[2] = std::pow(localpoint[2], _POWERS[0]);
