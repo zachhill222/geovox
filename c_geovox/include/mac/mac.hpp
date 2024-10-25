@@ -25,6 +25,7 @@ using VectorXd = Eigen::VectorXd;
 #define MAC_DOMAIN_MARKER 0
 #define MAC_DEFAULT_TOL 1E-6
 #define MAC_DEFAULT_MAX_OUTER_ITERATIONS 100
+#define MAC_MULTIGRID_MIN_DIMENSION 32
 
 namespace GeoVox::mac{
 	class MacMesh{
@@ -73,7 +74,9 @@ namespace GeoVox::mac{
 		//DOF masks (periodic BC, so the number of DOFs are the same)
 		Eigen::Matrix<long unsigned int, 3, 1> N;
 		Point3 H;
-		inline long unsigned int index(long unsigned int i, long unsigned int j, long unsigned k) const {return p_mask.index(i%N[0],j%N[1],k%N[2]);}
+		inline long unsigned int index(long unsigned int i, long unsigned int j, long unsigned k) const {return (i%N[0]) + N[0]*( (j%N[1]) + N[1]*(k%N[2]) );}
+		inline long unsigned int fine_index(long unsigned int i, long unsigned int j, long unsigned k) const {long unsigned int M[3] {2*N[0], 2*N[1], 2*N[2]}; return (i%M[0]) + M[0]*( (j%M[1]) + M[1]*(k%M[2]));}
+		inline long unsigned int coarse_index(long unsigned int i, long unsigned int j, long unsigned k) const {long unsigned int M[3] {N[0]/2, N[1]/2, N[2]/2}; return (i%M[0]) + M[0]*( (j%M[1]) + M[1]*(k%M[2]));}
 
 		StructuredPoints p_mask; //pressure mask (global indexing): Nx by Ny by Nz
 		StructuredPoints u_mask; //x-velocity mask (global indexing): Nx by Ny by Nz
@@ -112,11 +115,15 @@ namespace GeoVox::mac{
 
 		//SOLUTION
 		void GS_relax_velocity();
+		void GS_relax_velocity_reverse();
 		VectorXd GS_relax_p() const; //Return ep = Ap_inv(g-Bx(u)-By(v)-Bz(w))
+		VectorXd GS_relax_p_reverse() const;
 		void setRockVelocity();
 
 		void DGS();
+		void DGS_reverse(); //for symmetric Gauss-Seidel iterations
 		void solve(const int max_iter=MAC_DEFAULT_MAX_OUTER_ITERATIONS);
+		void solve_reverse(const int max_iter=MAC_DEFAULT_MAX_OUTER_ITERATIONS);
 		
 		void solve_multigrid(int m);
 		void coarsen(VectorXd& U, VectorXd& V, VectorXd& W, VectorXd& P);

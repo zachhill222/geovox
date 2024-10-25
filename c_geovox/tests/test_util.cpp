@@ -19,7 +19,7 @@ using Box = util::Box;
 
 int test_assembly(){
 	std::cout << "READING PARTICLES\n";
-	Assembly A = Assembly("particles_50.txt");
+	Assembly A = Assembly("sphere.txt");
 
 	std::cout << "MAKING PARTICLE OCTREE\n";
 	A.divide(5);
@@ -31,8 +31,8 @@ int test_assembly(){
 	octree_structure.saveas("octree_structure.vtk");
 	
 
-	Box geobox = 1.05*A.box;
-	long unsigned int  N[3] {128, 128, 128};
+	Box geobox = 2*A.box;
+	long unsigned int  N[3] {64, 64, 64};
 
 
 	// std::cout << "SAVING GEOMETRY\n";
@@ -55,9 +55,22 @@ int test_assembly(){
 
 	mac.mu = 1E-3;
 	std::cout << "SOLVING MAC\n";
-	mac.solve(101);
+	mac.solve_multigrid(50);
+	// mac.solve(100);
+	// mac.solve_reverse(100);
+
+	// long unsigned int M[3] {N[0]*2,N[1]*2,N[2]*2};
+	// GeoVox::mac::MacMesh test_mac(geobox, M, &A);
+	// for (long unsigned int k=0; k<test_mac.N[2]; k++){
+	// 	for (long unsigned int j=0; j<test_mac.N[1]; j++){
+	// 		for (long unsigned int i=0; i<test_mac.N[0]; i++){
+	// 			test_mac.p[test_mac.index(i,j,k)] = mac.fine_index(i,j,k);
+	// 		}
+	// 	}
+	// }
 
 	std::cout << "SAVING MAC SOLUTION\n";
+	// test_mac.saveas("test_mac_solution.vtk");
 	mac.saveas("mac_solution.vtk");
 
 	return 1;
