@@ -19,7 +19,7 @@ using Box = util::Box;
 
 int test_assembly(){
 	std::cout << "READING PARTICLES\n";
-	Assembly A = Assembly("sphere.txt");
+	Assembly A = Assembly("testdata/sphere.txt");
 
 	std::cout << "MAKING PARTICLE OCTREE\n";
 	A.divide(5);
@@ -28,7 +28,7 @@ int test_assembly(){
 	Mesh octree_structure = GeoVox::util::visualize_octree_structure<Assembly, GeoVox::geometry::AssemblyNode, GeoVox::geometry::SuperEllipsoid>(&A);
 
 	std::cout << "SAVING OCTREE STRUCTURE AS VTK MESH\n";
-	octree_structure.saveas("octree_structure.vtk");
+	octree_structure.saveas("outfiles/octree_structure.vtk");
 	
 
 	Box geobox = 2*A.box;
@@ -36,7 +36,7 @@ int test_assembly(){
 
 
 	// std::cout << "SAVING GEOMETRY\n";
-	// A.save_geometry("Geometry.dat", A.box, N);
+	// A.save_geometry("outfiles/Geometry.dat", A.box, N);
 
 	// std::cout << "READING GEOMETRY\n";
 	// Point3 H = (A.box.high()-A.box.low())/Point3(N[0], N[1], N[2]);
@@ -45,7 +45,7 @@ int test_assembly(){
 	// GeoVox::mesh::StructuredPoints SP = A.make_structured_mesh(geobox,N);
 	
 	// std::cout << "SAVING STRUCTURED POINTS\n";
-	// SP.saveas("structured_points.vtk");
+	// SP.saveas("outfiles/structured_points.vtk");
 
 	std::cout << "SETTING UP MAC\n";
 	GeoVox::mac::MacMesh mac(geobox, N, &A);
@@ -70,8 +70,8 @@ int test_assembly(){
 	// }
 
 	std::cout << "SAVING MAC SOLUTION\n";
-	// test_mac.saveas("test_mac_solution.vtk");
-	mac.saveas("mac_solution.vtk");
+	// test_mac.saveas("outfiles/test_mac_solution.vtk");
+	mac.saveas("outfiles/mac_solution.vtk");
 
 	return 1;
 }

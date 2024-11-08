@@ -72,7 +72,7 @@ namespace GeoVox::mac{
 		for (long unsigned int k=0; k<N[2]; k++){
 			for (long unsigned int j=0; j<N[1]; j++){
 				for (long unsigned int i=0; i<N[0]; i++){
-					result[index(i,j,k)] = h_1*(variable[index(i,j,k)]-variable[index(i+1,j,k)]);
+					result[index(i,j,k)] = h_1*(variable[index(i+1,j,k)]-variable[index(i,j,k)]);
 				}
 			}
 		}
@@ -89,7 +89,7 @@ namespace GeoVox::mac{
 		for (long unsigned int k=0; k<N[2]; k++){
 			for (long unsigned int j=0; j<N[1]; j++){
 				for (long unsigned int i=0; i<N[0]; i++){
-					result[index(i,j,k)] = h_1*(variable[index(i,j,k)]-variable[index(i,j+1,k)]);
+					result[index(i,j,k)] = h_1*(variable[index(i,j+1,k)]-variable[index(i,j,k)]);
 				}
 			}
 		}
@@ -106,12 +106,12 @@ namespace GeoVox::mac{
 		for (long unsigned int k=0; k<N[2]; k++){
 			for (long unsigned int j=0; j<N[1]; j++){
 				for (long unsigned int i=0; i<N[0]; i++){
-					result[index(i,j,k)] = h_1*(variable[index(i,j,k)]-variable[index(i,j,k+1)]);
+					result[index(i,j,k)] = h_1*(variable[index(i,j,k+1)]-variable[index(i,j,k)]);
 				}
 			}
 		}
 
-		return mu*result;
+		return result;
 	}
 
 
@@ -127,11 +127,11 @@ namespace GeoVox::mac{
 		for (long unsigned int k=0; k<N[2]; k++){
 			for (long unsigned int j=0; j<N[1]; j++){
 				for (long unsigned int i=0; i<N[0]; i++){
-					long unsigned int P = index(i,j,k);
+					long unsigned int idx = index(i,j,k);
 
-					result[P] = h_2[0]*(2*variable[P] - variable[index(i-1,j,k)] - variable[index(i+1,j,k)]);
-					result[P]+= h_2[1]*(2*variable[P] - variable[index(i,j-1,k)] - variable[index(i,j+1,k)]);
-					result[P]+= h_2[2]*(2*variable[P] - variable[index(i,j,k-1)] - variable[index(i,j,k+1)]);
+					result[idx] = h_2[0]*(2*variable[idx] - variable[index(i-1,j,k)] - variable[index(i+1,j,k)]);
+					result[idx]+= h_2[1]*(2*variable[idx] - variable[index(i,j-1,k)] - variable[index(i,j+1,k)]);
+					result[idx]+= h_2[2]*(2*variable[idx] - variable[index(i,j,k-1)] - variable[index(i,j,k+1)]);
 				}
 			}
 		}

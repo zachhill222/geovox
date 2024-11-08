@@ -30,36 +30,42 @@ using VectorXd = Eigen::VectorXd;
 namespace GeoVox::mac{
 	class MacMesh{
 	public:
-		MacMesh(const Box& box, const long unsigned int N[3], const Assembly* const assembly) : mu(1.0), tol(MAC_DEFAULT_TOL), N(N), assembly(assembly), box(box) {
+		MacMesh(const Box& box, const long unsigned int _N[3], const Assembly* const assembly) : mu(1.0), tol(MAC_DEFAULT_TOL), N(_N), assembly(assembly), box(box) {
 			//get spacing between DOFs
 			H = box.sidelength().array()/Point3(N[0], N[1], N[2]).array();
 
 			//create masks
-			Point3 offset = 0.5*H;
-			Box subbox = Box(box.low()+offset, box.high()-offset);
+			Point3 offset_low = 0.5*H;
+			Point3 offset_high = 0.5*H;
+			Box subbox = Box(box.low()+offset_low, box.high()-offset_high);
+			p_mask = assembly->make_structured_mesh(subbox, _N);
 
-			p_mask = assembly->make_structured_mesh(subbox, N);
+			offset_low = Point3(0, 0.5*H[1], 0.5*H[2]);
+			offset_high = Point3(H[0], 0.5*H[1], 0.5*H[2]);
+			subbox = Box(box.low()+offset_low, box.high()-offset_high);
+			u_mask = assembly->make_structured_mesh(subbox, _N);
 
-			offset = Point3(0.5*H[0], 0, 0);
-			u_mask = assembly->make_structured_mesh(subbox-offset, N);
+			offset_low = Point3(0.5*H[0], 0, 0.5*H[2]);
+			offset_high = Point3(0.5*H[0], H[1], 0.5*H[2]);
+			subbox = Box(box.low()+offset_low, box.high()-offset_high);
+			v_mask = assembly->make_structured_mesh(subbox, _N);
 
-			offset = Point3(0, 0.5*H[1], 0);
-			v_mask = assembly->make_structured_mesh(subbox-offset, N);
-
-			offset = Point3(0, 0, 0.5*H[2]);
-			w_mask = assembly->make_structured_mesh(subbox-offset, N);
+			offset_low = Point3(0.5*H[0], 0.5*H[1], 0);
+			offset_high = Point3(0.5*H[0], 0.5*H[1], H[2]);
+			subbox = Box(box.low()+offset_low, box.high()-offset_high);
+			w_mask = assembly->make_structured_mesh(subbox, _N);
 
 			//initialize unkowns to 0
-			p = VectorXd::Zero(p_mask.N.prod());
-			u = VectorXd::Zero(u_mask.N.prod());
-			v = VectorXd::Zero(v_mask.N.prod());
-			w = VectorXd::Zero(w_mask.N.prod());
+			p = VectorXd::Zero(N.prod());
+			u = VectorXd::Zero(N.prod());
+			v = VectorXd::Zero(N.prod());
+			w = VectorXd::Zero(N.prod());
 
 			//initialize forcing terms to 0
-			f1 = VectorXd::Zero(u.size());
-			f2 = VectorXd::Zero(v.size());
-			f3 = VectorXd::Zero(w.size());
-			g  = VectorXd::Zero(p.size());
+			f1 = VectorXd::Zero(N.prod());
+			f2 = VectorXd::Zero(N.prod());
+			f3 = VectorXd::Zero(N.prod());
+			g  = VectorXd::Zero(N.prod());
 		}
 
 		
