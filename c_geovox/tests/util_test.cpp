@@ -55,9 +55,9 @@ int test_assembly(){
 
 	mac.mu = 1E-3;
 	std::cout << "SOLVING MAC\n";
-	mac.solve_multigrid(50);
-	// mac.solve(100);
-	// mac.solve_reverse(100);
+	// mac.solve_multigrid(50);
+	mac.solve(100);
+	mac.solve_reverse(100);
 
 	// long unsigned int M[3] {N[0]*2,N[1]*2,N[2]*2};
 	// GeoVox::mac::MacMesh test_mac(geobox, M, &A);
@@ -70,8 +70,9 @@ int test_assembly(){
 	// }
 
 	std::cout << "SAVING MAC SOLUTION\n";
-	// test_mac.saveas("outfiles/test_mac_solution.vtk");
-	mac.saveas("outfiles/mac_solution.vtk");
+	mac.saveas("outfiles/mac_solution_test.vtk");
+	// mac.saveas("outfiles/mac_solution.vtk");
+	// mac.saveas("outfiles/mac_solution_multigrid.vtk");
 
 	return 1;
 }
