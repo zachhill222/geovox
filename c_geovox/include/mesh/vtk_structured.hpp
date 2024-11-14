@@ -1,6 +1,7 @@
 #ifndef VTK_STRUCTURED_H
 #define VTK_STRUCTURED_H
 
+#include "constants.hpp"
 #include "util/box.hpp"
 #include "util/point.hpp"
 
@@ -11,6 +12,8 @@
 #include <fstream>
 #include <string>
 #include <sstream>
+
+#include <omp.h>
 
 using Point3 = GeoVox::util::Point<3>;
 using Box = GeoVox::util::Box;
@@ -29,6 +32,7 @@ namespace GeoVox::mesh{
 		//access methods
 		inline Point3 idx2point(long unsigned int i, long unsigned int j, long unsigned int k) const {return Point3(box.low()[0]+H[0]*i, box.low()[1]+H[1]*j, box.low()[2]+H[2]*k);}
 		inline long unsigned int index(long unsigned int i, long unsigned int j, long unsigned int k) const {return i + N[0]*( j + N[1]*k);}
+		bool index2ijk(long unsigned int l, long unsigned int &i, long unsigned int &j, long unsigned int &k) const;
 		inline int operator()(long unsigned int i, long unsigned int j, long unsigned int k) const {return markers[index(i,j,k)];}
 
 		//fileio
@@ -36,10 +40,14 @@ namespace GeoVox::mesh{
 		void readfile(const std::string filename);
 		
 		//mesh information
-		std::vector<int> markers; //MARK CENTROID OF CELLS
+		std::vector<int> markers;
 		Box box;
 		Eigen::Array<long unsigned int, 1, 3> N;
 		Point3 H;
+
+		//set all markers
+		void set_all_markers(const int mkr);
+		void replace_marker(const int old_mkr, const int new_mkr);
 	};
 	
 	

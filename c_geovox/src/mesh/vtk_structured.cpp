@@ -2,6 +2,47 @@
 
 
 namespace GeoVox::mesh{
+	bool StructuredPoints::index2ijk(long unsigned int l, long unsigned int &i, long unsigned int &j, long unsigned int &k) const{
+		if (l >= N[0]*N[1]*N[2]){
+			return false;
+		}
+
+		k = l/(N[0]*N[1]);
+		l-= k;
+
+		j = l/N[0];
+		l-=k;
+
+		i = l;
+
+		return true;
+	}
+
+
+	void StructuredPoints::set_all_markers(const int mkr){
+		#pragma omp parallel for collapse(3)
+		for (long unsigned int k=0; k<N[2]; k++){
+			for (long unsigned int j=0; j<N[1]; j++){
+				for (long unsigned int i=0; i<N[0]; i++){
+					markers[index(i,j,k)] = mkr;
+				}
+			}
+		}
+	}
+
+	void StructuredPoints::replace_marker(const int old_mkr, const int new_mkr){
+		#pragma omp parallel for collapse(3)
+		for (long unsigned int k=0; k<N[2]; k++){
+			for (long unsigned int j=0; j<N[1]; j++){
+				for (long unsigned int i=0; i<N[0]; i++){
+					if (markers[index(i,j,k)] == old_mkr){
+						markers[index(i,j,k)] == new_mkr;
+					}
+				}
+			}
+		}
+	}
+
 	void StructuredPoints::saveas(const std::string filename) const{
 		//////////////// OPEN FILE ////////////////
 		std::ofstream meshfile(filename);
