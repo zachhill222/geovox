@@ -9,6 +9,8 @@
 #include <sstream>
 
 
+// using Point3 = GeoVox::util::Point3;
+
 namespace GeoVox::util{
 	class Box{
 	public:

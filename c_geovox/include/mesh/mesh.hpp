@@ -5,7 +5,7 @@
 #include "util/box.hpp"
 
 #include "mesh/nodes.hpp"
-#include "mesh/vtk_linear_elements.hpp"
+// #include "mesh/vtk_linear_elements.hpp"
 
 #include <vector>
 #include <algorithm>
@@ -18,11 +18,12 @@
 
 #include <stdexcept>
 
-using Point3 = GeoVox::util::Point<3>;
-using Box = GeoVox::util::Box;
-using MeshNode = GeoVox::mesh::MeshNode;
 
 namespace GeoVox::mesh{
+	using Box = GeoVox::util::Box;
+	using MeshNode = GeoVox::mesh::MeshNode;
+	using Point3 = GeoVox::util::Point3;
+
 	class Mesh{
 	public:
 		Mesh() {}
@@ -63,11 +64,8 @@ namespace GeoVox::mesh{
 
 		//subdomains
 		Mesh mesh_subdomain(const std::set<int>& eMarker) const;
-		// Mesh boundary_mesh(const std::set<int>& eMarker) const;
-		// Mesh extract_boundary_mesh();
 
 		//essential data
-		// std::vector<Point3> _node; //point locations for each node
 		MeshNode _node;
 		std::vector<std::vector<long unsigned int>> _elem2node; //could be slow, but will allow different types of elements in the same mesh
 		std::vector<std::vector<long unsigned int>> _node2elem;

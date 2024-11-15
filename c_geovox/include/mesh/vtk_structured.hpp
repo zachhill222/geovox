@@ -15,7 +15,7 @@
 
 #include <omp.h>
 
-using Point3 = GeoVox::util::Point<3>;
+using Point3 = GeoVox::util::Point3;
 using Box = GeoVox::util::Box;
 
 
@@ -36,13 +36,14 @@ namespace GeoVox::mesh{
 		inline int operator()(long unsigned int i, long unsigned int j, long unsigned int k) const {return markers[index(i,j,k)];}
 
 		//fileio
-		void saveas(const std::string filename) const;
+		void saveas(const std::string filename, bool cells=false) const;
 		void readfile(const std::string filename);
 		
 		//mesh information
 		std::vector<int> markers;
 		Box box;
-		Eigen::Array<long unsigned int, 1, 3> N;
+		// Eigen::Array<long unsigned int, 1, 3> N;
+		long unsigned int N[3];
 		Point3 H;
 
 		//set all markers

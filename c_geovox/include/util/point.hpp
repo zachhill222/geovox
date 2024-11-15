@@ -82,12 +82,20 @@ namespace GeoVox::util{
 
 	template <typename Derived>
 	typename Derived::PlainObject el_max(const Eigen::MatrixBase<Derived>& A, const Eigen::MatrixBase<Derived>& B){ //element-wise maximum
-		return (A.array() > B.array()).select(A,B);
+		Derived result;
+		for (long int idx=0; idx<A.size(); idx++){
+			result[idx] = (A[idx]>=B[idx]) ? (A[idx]) : (B[idx]);
+		}
+		return result;
 	}
 
 	template <typename Derived>
 	typename Derived::PlainObject el_min(const Eigen::MatrixBase<Derived>& A, const Eigen::MatrixBase<Derived>& B){ //element-wise minimum
-		return (A.array() < B.array()).select(A,B);
+		Derived result;
+		for (long int idx=0; idx<A.size(); idx++){
+			result[idx] = (A[idx]<=B[idx]) ? (A[idx]) : (B[idx]);
+		}
+		return result;
 	}
 
 

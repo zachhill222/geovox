@@ -480,21 +480,21 @@ namespace GeoVox::mac{
 								idx = fine_index(ii+x,jj+y,kk+z);
 								
 								if (x==0){
-									// U[idx] = 0.0625*(9*u[index(i,j,k)]+3*u[index(i,j+ysgn,k)]+3*u[index(i,j,k+zsgn)]+u[index(i,j+ysgn,k+zsgn)]);
+									U[idx] = 0.0625*(9*u[index(i,j,k)]+3*u[index(i,j+ysgn,k)]+3*u[index(i,j,k+zsgn)]+u[index(i,j+ysgn,k+zsgn)]);
 									// U[idx] = 0.75*u[index(i,j,k)] + 0.25*u[index(i,j+ysgn,k+zsgn)];
-									U[idx] = u[index(i,j,k)];
+									// U[idx] = u[index(i,j,k)];
 								}
 								
 								if (y==0){
-									// V[idx] = 0.0625*(9*v[index(i,j,k)]+3*v[index(i,j,k+zsgn)]+3*v[index(i+xsgn,j,k)]+v[index(i+xsgn,j,k+zsgn)]);
+									V[idx] = 0.0625*(9*v[index(i,j,k)]+3*v[index(i,j,k+zsgn)]+3*v[index(i+xsgn,j,k)]+v[index(i+xsgn,j,k+zsgn)]);
 									// V[idx] = 0.75*v[index(i,j,k)] + 0.25*v[index(i+xsgn,j,k+zsgn)];
-									V[idx] = v[index(i,j,k)];
+									// V[idx] = v[index(i,j,k)];
 								}
 								
 								if (z==0){
-									// W[idx] = 0.0625*(9*w[index(i,j,k)]+3*w[index(i+xsgn,j,k)]+3*w[index(i,j+ysgn,k)]+w[index(i+xsgn,j+ysgn,k)]);
+									W[idx] = 0.0625*(9*w[index(i,j,k)]+3*w[index(i+xsgn,j,k)]+3*w[index(i,j+ysgn,k)]+w[index(i+xsgn,j+ysgn,k)]);
 									// W[idx] = 0.75*w[index(i,j,k)] + 0.25*w[index(i+zsgn,j+ysgn,k)];
-									W[idx] = w[index(i,j,k)];
+									// W[idx] = w[index(i,j,k)];
 								}
 
 								P[idx] = p[index(i,j,k)];

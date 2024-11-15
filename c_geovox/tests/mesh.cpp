@@ -19,6 +19,10 @@ void mark_regions(std::string filename, long unsigned int N[3]){
 	Assembly A(filename);
 	VoxelParticleGeometry voxel_mesh(A, N);
 
+	// voxel_mesh.periodicBC[0] = false;
+	// voxel_mesh.periodicBC[1] = false;
+	// voxel_mesh.periodicBC[2] = false;
+
 	voxel_mesh.compute_connectivity();
 	voxel_mesh.saveas("outfiles/mesh/voxel_mesh_connectivity.vtk");
 }

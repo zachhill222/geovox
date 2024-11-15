@@ -8,16 +8,17 @@
 #include <vector>
 #include <iostream>
 
-using Point3 = GeoVox::util::Point<3>;
-using Box = GeoVox::util::Box;
+
 
 
 
 namespace GeoVox::mesh{
 	class MeshNodeNode; //node of octree
 	class MeshNode; //root node of octree is called MeshNode because it stores the FEM node locations
+	
+	using Point3 = GeoVox::util::Point3;
+	using Box = GeoVox::util::Box;
 	using OctreeNode = GeoVox::util::OctreeNode<MeshNode, MeshNodeNode, Point3>;
-
 
 	class MeshNodeNode : public OctreeNode{
 		public:

@@ -14,14 +14,22 @@ LDLIBS     = -lcgeovox
 .PHONY: all
 all: $(TARGETS)
 
-# $(TARGETS): $(OBJ) $(LIB_DIR)/libcgeovox.a
-# 	$(CC) $(LDFLAGS) $^ -o $@ $(LDLIBS)
+# .o: $(OBJ) $(LIB_DIR)/libcgeovox.a
+# 	$(CC) $(LDFLAGS) $< -o $@ $(LDLIBS)
 
-.o: $(OBJ) $(LIB_DIR)/libcgeovox.a
+# .cpp.o:
+# 	$(CC) $(CFLAGS) -I$(INC_DIR) -c $< -o $@
+
+
+
+# LINK
+$(TARGETS) : % : %.o $(OBJ)
 	$(CC) $(LDFLAGS) $< -o $@ $(LDLIBS)
 
-.cpp.o:
+# COMPILE
+%.o: %.cpp $(LIB_DIR)/libcgeovox.a
 	$(CC) $(CFLAGS) -I$(INC_DIR) -c $< -o $@
+
 
 .PHONY: clean
 clean:
