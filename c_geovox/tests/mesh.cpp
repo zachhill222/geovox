@@ -17,6 +17,8 @@ using VoxelParticleGeometry = geometry::VoxelParticleGeometry;
 
 void mark_regions(std::string filename, long unsigned int N[3]){
 	Assembly A(filename);
+	A.divide(5);
+	
 	VoxelParticleGeometry voxel_mesh(A, N);
 
 	// voxel_mesh.periodicBC[0] = false;
