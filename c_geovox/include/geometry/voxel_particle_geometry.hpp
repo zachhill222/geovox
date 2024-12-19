@@ -10,6 +10,7 @@
 #include <array>
 #include <set>
 #include <string>
+#include <iostream>
 
 #include <omp.h>
 
@@ -28,10 +29,7 @@ namespace GeoVox::geometry{
 
 		
 		//boundary conditions
-		bool periodicBC[3] {1}; //xlow=xhigh, ylow=yhigh, zlow=zhigh
 		bool wallBC[6] {0}; //xlow, xhigh, ylow, yhigh, zlow, zhigh
-
-		long unsigned int index_bc(long unsigned int i, long unsigned int j, long unsigned int k);
 
 		//separate the void space into disjoint (orthogonal connectivity) regions.
 		//regions connected to inlet/outlet boundaries are labeled with poitive integers.
@@ -40,6 +38,7 @@ namespace GeoVox::geometry{
 
 		void initialize(); //mark solid phase as SOLID_MARKER and set all others to UNDEFINED_MARKER
 
+		void print(std::ostream &stream) const;
 	private:
 		Assembly const* A;
 

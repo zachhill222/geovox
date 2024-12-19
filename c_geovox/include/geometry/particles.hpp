@@ -95,8 +95,8 @@ namespace GeoVox::geometry{
 
 		double neldermeadfun(GeoVox::util::Point<2> coords,  GeoVox::util::Point<3> localpoint) const;
 		
-
-
+		// int id;
+		// double vol;
 	private:
 		Point3 _r;
 		double _eps1;

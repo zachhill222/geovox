@@ -1,28 +1,6 @@
 #include "geometry/voxel_particle_geometry.hpp"
 
 namespace GeoVox::geometry{
-	long unsigned int VoxelParticleGeometry::index_bc(long unsigned int i, long unsigned int j, long unsigned int k){
-		if (periodicBC[0]){
-			i=i%N[0];
-		}else{
-			i=std::min(i,N[0]-1);
-		}
-
-		if (periodicBC[1]){
-			j=j%N[1];
-		}else{
-			j=std::min(j,N[1]-1);
-		}
-
-		if (periodicBC[2]){
-			k=k%N[2];
-		}else{
-			k=std::min(k,N[2]-1);
-		}
-
-		return index(i,j,k);
-	}
-
 	void VoxelParticleGeometry::compute_connectivity(){
 		std::vector<long unsigned int> active_index;
 		std::set<int> unique_markers;
@@ -48,14 +26,11 @@ namespace GeoVox::geometry{
 			n_spread = spread(active_index);
 			
 			iter += 1;
-			std::cout << "pass " << iter << std::endl;
-			std::cout << "\tn_spread= " << n_spread << std::endl;
-			std::cout << "\tactive_index.size()= " << active_index.size() << std::endl;
-
-
-			std::string filename = "particle_label_spread_" + std::to_string(iter) + ".vtk";
-			std::cout << "saving: " + filename << std::endl;
-			saveas(filename, true);
+			
+			if (iter%10==0){ //FOR TESTING ONLY
+				std::string filename = "particle_label_spread_" + std::to_string(iter) + ".vtk";
+				saveas(filename, true);
+			}
 		}
 	}
 
@@ -73,77 +48,16 @@ namespace GeoVox::geometry{
 
 			//get i,j,k indexing of current voxel
 			index2ijk(current,i,j,k);
-			// std::cout << "current= " << current << " -> (i,j,k)= (" << i << ", " <<  j << ", " <<  k << ", " << ")\n";
-			// std::cout << "index(i,j,k) = " << index(i,j,k) << std::endl;
 
 			//get linear index for neighbors
 			long unsigned int EAST, WEST, NORTH, SOUTH, TOP, BOTTOM;
+			EAST = east(i,j,k);
+			WEST = west(i,j,k);
+			NORTH = north(i,j,k);
+			SOUTH = south(i,j,k);
+			TOP = top(i,j,k);
+			BOTTOM = bottom(i,j,k);
 			
-			//X (EAST/WEST)
-			if (i==0){
-				if (periodicBC[0]){
-					WEST = index(N[0]-1,j,k);
-				}else{
-					WEST = current;
-				}
-
-				EAST = index(i+1,j,k);
-			}else if (i==N[0]-1){
-				if (periodicBC[0]){
-					EAST = index(0,j,k);
-				}else{
-					EAST = current;
-				}
-
-				WEST = index(i-1,j,k);
-			}else{
-				EAST = index(i+1,j,k);
-				WEST = index(i-1,j,k);
-			}
-
-			//Y (NORTH/SOUTH)
-			if (j==0){
-				if (periodicBC[1]){
-					SOUTH = index(i,N[1]-1,k);
-				}else{
-					SOUTH = current;
-				}
-
-				NORTH = index(i,j+1,k);
-			}else if (j==N[1]-1){
-				if (periodicBC[1]){
-					NORTH = index(i,0,k);
-				}else{
-					NORTH = current;
-				}
-
-				SOUTH = index(i,j-1,k);
-			}else{
-				NORTH = index(i,j+1,k);
-				SOUTH = index(i,j-1,k);
-			}
-
-			//Z (TOP/BOTTOM)
-			if (k==0){
-				if (periodicBC[2]){
-					BOTTOM = index(i,j,N[2]-1);
-				}else{
-					BOTTOM = current;
-				}
-
-				TOP = index(i,j,k+1);
-			}else if (k==N[2]-1){
-				if (periodicBC[2]){
-					TOP = index(i,j,0);
-				}else{
-					TOP = current;
-				}
-
-				BOTTOM = index(i,j,k-1);
-			}else{
-				TOP    = index(i,j,k+1);
-				BOTTOM = index(i,j,k-1);
-			}
 
 
 			if (EAST!=current and markers[EAST]!=SOLID_PHASE_MARKER){
@@ -222,7 +136,6 @@ namespace GeoVox::geometry{
 
 		//merge regions
 		for (auto low_high : merge_markers){
-
 			int old_mkr, new_mkr;
 			if (low_high[0]>0){//if lower of the two markers is positive, use that as the region marker
 				old_mkr = low_high[1];
@@ -339,5 +252,37 @@ namespace GeoVox::geometry{
 		}
 
 		return false;
+	}
+
+
+	void VoxelParticleGeometry::print(std::ostream &stream) const{
+		std::vector<int> mkr;
+		std::vector<long unsigned int> mkr_count;
+		unique_markers(mkr, mkr_count);
+
+
+		long unsigned int pos_count=0;
+		long unsigned int neg_count=0;
+		long unsigned int zero_count=0;
+
+		for (long unsigned int idx=0; idx<mkr.size(); idx++){
+			mkr_count[idx] = count(mkr[idx]);
+			if (mkr[idx]<0){
+				neg_count += mkr_count[idx];
+			}else if (mkr[idx]>0){
+				pos_count += mkr_count[idx];
+			}else{
+				zero_count += mkr_count[idx];
+			}
+		}
+
+
+		for (long unsigned int idx=0; idx<mkr.size(); idx++){
+			stream << "marker= " << mkr[idx] << "\tcount= " << mkr_count[idx] << "\tfraction= " << mkr_count[idx]/(N[0]*N[1]*N[2]) << std::endl;
+		}
+
+		stream << "positive_marker_fraction= " << pos_count/(N[0]*N[1]*N[2]) << std::endl;
+		stream << "negative_marker_fraction= " << neg_count/(N[0]*N[1]*N[2]) << std::endl;
+		stream << "zero_marker_fraction= " << zero_count/(N[0]*N[1]*N[2]) << std::endl;
 	}
 }

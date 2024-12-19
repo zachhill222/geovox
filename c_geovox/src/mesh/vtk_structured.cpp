@@ -17,6 +17,80 @@ namespace GeoVox::mesh{
 	}
 
 
+
+	long unsigned int StructuredPoints::east(long unsigned int i, long unsigned int j, long unsigned int k) const{
+		if (i+1<N[0]){
+			return index(i+1,j,k);
+		}
+
+		if (periodic_bc[0]){
+			return index(0,j,k);
+		}else{
+			return index(i,j,k);
+		}
+	}
+
+	long unsigned int StructuredPoints::north(long unsigned int i, long unsigned int j, long unsigned int k) const{
+		if (j+1<N[1]){
+			return index(i,j+1,k);
+		}
+
+		if (periodic_bc[1]){
+			return index(i,0,k);
+		}else{
+			return index(i,j,k);
+		}
+	}
+
+	long unsigned int StructuredPoints::top(long unsigned int i, long unsigned int j, long unsigned int k) const{
+		if (k+1<N[2]){
+			return index(i,j,k+1);
+		}
+
+		if (periodic_bc[2]){
+			return index(i,j,0);
+		}else{
+			return index(i,j,k);
+		}
+	}
+
+	long unsigned int StructuredPoints::west(long unsigned int i, long unsigned int j, long unsigned int k) const{
+		if (i-1>0){
+			return index(i-1,j,k);
+		}
+
+		if (periodic_bc[0]){
+			return index(N[0]-1,j,k);
+		}else{
+			return index(i,j,k);
+		}
+	}
+
+	long unsigned int StructuredPoints::south(long unsigned int i, long unsigned int j, long unsigned int k) const{
+		if (j-1>0){
+			return index(i,j-1,k);
+		}
+
+		if (periodic_bc[1]){
+			return index(i,N[1]-1,k);
+		}else{
+			return index(i,j,k);
+		}
+	}
+
+	long unsigned int StructuredPoints::bottom(long unsigned int i, long unsigned int j, long unsigned int k) const{
+		if (k-1>0){
+			return index(i,j,k-1);
+		}
+
+		if (periodic_bc[2]){
+			return index(i,j,N[2]-1);
+		}else{
+			return index(i,j,k);
+		}
+	}
+
+
 	void StructuredPoints::set_all_markers(const int mkr){
 		#pragma omp parallel for collapse(3)
 		for (long unsigned int k=0; k<N[2]; k++){
@@ -36,6 +110,45 @@ namespace GeoVox::mesh{
 					long unsigned int idx = index(i,j,k);
 					if (markers[idx] == old_mkr){
 						markers[idx] = new_mkr;
+					}
+				}
+			}
+		}
+	}
+
+
+
+	long unsigned int StructuredPoints::count(const int mkr) const{
+		long unsigned int number = 0;
+		#pragma omp parallel for collapse(3) reduction(+:number)
+		for (long unsigned int k=0; k<N[2]; k++){
+			for (long unsigned int j=0; j<N[1]; j++){
+				for (long unsigned int i=0; i<N[0]; i++){
+					long unsigned int idx = index(i,j,k);
+					if (markers[idx] == mkr){
+						number += 1;
+					}
+				}
+			}
+		}
+
+		return number;
+	}
+
+
+	
+		void StructuredPoints::unique_markers(std::vector<int> &mkr, std::vector<long unsigned int> &mkr_count) const{
+		for (long unsigned int k=0; k<N[2]; k++){
+			for (long unsigned int j=0; j<N[1]; j++){
+				for (long unsigned int i=0; i<N[0]; i++){
+					long unsigned int idx = index(i,j,k);
+
+					long unsigned int mkr_idx = std::distance(mkr.begin(), std::find(mkr.begin(), mkr.end(), markers[idx]));
+					if (mkr_idx==mkr.size()){
+						mkr.push_back(markers[idx]);
+						mkr_count.push_back(1);
+					}else{
+						mkr_count[mkr_idx] += 1;
 					}
 				}
 			}

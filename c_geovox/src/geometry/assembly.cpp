@@ -151,7 +151,7 @@ namespace GeoVox::geometry{
 		//READ FILE
 		double rx, ry, rz, eps1, eps2, x, y, z, q0, q1, q2, q3;
 
-		long unsigned int particle_number = 0;
+		// long unsigned int particle_number = 0;
 
 		while (getline(_file, line)){
 			if (!line.empty() && line[0] != '#'){
@@ -173,7 +173,7 @@ namespace GeoVox::geometry{
 				SuperEllipsoid P = SuperEllipsoid(Point3(rx,ry,rz), eps1, eps2, Point3(x,y,z), Quaternion(q0,-q1,-q2,-q3));
 				_particles.push_back(P);
 				// _particle_index.push_back(particle_number);
-				particle_number += 1;
+				// particle_number += 1;
 			}
 		}
 
@@ -181,8 +181,114 @@ namespace GeoVox::geometry{
 
 	}
 
+	void Assembly::readfile(const std::string fullfile, const std::string columns){
+		// COLUMN OPTIONS:
+		// -id (IDENTIFIER, int)
+		// -r (TRIPLE RADIUS, double[3])
+		// -c (CENTER, double[3])
+		// -eps (SHAPE PARAMETERS, double[2])
+		// -v (VOLUME, double)
+		// -q (QUATERNION, double[4])
+		// -l (BOUNDING BOX LENGTH, double[3])
+
+		// INITIALIZE TEMPORARY STORAGE
+		int id;
+		double rx, ry, rz;
+		double x, y, z;
+		double eps1, eps2;
+		double vol;
+		double q0, q1, q2, q3;
+		double lx, ly, lz;
+
+		enum col_string_to_int {
+			ID, R, C, EPS, VOL, QUAT, LEN
+		};
+
+		//SET USE/SKIP COLUMNS
+		std::vector<int> col_param;
+		std::stringstream ss(columns);
+		std::string col_opt;
+		char del = '-';
+		while (getline(ss, col_opt, del)){
+			col_opt.erase(remove_if(col_opt.begin(), col_opt.end(), isspace), col_opt.end()); //strip whitespace
+			
+			if (col_opt.compare("id")==0){
+				col_param.push_back(ID);
+			}else if (col_opt.compare("r")==0){
+				col_param.push_back(R);
+			}else if (col_opt.compare("eps")==0){
+				col_param.push_back(EPS);
+			}else if (col_opt.compare("v")==0){
+				col_param.push_back(VOL);
+			}else if (col_opt.compare("c")==0){
+				col_param.push_back(C);
+			}else if (col_opt.compare("q")==0){
+				col_param.push_back(QUAT);
+			}else if (col_opt.compare("l")==0){
+				col_param.push_back(LEN);
+			}
+		}
+
+
+		//OPEN FILE AS INPUT FILE STREAM
+		std::ifstream _file(fullfile);
+		std::string line;
+
+		if( not _file.is_open() )
+		{
+			std::cout << "Could not open " << fullfile << std::endl;
+			return;
+		}
+
+		//READ FILE
+		while (getline(_file, line)){
+			if (!line.empty() && line[0] != '#'){
+				std::istringstream iss(line);
+				for (long unsigned int param_idx=0; param_idx<col_param.size(); param_idx++){
+					switch (col_param[param_idx]){
+					case R:
+						iss >> rx;
+						iss >> ry;
+						iss >> rz;
+						break;
+					case C:
+						iss >> x;
+						iss >> y;
+						iss >> z;
+						break;
+					case EPS:
+						iss >> eps1;
+						iss >> eps2;
+						break;
+					case QUAT:
+						iss >> q0;
+						iss >> q1;
+						iss >> q2;
+						iss >> q3;
+						break;
+					case VOL:
+						iss >> vol;
+						break;
+					case LEN:
+						iss >> lx;
+						iss >> ly;
+						iss >> lz;
+						break;
+					case ID:
+						iss >> id;
+						break;
+					}
+				}
+
+				SuperEllipsoid P = SuperEllipsoid(Point3(rx,ry,rz), eps1, eps2, Point3(x,y,z), Quaternion(q0,-q1,-q2,-q3));
+				_particles.push_back(P);
+			}
+		}
+
+	}
+
 	void Assembly::print(std::ostream &stream) const{
-		stream << "#For superellipsoids (12 columns:rx	ry	rz	eps1	eps2	x	y	z	q0	q1	q2	q3)\n";
+		stream << "#rx	ry	rz	eps1	eps2	x	y	z	q0	q1	q2	q3)\n";
 		stream << std::scientific; //set format
 
 		for (long unsigned int i=0; i<_particles.size(); i++){

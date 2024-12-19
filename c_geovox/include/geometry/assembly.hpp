@@ -24,6 +24,7 @@
 #include <fstream>
 #include <string>
 #include <sstream>
+#include <algorithm>
 
 
 
@@ -73,9 +74,18 @@ namespace GeoVox::geometry{
 			}
 		}
 
+		Assembly(const std::string particle_file, const std::string columns) : AssemblyNode(), _nleaves(1), _maxdepth(0), max_data_per_leaf(8) {
+			_root = this;
+			readfile(particle_file, columns);
+			for (long unsigned int i=0; i<_particles.size(); i++){
+				_data.push_back(_particles[i]);
+			}
+		}
+
 		void gradiate(); //ensure depth changes by at most one between neighbors
 
 		void readfile(const std::string fullfile);
+		void readfile(const std::string fullfile, const std::string columns);
 		void print(std::ostream &stream) const;
 
 		StructuredPoints make_structured_mesh(const Box& subbox, const long unsigned int N[3]) const;
