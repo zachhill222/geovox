@@ -138,54 +138,11 @@ namespace GeoVox::geometry{
 
 
 	//ASSEMBLY
-	void Assembly::readfile(const std::string fullfile){
-		std::ifstream _file(fullfile);
-		std::string line;
-
-		if( not _file.is_open() )
-		{
-			std::cout << "Could not open " << fullfile << std::endl;
-			return;
-		}
-
-		//READ FILE
-		double rx, ry, rz, eps1, eps2, x, y, z, q0, q1, q2, q3;
-
-		// long unsigned int particle_number = 0;
-
-		while (getline(_file, line)){
-			if (!line.empty() && line[0] != '#'){
-				std::istringstream iss(line);
-				iss >> rx;
-				iss >> ry;
-				iss >> rz;
-				iss >> eps1;
-				iss >> eps2;
-				iss >> x;
-				iss >> y;
-				iss >> z;
-				iss >> q0;
-				iss >> q1;
-				iss >> q2;
-				iss >> q3;
-
-				// std::cout << rx << "\t" << ry << "\t"<< rz << "\t"<< eps1 << "\t"<< eps2 << "\t"<< x << "\t" << y << "\t" << z << "\t" << q0 << "\t"<< q1 << "\t" << q2 << "\t" << q3 << "\n";
-				SuperEllipsoid P = SuperEllipsoid(Point3(rx,ry,rz), eps1, eps2, Point3(x,y,z), Quaternion(q0,-q1,-q2,-q3));
-				_particles.push_back(P);
-				// _particle_index.push_back(particle_number);
-				// particle_number += 1;
-			}
-		}
-
-		_setbbox();
-
-	}
-
 	void Assembly::readfile(const std::string fullfile, const std::string columns){
 		// COLUMN OPTIONS:
 		// -id (IDENTIFIER, int)
-		// -r (TRIPLE RADIUS, double[3])
-		// -c (CENTER, double[3])
+		// -rrr (TRIPLE RADIUS, double[3])
+		// -xyz (CENTER, double[3])
 		// -eps (SHAPE PARAMETERS, double[2])
 		// -v (VOLUME, double)
 		// -q (QUATERNION, double[4])
@@ -197,11 +154,11 @@ namespace GeoVox::geometry{
 		double x, y, z;
 		double eps1, eps2;
 		double vol;
-		double q0, q1, q2, q3;
+		double qw, qx, qy, qz;
 		double lx, ly, lz;
 
 		enum col_string_to_int {
-			ID, R, C, EPS, VOL, QUAT, LEN
+			ID, RRR, XYZ, EPS, VOL, QUAT, LEN
 		};
 
 		//SET USE/SKIP COLUMNS
@@ -211,22 +168,27 @@ namespace GeoVox::geometry{
 		char del = '-';
 		while (getline(ss, col_opt, del)){
 			col_opt.erase(remove_if(col_opt.begin(), col_opt.end(), isspace), col_opt.end()); //strip whitespace
-			
-			if (col_opt.compare("id")==0){
+			if (col_opt.size()>0){
+				if (col_opt.compare("id")==0){
 				col_param.push_back(ID);
-			}else if (col_opt.compare("r")==0){
-				col_param.push_back(R);
-			}else if (col_opt.compare("eps")==0){
-				col_param.push_back(EPS);
-			}else if (col_opt.compare("v")==0){
-				col_param.push_back(VOL);
-			}else if (col_opt.compare("c")==0){
-				col_param.push_back(C);
-			}else if (col_opt.compare("q")==0){
-				col_param.push_back(QUAT);
-			}else if (col_opt.compare("l")==0){
-				col_param.push_back(LEN);
+				}else if (col_opt.compare("rrr")==0){
+					col_param.push_back(RRR);
+				}else if (col_opt.compare("eps")==0){
+					col_param.push_back(EPS);
+				}else if (col_opt.compare("v")==0){
+					col_param.push_back(VOL);
+				}else if (col_opt.compare("xyz")==0){
+					col_param.push_back(XYZ);
+				}else if (col_opt.compare("q")==0){
+					col_param.push_back(QUAT);
+				}else if (col_opt.compare("l")==0){
+					col_param.push_back(LEN);
+				}else{
+					std::string error_message = "Unkonwn parameter: " + col_opt;
+					throw std::runtime_error(error_message);
+				}
 			}
+			
 		}
 
 
@@ -246,45 +208,47 @@ namespace GeoVox::geometry{
 				std::istringstream iss(line);
 				for (long unsigned int param_idx=0; param_idx<col_param.size(); param_idx++){
 					switch (col_param[param_idx]){
-					case R:
-						iss >> rx;
-						iss >> ry;
-						iss >> rz;
+					case RRR:
+						iss >> rx; //x-radius
+						iss >> ry; //y-radius
+						iss >> rz; //z-radius
 						break;
-					case C:
-						iss >> x;
-						iss >> y;
-						iss >> z;
+					case XYZ:
+						iss >> x; //x-coordinate of center
+						iss >> y; //y-coordinate of center
+						iss >> z; //z-coordinate of center
 						break;
 					case EPS:
-						iss >> eps1;
-						iss >> eps2;
+						iss >> eps1; //super-ellipsoid shape parameter (local xy-plane)
+						iss >> eps2; //super-ellipsoid shape parameter (local z-axis)
 						break;
 					case QUAT:
-						iss >> q0;
-						iss >> q1;
-						iss >> q2;
-						iss >> q3;
+						iss >> qw; //rotation angle from global coordinates to particle local coordinates
+						iss >> qx; //rotation axis x-component
+						iss >> qy; //rotation axis y-component
+						iss >> qz; //rotation axis z-component
 						break;
 					case VOL:
-						iss >> vol;
+						iss >> vol; //volume of particle
 						break;
 					case LEN:
-						iss >> lx;
-						iss >> ly;
-						iss >> lz;
+						iss >> lx; //assembly bounding box length
+						iss >> ly; //assembly bounding box width
+						iss >> lz; //assembly bounding box height
 						break;
 					case ID:
-						iss >> id;
+						iss >> id; //particle unique ID in assembly
 						break;
 					}
 				}
 
-				SuperEllipsoid P = SuperEllipsoid(Point3(rx,ry,rz), eps1, eps2, Point3(x,y,z), Quaternion(q0,-q1,-q2,-q3));
+				SuperEllipsoid P = SuperEllipsoid(Point3(rx,ry,rz), eps1, eps2, Point3(x,y,z), Quaternion(qw,-qx,-qy,-qz));
 				_particles.push_back(P);
 			}
 		}
 
+		//RE-SIZE BOUNDING BOX
+		_setbbox();
 	}
 
 	void Assembly::print(std::ostream &stream) const{
@@ -341,7 +305,7 @@ namespace GeoVox::geometry{
 				centroid[1] = box.low()[1] + H[1]*(0.5+j);
 				for (long unsigned int  i=0; i<N[0]; i++){
 					centroid[0] = box.low()[0] + H[0]*(0.5+i);
-					buffer << in_particle(centroid) << " ";
+					buffer << in_particle(centroid) << " "; //HYBGE NOTATION: FLUID=0, SOLID=1
 				}
 				buffer << std::endl;
 			}
@@ -356,23 +320,22 @@ namespace GeoVox::geometry{
 		geofile.close();
 	}
 
-	StructuredPoints Assembly::make_structured_mesh(const Box& subbox, const long unsigned int N[3]) const{
-		StructuredPoints mesh(subbox, N);
+	VoxelParticleGeometry Assembly::make_structured_mesh(const Box& subbox, const long unsigned int N[3]) const{
+		VoxelParticleGeometry mesh(subbox, N);
 
 		for (long unsigned int k=0; k<N[2]; k++){
 			for (long unsigned int j=0; j<N[1]; j++){
 				for (long unsigned int i=0; i<N[0]; i++){
-					mesh.markers[mesh.index(i,j,k)] = in_particle(mesh.idx2point(i,j,k));
+					if (in_particle(mesh.idx2point(i,j,k))){
+						mesh.markers[mesh.index(i,j,k)] = SOLID_PHASE_MARKER;
+					}else{
+						mesh.markers[mesh.index(i,j,k)] = DEFAULT_FLUID_PHASE_MARKER;
+					}
+					
 				}
 			}
 		}
 		return mesh;
-	}
-
-	StructuredPoints Assembly::make_structured_mesh(const long unsigned int N[3]) const{
-		Point3 H = (box.high()-box.low()).array()/Point3(N[0],N[1],N[2]).array();
-		Box subbox = Box(box.low()+0.5*H, box.high()-0.5*H);
-		return make_structured_mesh(subbox, N);
 	}
 
 
@@ -387,5 +350,14 @@ namespace GeoVox::geometry{
 				box.combine(_particles[i].axis_alligned_bbox());
 			}
 		}
+	}
+
+	std::string Assembly::tostr() const{
+		std::stringstream ss;
+		ss << "n_particles= " << _particles.size() << "\n";
+		ss << "bbox_low= " << box.low() << "\n";
+		ss << "bbox_high= " << box.high() << "\n";
+		ss << "bbox_size= " << box.high()-box.low() << "\n";
+		return ss.str();
 	}
 }

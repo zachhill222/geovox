@@ -2,34 +2,48 @@
 
 namespace GeoVox::geometry{
 	void VoxelParticleGeometry::compute_connectivity(){
+		//set markers that are not SOLID_PHASE_MARKER to UNDEFINED_MARKER 
+		initialize();
+
 		std::vector<long unsigned int> active_index;
-		std::set<int> unique_markers;
 
 		////////////// FLOW-CONNECTED (POSITIVE MARKER) REGIONS /////////////
-		//set seeds
-		for (int n=0; n<6; n++){
-			long unsigned int i,j,k;
-			if (not wallBC[0]){
-				if (find_unmarked_face(n,i,j,k)){
-					markers[index(i,j,k)] = n+1;
-					unique_markers.insert(n+1);
-					active_index.push_back(index(i,j,k));
-				}
+		bool found_unmarked_region = true;
+		int mkr = 1;
+
+		while (found_unmarked_region){
+			//set initial marker and update active_index with new seeds
+			found_unmarked_region = find_unmarked_boundary_voxel(active_index, 16);
+			for (long unsigned int idx=0; idx<active_index.size(); idx++){
+				markers[active_index[idx]] = mkr;
+				mkr += 1;
+			}
+
+			//spread regions from new seeds
+			long unsigned int n_spread = 1;
+			while (n_spread > 0){
+				n_spread = spread(active_index);
+				// std::cout << "connected fluid phase n_spread= " << n_spread << std::endl;
 			}
 		}
-		std::cout << "set initial seeds\n";
-		saveas("particle_label_spread_0.vtk", true);
+		
+		////////////// FLOW-DISCONNECTED (NEGATIVE MARKER) REGIONS /////////////
+		found_unmarked_region = true;
+		mkr = -1;
 
-		long unsigned int n_spread = 1;
-		int iter = 0;
-		while (n_spread > 0){
-			n_spread = spread(active_index);
+		while (found_unmarked_region){
+			//set initial marker and update active_index with new seeds
+			found_unmarked_region = find_unmarked_voxel(active_index, 16);
+			for (long unsigned int idx=0; idx<active_index.size(); idx++){
+				markers[active_index[idx]] = mkr;
+				mkr -= 1;
+			}
 			
-			iter += 1;
-			
-			if (iter%10==0){ //FOR TESTING ONLY
-				std::string filename = "particle_label_spread_" + std::to_string(iter) + ".vtk";
-				saveas(filename, true);
+			//spread markers
+			long unsigned int n_spread = 1;
+			while (n_spread>0){
+				n_spread = spread(active_index);
+				// std::cout << "disconnected fluid phase n_spread= " << n_spread << std::endl;
 			}
 		}
 	}
@@ -57,8 +71,6 @@ namespace GeoVox::geometry{
 			SOUTH = south(i,j,k);
 			TOP = top(i,j,k);
 			BOTTOM = bottom(i,j,k);
-			
-
 
 			if (EAST!=current and markers[EAST]!=SOLID_PHASE_MARKER){
 				if (markers[EAST]==UNDEFINED_MARKER){
@@ -68,7 +80,8 @@ namespace GeoVox::geometry{
 				}else if (markers[EAST]!=markers[current]){ //check if we should merge
 					int mkr_low = std::min(markers[EAST], markers[current]);
 					int mkr_high = std::max(markers[EAST], markers[current]);
-					merge_markers.insert(std::array<int, 2> {mkr_low, mkr_high});
+					merge_regions(mkr_low, mkr_high);
+					// merge_markers.insert(std::array<int, 2> {mkr_low, mkr_high});
 				}
 			}
 			
@@ -80,7 +93,8 @@ namespace GeoVox::geometry{
 				}else if (markers[WEST]!=markers[current]){ //check if we should merge
 					int mkr_low = std::min(markers[WEST], markers[current]);
 					int mkr_high = std::max(markers[WEST], markers[current]);
-					merge_markers.insert(std::array<int, 2> {mkr_low, mkr_high});
+					merge_regions(mkr_low, mkr_high);
+					// merge_markers.insert(std::array<int, 2> {mkr_low, mkr_high});
 				}
 			}
 
@@ -92,7 +106,8 @@ namespace GeoVox::geometry{
 				}else if (markers[NORTH]!=markers[current]){ //check if we should merge
 					int mkr_low = std::min(markers[NORTH], markers[current]);
 					int mkr_high = std::max(markers[NORTH], markers[current]);
-					merge_markers.insert(std::array<int, 2> {mkr_low, mkr_high});
+					merge_regions(mkr_low, mkr_high);
+					// merge_markers.insert(std::array<int, 2> {mkr_low, mkr_high});
 				}
 			}
 
@@ -104,7 +119,8 @@ namespace GeoVox::geometry{
 				}else if (markers[SOUTH]!=markers[current]){ //check if we should merge
 					int mkr_low = std::min(markers[SOUTH], markers[current]);
 					int mkr_high = std::max(markers[SOUTH], markers[current]);
-					merge_markers.insert(std::array<int, 2> {mkr_low, mkr_high});
+					merge_regions(mkr_low, mkr_high);
+					// merge_markers.insert(std::array<int, 2> {mkr_low, mkr_high});
 				}
 			}
 
@@ -116,7 +132,8 @@ namespace GeoVox::geometry{
 				}else if (markers[TOP]!=markers[current]){ //check if we should merge
 					int mkr_low = std::min(markers[TOP], markers[current]);
 					int mkr_high = std::max(markers[TOP], markers[current]);
-					merge_markers.insert(std::array<int, 2> {mkr_low, mkr_high});
+					merge_regions(mkr_low, mkr_high);
+					// merge_markers.insert(std::array<int, 2> {mkr_low, mkr_high});
 				}
 			}
 
@@ -128,41 +145,53 @@ namespace GeoVox::geometry{
 				}else if (markers[BOTTOM]!=markers[current]){ //check if we should merge
 					int mkr_low = std::min(markers[BOTTOM], markers[current]);
 					int mkr_high = std::max(markers[BOTTOM], markers[current]);
-					merge_markers.insert(std::array<int, 2> {mkr_low, mkr_high});
+					merge_regions(mkr_low, mkr_high);
+					// merge_markers.insert(std::array<int, 2> {mkr_low, mkr_high});
 				}
 			}
 			
 		}
 
 		//merge regions
-		for (auto low_high : merge_markers){
-			int old_mkr, new_mkr;
-			if (low_high[0]>0){//if lower of the two markers is positive, use that as the region marker
-				old_mkr = low_high[1];
-				new_mkr = low_high[0];
-			}else{
-				old_mkr = low_high[0];
-				new_mkr = low_high[1];
-			}
+		// for (auto low_high : merge_markers){
+		// 	int old_mkr, new_mkr;
+		// 	if (low_high[0]>0){//if lower of the two markers is positive, use that as the region marker
+		// 		old_mkr = low_high[1];
+		// 		new_mkr = low_high[0];
+		// 	}else{
+		// 		old_mkr = low_high[0];
+		// 		new_mkr = low_high[1];
+		// 	}
 
-			std::cout << "\tMERGE " << old_mkr << " <- " << new_mkr << std::endl;
-			replace_marker(old_mkr, new_mkr);
-		}
+		// 	// std::cout << "\tMERGE " << old_mkr << " <- " << new_mkr << std::endl;
+		// 	replace_marker(old_mkr, new_mkr);
+		// }
 
 		//update active_index and return
 		active_index = new_active_index;
 		return n_spread;
 	}
 
+	void VoxelParticleGeometry::merge_regions(const int mkr_low, const int mkr_high){
+		int old_mkr, new_mkr;
+		if (mkr_low>0){//if lower of the two markers is positive, use that as the region marker
+			old_mkr = mkr_high;
+			new_mkr = mkr_low;
+		}else{
+			old_mkr = mkr_low;
+			new_mkr = mkr_high;
+		}
+
+		// std::cout << "\tMERGE " << old_mkr << " <- " << new_mkr << std::endl;
+		replace_marker(old_mkr, new_mkr);
+	}
 
 	void VoxelParticleGeometry::initialize(){
 		#pragma omp parallel for collapse(3)
 		for (long unsigned int k=0; k<N[2]; k++){
 			for (long unsigned int j=0; j<N[1]; j++){
 				for (long unsigned int i=0; i<N[0]; i++){
-					if (A->in_particle(idx2point(i,j,k))){
-						markers[index(i,j,k)] = SOLID_PHASE_MARKER;
-					}else{
+					if (markers[index(i,j,k)] != SOLID_PHASE_MARKER){
 						markers[index(i,j,k)] = UNDEFINED_MARKER;
 					}
 				}
@@ -170,90 +199,86 @@ namespace GeoVox::geometry{
 		}
 	}
 
-	bool VoxelParticleGeometry::find_unmarked_face(const int n, long unsigned int &ii, long unsigned int &jj, long unsigned int &kk){
-		switch(n) {
-		case 0: //xlow
-			ii=0;
-			for (long unsigned int k=0; k<N[2]; k++){
-				for (long unsigned int j=0; j<N[1]; j++){
-					if (markers[index( ii, (N[1]/2+j)%N[1], (N[2]/2+k)%N[2] )]==UNDEFINED_MARKER){
-						jj=j;
-						kk=k;
-						return true;
-					}
-				}
-			}
-			break;
+	
 
-		case 1: //xhigh
-			ii=N[0]-1;
-			for (long unsigned int k=0; k<N[2]; k++){
-				for (long unsigned int j=0; j<N[1]; j++){
-					if (markers[index(ii,j,k)]==UNDEFINED_MARKER){
-						jj=j;
-						kk=k;
-						return true;
-					}
-				}
-			}
-			break;
 
-		case 2: //ylow
-			jj=0;
-			for (long unsigned int k=0; k<N[2]; k++){
-				for (long unsigned int i=0; i<N[0]; i++){
-					if (markers[index(i,jj,k)]==UNDEFINED_MARKER){
-						ii=i;
-						kk=k;
-						return true;
-					}
-				}
-			}
-			break;
+	bool VoxelParticleGeometry::find_unmarked_boundary_voxel(std::vector<long unsigned int> &active_index, const long unsigned int max_voxels) const {
+		active_index.clear();
 
-		case 3: //yhigh
-			jj=N[1]-1;
-			for (long unsigned int k=0; k<N[2]; k++){
-				for (long unsigned int i=0; i<N[0]; i++){
-					if (markers[index(i,jj,k)]==UNDEFINED_MARKER){
-						ii=i;
-						kk=k;
-						return true;
-					}
-				}
-			}
-			break;
-
-		case 4: //zlow
-			kk=0;
+		//search x-faces
+		for (long unsigned int k=0; k<N[2]; k++){
 			for (long unsigned int j=0; j<N[1]; j++){
-				for (long unsigned int i=0; i<N[0]; i++){
-					if (markers[index(i,j,kk)]==UNDEFINED_MARKER){
-						ii=i;
-						jj=j;
-						return true;
+				if (not wall_bc[0]){
+					if (markers[index(0,j,k)] == UNDEFINED_MARKER){
+						active_index.push_back(index(0,j,k));
+						if (active_index.size()>=max_voxels){return true;}
+					}
+				}
+				if (not wall_bc[1]){
+					if (markers[index(N[0]-1,j,k)] == UNDEFINED_MARKER){
+						active_index.push_back(index(N[0]-1,j,k));
+						if (active_index.size()>=max_voxels){return true;}
 					}
 				}
 			}
-			break;
-
-		case 5: //zhigh
-			kk=N[2]-1;
-			for (long unsigned int j=0; j<N[1]; j++){
-				for (long unsigned int i=0; i<N[0]; i++){
-					if (markers[index(i,j,kk)]==UNDEFINED_MARKER){
-						ii=i;
-						jj=j;
-						return true;
-					}
-				}
-			}
-			break;
 		}
 
-		return false;
+		//search y-faces
+		for (long unsigned int k=0; k<N[2]; k++){
+			for (long unsigned int i=0; i<N[0]; i++){
+				if (not wall_bc[2]){
+					if (markers[index(i,0,k)] == UNDEFINED_MARKER){
+						active_index.push_back(index(i,0,k));
+						if (active_index.size()>=max_voxels){return true;}
+					}
+				}
+				if (not wall_bc[3]){
+					if (markers[index(i,N[1]-1,k)] == UNDEFINED_MARKER){
+						active_index.push_back(index(i,N[1]-1,k));
+						if (active_index.size()>=max_voxels){return true;}
+					}
+				}
+			}
+		}
+
+		//search z-faces
+		for (long unsigned int j=0; j<N[1]; j++){
+			for (long unsigned int i=0; i<N[0]; i++){
+				if (not wall_bc[4]){
+					if (markers[index(i,j,0)] == UNDEFINED_MARKER){
+						active_index.push_back(index(i,j,0));
+						if (active_index.size()>=max_voxels){return true;}
+					}
+				}
+				if (not wall_bc[5]){
+					if (markers[index(i,j,N[2]-1)] == UNDEFINED_MARKER){
+						active_index.push_back(index(i,j,N[2]-1));
+						if (active_index.size()>=max_voxels){return true;}
+					}
+				}
+			}
+		}
+
+		return active_index.size() > 0;
 	}
 
+
+	bool VoxelParticleGeometry::find_unmarked_voxel(std::vector<long unsigned int> &active_index, const long unsigned int max_voxels) const {
+		active_index.clear();
+
+		for (long unsigned int k=0; k<N[2]; k++){
+			for (long unsigned int j=0; j<N[1]; j++){
+				for (long unsigned int i=0; i<N[0]; i++){
+					if (markers[index(i,j,k)] == UNDEFINED_MARKER){
+						active_index.push_back(index(i,j,k));
+						if (active_index.size()>=max_voxels){return true;}
+					}
+				}
+			}
+		}
+
+		return active_index.size() > 0;
+	}
 
 	void VoxelParticleGeometry::print(std::ostream &stream) const{
 		std::vector<int> mkr;
@@ -261,9 +286,9 @@ namespace GeoVox::geometry{
 		unique_markers(mkr, mkr_count);
 
 
-		long unsigned int pos_count=0;
-		long unsigned int neg_count=0;
-		long unsigned int zero_count=0;
+		double pos_count=0;
+		double neg_count=0;
+		double zero_count=0;
 
 		for (long unsigned int idx=0; idx<mkr.size(); idx++){
 			mkr_count[idx] = count(mkr[idx]);
@@ -278,11 +303,19 @@ namespace GeoVox::geometry{
 
 
 		for (long unsigned int idx=0; idx<mkr.size(); idx++){
-			stream << "marker= " << mkr[idx] << "\tcount= " << mkr_count[idx] << "\tfraction= " << mkr_count[idx]/(N[0]*N[1]*N[2]) << std::endl;
+			if (mkr_count[idx]>=5){
+				stream << "marker= " << mkr[idx] << "\tcount= " << mkr_count[idx] << "\tfraction= " << static_cast<double>(mkr_count[idx])/(N[0]*N[1]*N[2]) << std::endl;
+			}
 		}
 
-		stream << "positive_marker_fraction= " << pos_count/(N[0]*N[1]*N[2]) << std::endl;
-		stream << "negative_marker_fraction= " << neg_count/(N[0]*N[1]*N[2]) << std::endl;
-		stream << "zero_marker_fraction= " << zero_count/(N[0]*N[1]*N[2]) << std::endl;
+		stream << "\npositive_marker_count= " << pos_count  << "\tpositive_marker_fraction= " << pos_count/(N[0]*N[1]*N[2])  << std::endl;
+		stream << "negative_marker_count= " << neg_count  << "\tnegative_marker_fraction= " << neg_count/(N[0]*N[1]*N[2])  << std::endl;
+		stream << "zero_marker_count= "     << zero_count << "\tzero_marker_fraction= "     << zero_count/(N[0]*N[1]*N[2]) << std::endl;
+	}
+
+	std::string VoxelParticleGeometry::tostr() const{
+		std::stringstream ss;
+		print(ss);
+		return ss.str();
 	}
 }

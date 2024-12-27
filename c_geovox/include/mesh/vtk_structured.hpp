@@ -13,6 +13,7 @@
 #include <string>
 #include <sstream>
 #include <algorithm>
+#include <stdexcept>
 
 #include <omp.h>
 
@@ -26,12 +27,58 @@ namespace GeoVox::mesh{
 	class StructuredPoints{
 	public:
 		StructuredPoints () {}
-		StructuredPoints(const Box& box, const long unsigned int N[3]) :  periodic_bc{1,1,1}, box(box), N{N[0], N[1], N[2]}, H((box.high()-box.low()).array()/Point3(N[0]-1, N[1]-1, N[2]-1).array()) {markers = std::vector<int>(N[0]*N[1]*N[2], 0);}
-		StructuredPoints(const Point3& low, const Point3& high, const long unsigned int N[3]) : periodic_bc{1,1,1}, box(Box(low, high)), N{N[0], N[1], N[2]}, H((box.high()-box.low()).array()/Point3(N[0]-1, N[1]-1, N[2]-1).array()) {markers = std::vector<int>(N[0]*N[1]*N[2], 0);}
-		StructuredPoints(const Box& box, const std::string geofile) : periodic_bc{1,1,1}, box(box) {readfile(geofile);};
+		StructuredPoints(const Box& box, const long unsigned int _N[3], const int dof_location=3) :  periodic_bc{1,1,1}, dof_location(dof_location), box(box){
+			N[0] = _N[0];
+			N[1] = _N[1];
+			N[2] = _N[2];
+
+			H = box.sidelength().array()/Point3(_N[0], _N[1], _N[2]).array();
+
+			switch (dof_location){
+			case 0:
+				if (!periodic_bc[0]){
+					N[0] += 1;
+				}
+			case 1:
+				if (!periodic_bc[1]){
+					N[1] += 1;
+				}
+			case 2:
+				if (!periodic_bc[2]){
+					N[2] += 1;
+				}
+			}
+			markers = std::vector<int>(N[0]*N[1]*N[2], 0);
+		}
+		StructuredPoints(const Point3& low, const Point3& high, const long unsigned int _N[3], const int dof_location=3) : periodic_bc{1,1,1}, dof_location(dof_location) {
+			N[0] = _N[0];
+			N[1] = _N[1];
+			N[2] = _N[2];
+
+			box = Box(low, high);
+			H = box.sidelength().array()/Point3(_N[0], _N[1], _N[2]).array();
+
+			switch (dof_location){
+			case 0:
+				if (!periodic_bc[0]){
+					N[0] += 1;
+				}
+			case 1:
+				if (!periodic_bc[1]){
+					N[1] += 1;
+				}
+			case 2:
+				if (!periodic_bc[2]){
+					N[2] += 1;
+				}
+			}
+
+			markers = std::vector<int>(N[0]*N[1]*N[2], 0);
+		}
+		// StructuredPoints(const Box& box, const std::string geofile, const int dof_location=3) : periodic_bc{1,1,1}, dof_location(dof_location), box(box) {readfile(geofile);};
 		
 		//access methods
-		inline Point3 idx2point(long unsigned int i, long unsigned int j, long unsigned int k) const {return Point3(box.low()[0]+H[0]*i, box.low()[1]+H[1]*j, box.low()[2]+H[2]*k);}
+		Point3 idx2point(long unsigned int i, long unsigned int j, long unsigned int k) const;
 		inline long unsigned int index(long unsigned int i, long unsigned int j, long unsigned int k) const {return i + N[0]*( j + N[1]*k);}
 		bool index2ijk(long unsigned int l, long unsigned int &i, long unsigned int &j, long unsigned int &k) const;
 		inline int operator()(long unsigned int i, long unsigned int j, long unsigned int k) const {return markers[index(i,j,k)];}
@@ -45,9 +92,16 @@ namespace GeoVox::mesh{
 		long unsigned int top(long unsigned int i, long unsigned int j, long unsigned int k) const;
 		long unsigned int bottom(long unsigned int i, long unsigned int j, long unsigned int k) const;
 
+		//degree of freedom location
+		// 0 -> cell faces perpendicular to x-axis
+		// 1 -> cell faces perpendicular to y-axis
+		// 2 -> cell faces perpendicular to z-axis
+		// 3 -> cell centroids
+		int dof_location;
+
 		//fileio
-		void saveas(const std::string filename, bool cells=false) const;
-		void readfile(const std::string filename);
+		void saveas(const std::string filename) const;
+		// void readfile(const std::string filename);
 		
 		//mesh information
 		std::vector<int> markers;

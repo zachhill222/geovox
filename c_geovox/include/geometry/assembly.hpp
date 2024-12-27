@@ -1,8 +1,9 @@
 #ifndef ASSEMBLY_H
 #define ASSEMBLY_H
 
-#define MIN_ASSEMBLY_NUMBER_OF_PARTICLES 0
 
+
+#include "constants.hpp"
 
 #include "util/point.hpp"
 #include "util/box.hpp"
@@ -10,12 +11,7 @@
 
 #include "geometry/particles.hpp"
 #include "geometry/collisions.hpp"
-
-#include "mesh/vtk_linear_elements.hpp"
-#include "mesh/vtk_convex_cell.hpp"
-#include "mesh/mesh.hpp"
-#include "mesh/vtk_structured.hpp"
-#include "mesh/nodes.hpp"
+#include "geometry/voxel_particle_geometry.hpp"
 
 #include <vector>
 #include <map>
@@ -25,13 +21,11 @@
 #include <string>
 #include <sstream>
 #include <algorithm>
-
+#include <stdexcept>
 
 
 using SuperEllipsoid = GeoVox::geometry::SuperEllipsoid;
 using Box = GeoVox::util::Box;
-using Mesh = GeoVox::mesh::Mesh;
-using StructuredPoints = GeoVox::mesh::StructuredPoints;
 
 namespace GeoVox::geometry{
 	class AssemblyNode;
@@ -66,14 +60,6 @@ namespace GeoVox::geometry{
 			_root = this;
 		}
 
-		Assembly(const std::string particle_file) : AssemblyNode(), _nleaves(1), _maxdepth(0), max_data_per_leaf(8) {
-			_root = this;
-			readfile(particle_file);
-			for (long unsigned int i=0; i<_particles.size(); i++){
-				_data.push_back(_particles[i]);
-			}
-		}
-
 		Assembly(const std::string particle_file, const std::string columns) : AssemblyNode(), _nleaves(1), _maxdepth(0), max_data_per_leaf(8) {
 			_root = this;
 			readfile(particle_file, columns);
@@ -84,12 +70,13 @@ namespace GeoVox::geometry{
 
 		void gradiate(); //ensure depth changes by at most one between neighbors
 
-		void readfile(const std::string fullfile);
+		// void readfile(const std::string fullfile);
 		void readfile(const std::string fullfile, const std::string columns);
 		void print(std::ostream &stream) const;
+		std::string tostr() const;
 
-		StructuredPoints make_structured_mesh(const Box& subbox, const long unsigned int N[3]) const;
-		StructuredPoints make_structured_mesh(const long unsigned int N[3]) const;
+		VoxelParticleGeometry make_structured_mesh(const Box& subbox, const long unsigned int N[3]) const;
+		inline VoxelParticleGeometry make_structured_mesh(const long unsigned int N[3]) const {return make_structured_mesh(box, N);}
 
 		//FOR HYBGE ONLY. USE StructuredPoints
 		void save_geometry(const std::string filename, const Box& box, const long unsigned int N[3]) const;

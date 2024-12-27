@@ -2,6 +2,23 @@
 
 
 namespace GeoVox::mesh{
+	Point3 StructuredPoints::idx2point(long unsigned int i, long unsigned int j, long unsigned int k) const{
+		Point3 low = box.low();
+		long double ii = static_cast<long double>(i);
+		long double jj = static_cast<long double>(j);
+		long double kk = static_cast<long double>(k);
+
+		switch (dof_location){
+		case 0: return low + Point3(H[0]*ii,       H[1]*(jj+0.5), H[2]*(kk+0.5));
+		case 1: return low + Point3(H[0]*(ii+0.5), H[1]*jj,       H[2]*(kk+0.5));
+		case 2: return low + Point3(H[0]*(ii+0.5), H[1]*(jj+0.5), H[2]*kk      );
+		case 3: return low + Point3(H[0]*(ii+0.5), H[1]*(jj+0.5), H[2]*(kk+0.5));
+		default: throw std::runtime_error("Unknown DOF location. Must be between 0 and 3. (x-face, y-face, z-face, centroid).");
+		}
+
+		return Point3(0,0,0);
+	}
+
 	bool StructuredPoints::index2ijk(long unsigned int l, long unsigned int &i, long unsigned int &j, long unsigned int &k) const{
 		if (l >= N[0]*N[1]*N[2]){
 			return false;
@@ -55,38 +72,38 @@ namespace GeoVox::mesh{
 	}
 
 	long unsigned int StructuredPoints::west(long unsigned int i, long unsigned int j, long unsigned int k) const{
-		if (i-1>0){
+		if (i){ //i>0
 			return index(i-1,j,k);
 		}
 
 		if (periodic_bc[0]){
 			return index(N[0]-1,j,k);
 		}else{
-			return index(i,j,k);
+			return index(0,j,k);
 		}
 	}
 
 	long unsigned int StructuredPoints::south(long unsigned int i, long unsigned int j, long unsigned int k) const{
-		if (j-1>0){
+		if (j){ //j>0
 			return index(i,j-1,k);
 		}
 
 		if (periodic_bc[1]){
 			return index(i,N[1]-1,k);
 		}else{
-			return index(i,j,k);
+			return index(i,0,k);
 		}
 	}
 
 	long unsigned int StructuredPoints::bottom(long unsigned int i, long unsigned int j, long unsigned int k) const{
-		if (k-1>0){
+		if (k){ //k>0
 			return index(i,j,k-1);
 		}
 
 		if (periodic_bc[2]){
 			return index(i,j,N[2]-1);
 		}else{
-			return index(i,j,k);
+			return index(i,j,0);
 		}
 	}
 
@@ -155,7 +172,7 @@ namespace GeoVox::mesh{
 		}
 	}
 
-	void StructuredPoints::saveas(const std::string filename, bool cells) const{
+	void StructuredPoints::saveas(const std::string filename) const{
 		//////////////// OPEN FILE ////////////////
 		std::ofstream meshfile(filename);
 
@@ -175,13 +192,22 @@ namespace GeoVox::mesh{
 
 		//POINTS (CENTROIDS)
 		buffer << "DATASET STRUCTURED_POINTS\n";
-		if (cells){
-			buffer << "DIMENSIONS " << N[0]+1 << " " << N[1]+1 << " " << N[2]+1 << "\n";
-		}else{
+		switch (dof_location){
+		case 0:
 			buffer << "DIMENSIONS " << N[0] << " " << N[1] << " " << N[2] << "\n";
+			buffer << "ORIGIN " << box.low()+Point3(0,0.5*H[1],0.5*H[2]) << "\n";
+		case 1:
+			buffer << "DIMENSIONS " << N[0] << " " << N[1] << " " << N[2] << "\n";
+			buffer << "ORIGIN " << box.low()+Point3(0.5*H[0],0,0.5*H[2]) << "\n";
+		case 2:
+			buffer << "DIMENSIONS " << N[0] << " " << N[1] << " " << N[2] << "\n";
+			buffer << "ORIGIN " << box.low()+Point3(0.5*H[0],0.5*H[1],0) << "\n";
+		case 3:
+			buffer << "DIMENSIONS " << N[0]+1 << " " << N[1]+1 << " " << N[2]+1 << "\n";
+			buffer << "ORIGIN " << box.low() << "\n";
 		}
-		
-		buffer << "ORIGIN " << box.low() << "\n";
+
+
 		buffer << "SPACING " << H << "\n\n";
 
 		meshfile << buffer.rdbuf();
@@ -189,7 +215,7 @@ namespace GeoVox::mesh{
 
 
 		//POINT_MARKERS (CENTROIDS OF CELLS)
-		if (cells){
+		if (dof_location==3){
 			buffer << "CELL_DATA " << N[0]*N[1]*N[2] << "\n";
 		}else{
 			buffer << "POINT_DATA " << N[0]*N[1]*N[2] << "\n";
@@ -197,9 +223,10 @@ namespace GeoVox::mesh{
 		buffer << "SCALARS markers integer\n";
 		buffer << "LOOKUP_TABLE default\n";
 		for (long unsigned int k=0; k<N[2]; k++){
-			long unsigned int start_idx = N[0]*N[1]*k;
-			for (long unsigned int ij=0; ij<N[0]*N[1]; ij++){
-				buffer << markers[start_idx+ij] << " ";
+			for (long unsigned int j=0; j<N[1]; j++){
+				for (long unsigned int i=0; i<N[0]; i++){
+					buffer << markers[index(i,j,k)] << " ";
+				}
 			}
 			buffer << "\n";
 		}
@@ -212,36 +239,36 @@ namespace GeoVox::mesh{
 		meshfile.close();
 	}
 
-	void StructuredPoints::readfile(const std::string filename){
-		//OPEN FILE
-		std::ifstream geofile(filename);
-		std::string str;
+	// void StructuredPoints::readfile(const std::string filename){
+	// 	//OPEN FILE
+	// 	std::ifstream geofile(filename);
+	// 	std::string str;
 
-		if (not geofile.is_open()){
-			std::cout << "Could not open " << filename << std::endl;
-			return;
-		}
+	// 	if (not geofile.is_open()){
+	// 		std::cout << "Could not open " << filename << std::endl;
+	// 		return;
+	// 	}
 
 
-		//READ HEADER
-		geofile >> str >> N[0];
-		geofile >> str >> N[1];
-		geofile >> str >> N[2];
+	// 	//READ HEADER
+	// 	geofile >> str >> N[0];
+	// 	geofile >> str >> N[1];
+	// 	geofile >> str >> N[2];
 
-		H = (box.high()-box.low()).array()/Point3(N[0], N[1], N[2]).array();
+	// 	H = (box.high()-box.low()).array()/Point3(N[0], N[1], N[2]).array();
 
-		//READ BODY
-		int mkr;
-		markers.reserve(N[0]*N[1]*N[2]);
+	// 	//READ BODY
+	// 	int mkr;
+	// 	markers.reserve(N[0]*N[1]*N[2]);
 
-		for (long unsigned int k=0; k<N[2]; k++){
-			for (long unsigned int j=0; j<N[1]; j++){
-				for (long unsigned int i=0; i<N[0]; i++){
-					geofile >> mkr;
-					markers.push_back(mkr);
-				}
-			}
-		}
-		geofile.close();
-	}
+	// 	for (long unsigned int k=0; k<N[2]; k++){
+	// 		for (long unsigned int j=0; j<N[1]; j++){
+	// 			for (long unsigned int i=0; i<N[0]; i++){
+	// 				geofile >> mkr;
+	// 				markers.push_back(mkr);
+	// 			}
+	// 		}
+	// 	}
+	// 	geofile.close();
+	// }
 }

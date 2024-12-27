@@ -83,20 +83,6 @@ namespace GeoVox::util{
 	}
 
 
-	// template<typename root_t, typename node_t, typename data_t>
-	// long unsigned int OctreeNode<root_t, node_t, data_t>::size() const{
-	// 	if (_isdivided){
-	// 		long unsigned int result = 0;
-	// 		for (int c_idx=0; c_idx<8; c_idx++){
-	// 			result += _children[c_idx]->size();
-	// 		}
-	// 		return result;
-	// 	}
-
-	// 	return _data.size();
-	// }
-
-
 	template<typename root_t, typename node_t, typename data_t>
 	void OctreeNode<root_t, node_t, data_t>::set_ndata(){
 		if (_isdivided){
