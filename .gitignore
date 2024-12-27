@@ -21,5 +21,8 @@ c_geovox/lib
 # ignore test files for deletion
 *.deleteme
 
+# ignore specific folders
+**/ignoreme/
+
 # ignore output of test cases
 tests/outfiles/*
