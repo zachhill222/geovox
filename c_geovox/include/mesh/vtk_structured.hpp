@@ -21,10 +21,8 @@ using Point3 = GeoVox::util::Point3;
 using Box = GeoVox::util::Box;
 
 
-
-
 namespace GeoVox::mesh{
-	class StructuredPoints{
+	class StructuredPoints {
 	public:
 		StructuredPoints () {}
 		StructuredPoints(const Box& box, const long unsigned int _N[3], const int dof_location=3) :  periodic_bc{1,1,1}, dof_location(dof_location), box(box){
@@ -99,6 +97,9 @@ namespace GeoVox::mesh{
 		// 3 -> cell centroids
 		int dof_location;
 
+		//degree of freedom data
+		Eigen::VectorXd _data;
+
 		//fileio
 		void saveas(const std::string filename) const;
 		// void readfile(const std::string filename);
@@ -106,8 +107,8 @@ namespace GeoVox::mesh{
 		//mesh information
 		std::vector<int> markers;
 		Box box;
-		// Eigen::Array<long unsigned int, 1, 3> N;
-		long unsigned int N[3];
+		Eigen::Array<long unsigned int, 1, 3> N;
+		// long unsigned int N[3];
 		Point3 H;
 
 		//set all markers

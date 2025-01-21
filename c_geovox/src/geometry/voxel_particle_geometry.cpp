@@ -81,7 +81,6 @@ namespace GeoVox::geometry{
 					int mkr_low = std::min(markers[EAST], markers[current]);
 					int mkr_high = std::max(markers[EAST], markers[current]);
 					merge_regions(mkr_low, mkr_high);
-					// merge_markers.insert(std::array<int, 2> {mkr_low, mkr_high});
 				}
 			}
 			
@@ -94,7 +93,6 @@ namespace GeoVox::geometry{
 					int mkr_low = std::min(markers[WEST], markers[current]);
 					int mkr_high = std::max(markers[WEST], markers[current]);
 					merge_regions(mkr_low, mkr_high);
-					// merge_markers.insert(std::array<int, 2> {mkr_low, mkr_high});
 				}
 			}
 
@@ -107,7 +105,6 @@ namespace GeoVox::geometry{
 					int mkr_low = std::min(markers[NORTH], markers[current]);
 					int mkr_high = std::max(markers[NORTH], markers[current]);
 					merge_regions(mkr_low, mkr_high);
-					// merge_markers.insert(std::array<int, 2> {mkr_low, mkr_high});
 				}
 			}
 
@@ -120,7 +117,6 @@ namespace GeoVox::geometry{
 					int mkr_low = std::min(markers[SOUTH], markers[current]);
 					int mkr_high = std::max(markers[SOUTH], markers[current]);
 					merge_regions(mkr_low, mkr_high);
-					// merge_markers.insert(std::array<int, 2> {mkr_low, mkr_high});
 				}
 			}
 
@@ -133,7 +129,6 @@ namespace GeoVox::geometry{
 					int mkr_low = std::min(markers[TOP], markers[current]);
 					int mkr_high = std::max(markers[TOP], markers[current]);
 					merge_regions(mkr_low, mkr_high);
-					// merge_markers.insert(std::array<int, 2> {mkr_low, mkr_high});
 				}
 			}
 
@@ -146,26 +141,10 @@ namespace GeoVox::geometry{
 					int mkr_low = std::min(markers[BOTTOM], markers[current]);
 					int mkr_high = std::max(markers[BOTTOM], markers[current]);
 					merge_regions(mkr_low, mkr_high);
-					// merge_markers.insert(std::array<int, 2> {mkr_low, mkr_high});
 				}
 			}
 			
 		}
-
-		//merge regions
-		// for (auto low_high : merge_markers){
-		// 	int old_mkr, new_mkr;
-		// 	if (low_high[0]>0){//if lower of the two markers is positive, use that as the region marker
-		// 		old_mkr = low_high[1];
-		// 		new_mkr = low_high[0];
-		// 	}else{
-		// 		old_mkr = low_high[0];
-		// 		new_mkr = low_high[1];
-		// 	}
-
-		// 	// std::cout << "\tMERGE " << old_mkr << " <- " << new_mkr << std::endl;
-		// 	replace_marker(old_mkr, new_mkr);
-		// }
 
 		//update active_index and return
 		active_index = new_active_index;

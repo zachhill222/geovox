@@ -21,10 +21,10 @@ namespace GeoVox::geometry{
 	class VoxelParticleGeometry : public StructuredPoints {
 	public:
 		VoxelParticleGeometry() : StructuredPoints() {};
-		VoxelParticleGeometry(const Box box, const long unsigned int N[3]) : StructuredPoints(box, N, 3) {};
+		VoxelParticleGeometry(const Box& box, const long unsigned int N[3]) : StructuredPoints(box, N, 3) {};
 
 		
-		//boundary conditions
+		//boundary conditions// 1 for wall bc (homogeneous Dirichlet)
 		bool wall_bc[6] {0}; //xlow, xhigh, ylow, yhigh, zlow, zhigh
 
 		//separate the void space into disjoint (orthogonal connectivity) regions.

@@ -4,9 +4,9 @@
 namespace GeoVox::mesh{
 	Point3 StructuredPoints::idx2point(long unsigned int i, long unsigned int j, long unsigned int k) const{
 		Point3 low = box.low();
-		long double ii = static_cast<long double>(i);
-		long double jj = static_cast<long double>(j);
-		long double kk = static_cast<long double>(k);
+		double ii = static_cast<double>(i);
+		double jj = static_cast<double>(j);
+		double kk = static_cast<double>(k);
 
 		switch (dof_location){
 		case 0: return low + Point3(H[0]*ii,       H[1]*(jj+0.5), H[2]*(kk+0.5));

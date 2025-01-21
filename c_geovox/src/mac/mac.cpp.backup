@@ -1,39 +1,6 @@
 #include "mac/mac.hpp"
 
 namespace GeoVox::mac{
-	////////////////////////////////
-	////////// DOF CHECKS //////////
-	////////////////////////////////
-	int MacMesh::dof_type_p(const long unsigned int i, const long unsigned int j, const long unsigned int k) const {
-		if (markers[index(i,j,k)]==MAC_DOMAIN_MARKER){
-			return 0;
-		}else{
-			return -1;
-		}
-	}
-	int MacMesh::dof_type_u(const long unsigned int i, const long unsigned int j, const long unsigned int k) const{
-		bool a = markers[index(i,j,k)]==MAC_DOMAIN_MARKER;
-		bool b = markers[east(i,j,k)]==MAC_DOMAIN_MARKER;
-		if (a and b){return 0;} //interior
-		else if (a xor b){return 1;} //boundary
-		else {return -1;} //rock phase
-	}
-	int MacMesh::dof_type_v(const long unsigned int i, const long unsigned int j, const long unsigned int k) const{
-		bool a = markers[index(i,j,k)]==MAC_DOMAIN_MARKER;
-		bool b = markers[south(i,j,k)]==MAC_DOMAIN_MARKER;
-		if (a and b){return 0;} //interior
-		else if (a xor b){return 1;} //boundary
-		else {return -1;} //rock phase
-	}
-	int MacMesh::dof_type_w(const long unsigned int i, const long unsigned int j, const long unsigned int k) const{
-		bool a = markers[index(i,j,k)]==MAC_DOMAIN_MARKER;
-		bool b = markers[bottom(i,j,k)]==MAC_DOMAIN_MARKER;
-		if (a and b){return 0;} //interior
-		else if (a xor b){return 1;} //boundary
-		else {return -1;} //rock phase
-	}
-
-
 	/////////////////////////////////////////////////////////////////
 	////////// PRESSURE DERIVATIVES (B_transpose ~ grad()) //////////
 	/////////////////////////////////////////////////////////////////
@@ -243,31 +210,16 @@ namespace GeoVox::mac{
 
 
 					//UPDATE VELOCITY
-					switch (dof_type_u(i,j,k)){
-					case 0:
+					if (u_mask(i,j,k)==MAC_DOMAIN_MARKER){
 						u[P] = C*( f1[P] + mu*(H_2[0]*(u[E]+u[W]) + H_2[1]*(u[N]+u[S]) + H_2[2]*(u[T]+u[B])) + h_1[0]*(p[W]-p[P]) );
-						break;
-					default:
-						u[P] = 0;
-						break;
 					}
 					
-					switch (dof_type_v(i,j,k)){
-						case 0:
-							v[P] = C*( f2[P] + mu*(H_2[0]*(v[E]+v[W]) + H_2[1]*(v[N]+v[S]) + H_2[2]*(v[T]+v[B])) + h_1[1]*(p[S]-p[P]) );
-							break;
-						default:
-							v[P] = 0;
-							break;
+					if (v_mask(i,j,k)==MAC_DOMAIN_MARKER){
+						v[P] = C*( f2[P] + mu*(H_2[0]*(v[E]+v[W]) + H_2[1]*(v[N]+v[S]) + H_2[2]*(v[T]+v[B])) + h_1[1]*(p[S]-p[P]) );
 					}
 					
-					switch (dof_type_w(i,j,k)){
-						case 0:
-							w[P] = C*( f3[P] + mu*(H_2[0]*(w[E]+w[W]) + H_2[1]*(w[N]+w[S]) + H_2[2]*(w[T]+w[B])) + h_1[2]*(p[B]-p[P]) );
-							break;
-						default:
-							w[P] = 0;
-							break;
+					if (w_mask(i,j,k)==MAC_DOMAIN_MARKER){
+						w[P] = C*( f3[P] + mu*(H_2[0]*(w[E]+w[W]) + H_2[1]*(w[N]+w[S]) + H_2[2]*(w[T]+w[B])) + h_1[2]*(p[B]-p[P]) );
 					}
 				}
 			}
@@ -389,9 +341,10 @@ namespace GeoVox::mac{
 		for (long unsigned int k=0; k<N[2]; k++){
 			for (long unsigned int j=0; j<N[1]; j++){
 				for (long unsigned int i=0; i<N[0]; i++){
-					if (dof_type_u(i,j,k)!=1) {u[index(i,j,k)]=0;}
-					if (dof_type_v(i,j,k)!=1) {v[index(i,j,k)]=0;}
-					if (dof_type_w(i,j,k)!=1) {w[index(i,j,k)]=0;}
+					long unsigned int P = index(i,j,k);
+					if (!u_mask.markers[P]==MAC_DOMAIN_MARKER) {u[P]=0;}
+					if (!v_mask.markers[P]==MAC_DOMAIN_MARKER) {v[P]=0;}
+					if (!w_mask.markers[P]==MAC_DOMAIN_MARKER) {w[P]=0;}
 				}
 			}
 		}
@@ -470,129 +423,129 @@ namespace GeoVox::mac{
 		solve(m); //should write GS in reverse order
 	}
 
-	// void MacMesh::coarsen(VectorXd& U, VectorXd& V, VectorXd& W, VectorXd& P){
-	// 	long unsigned int N_2[3] {N[0]/2, N[1]/2, N[2]/2};
+	void MacMesh::coarsen(VectorXd& U, VectorXd& V, VectorXd& W, VectorXd& P){
+		long unsigned int N_2[3] {N[0]/2, N[1]/2, N[2]/2};
 
-	// 	#pragma omp parallel for collapse(3)
-	// 	for (long unsigned int k=0; k<N_2[2]; k++){
-	// 		for (long unsigned int j=0; j<N_2[1]; j++){
-	// 			for (long unsigned int i=0; i<N_2[0]; i++){
-	// 				long unsigned int idx = i + N_2[0]*(j + N_2[1]*k);
+		#pragma omp parallel for collapse(3)
+		for (long unsigned int k=0; k<N_2[2]; k++){
+			for (long unsigned int j=0; j<N_2[1]; j++){
+				for (long unsigned int i=0; i<N_2[0]; i++){
+					long unsigned int idx = i + N_2[0]*(j + N_2[1]*k);
 
-	// 				long unsigned int ii = 2*i;
-	// 				long unsigned int jj = 2*j;
-	// 				long unsigned int kk = 2*k;
+					long unsigned int ii = 2*i;
+					long unsigned int jj = 2*j;
+					long unsigned int kk = 2*k;
 
-	// 				U[idx] =    u[index(ii-1,jj,kk)] + u[index(ii-1,jj+1,kk)] + u[index(ii-1,jj+1,kk+1)] + u[index(ii-1,jj,kk+1)];
-	// 				U[idx]+= 2*(u[index(ii  ,jj,kk)] + u[index(ii  ,jj+1,kk)] + u[index(ii  ,jj+1,kk+1)] + u[index(ii  ,jj,kk+1)]);
-	// 				U[idx]+=    u[index(ii+1,jj,kk)] + u[index(ii+1,jj+1,kk)] + u[index(ii+1,jj+1,kk+1)] + u[index(ii+1,jj,kk+1)];
-	// 				U[idx]*=0.0625; // 1/16
+					U[idx] =    u[index(ii-1,jj,kk)] + u[index(ii-1,jj+1,kk)] + u[index(ii-1,jj+1,kk+1)] + u[index(ii-1,jj,kk+1)];
+					U[idx]+= 2*(u[index(ii  ,jj,kk)] + u[index(ii  ,jj+1,kk)] + u[index(ii  ,jj+1,kk+1)] + u[index(ii  ,jj,kk+1)]);
+					U[idx]+=    u[index(ii+1,jj,kk)] + u[index(ii+1,jj+1,kk)] + u[index(ii+1,jj+1,kk+1)] + u[index(ii+1,jj,kk+1)];
+					U[idx]*=0.0625; // 1/16
 
-	// 				V[idx] =    v[index(ii-1,jj,kk)] + v[index(ii-1,jj+1,kk)] + v[index(ii-1,jj+1,kk+1)] + v[index(ii-1,jj,kk+1)];
-	// 				V[idx]+= 2*(v[index(ii  ,jj,kk)] + v[index(ii  ,jj+1,kk)] + v[index(ii  ,jj+1,kk+1)] + v[index(ii  ,jj,kk+1)]);
-	// 				V[idx]+=    v[index(ii+1,jj,kk)] + v[index(ii+1,jj+1,kk)] + v[index(ii+1,jj+1,kk+1)] + v[index(ii+1,jj,kk+1)];
-	// 				V[idx]*=0.0625; // 1/16
+					V[idx] =    v[index(ii-1,jj,kk)] + v[index(ii-1,jj+1,kk)] + v[index(ii-1,jj+1,kk+1)] + v[index(ii-1,jj,kk+1)];
+					V[idx]+= 2*(v[index(ii  ,jj,kk)] + v[index(ii  ,jj+1,kk)] + v[index(ii  ,jj+1,kk+1)] + v[index(ii  ,jj,kk+1)]);
+					V[idx]+=    v[index(ii+1,jj,kk)] + v[index(ii+1,jj+1,kk)] + v[index(ii+1,jj+1,kk+1)] + v[index(ii+1,jj,kk+1)];
+					V[idx]*=0.0625; // 1/16
 
-	// 				W[idx] =    w[index(ii-1,jj,kk)] + w[index(ii-1,jj+1,kk)] + w[index(ii-1,jj+1,kk+1)] + w[index(ii-1,jj,kk+1)];
-	// 				W[idx]+= 2*(w[index(ii  ,jj,kk)] + w[index(ii  ,jj+1,kk)] + w[index(ii  ,jj+1,kk+1)] + w[index(ii  ,jj,kk+1)]);
-	// 				W[idx]+=    w[index(ii+1,jj,kk)] + w[index(ii+1,jj+1,kk)] + w[index(ii+1,jj+1,kk+1)] + w[index(ii+1,jj,kk+1)];
-	// 				W[idx]*=0.0625; // 1/16
+					W[idx] =    w[index(ii-1,jj,kk)] + w[index(ii-1,jj+1,kk)] + w[index(ii-1,jj+1,kk+1)] + w[index(ii-1,jj,kk+1)];
+					W[idx]+= 2*(w[index(ii  ,jj,kk)] + w[index(ii  ,jj+1,kk)] + w[index(ii  ,jj+1,kk+1)] + w[index(ii  ,jj,kk+1)]);
+					W[idx]+=    w[index(ii+1,jj,kk)] + w[index(ii+1,jj+1,kk)] + w[index(ii+1,jj+1,kk+1)] + w[index(ii+1,jj,kk+1)];
+					W[idx]*=0.0625; // 1/16
 
-	// 				P[idx] = 0.125*(p[index(ii,jj,kk)]       + p[index(ii+1,jj,kk)]   + p[index(ii,jj+1,kk)]   + p[index(ii,jj,kk+1)] /
-	// 					          + p[index(ii+1,jj+1,kk+1)] + p[index(ii,jj+1,kk+1)] + p[index(ii+1,jj,kk+1)] + p[index(ii+1,jj+1,kk)]);
-	// 			}
-	// 		}
-	// 	}
-	// }
+					P[idx] = 0.125*(p[index(ii,jj,kk)]       + p[index(ii+1,jj,kk)]   + p[index(ii,jj+1,kk)]   + p[index(ii,jj,kk+1)] /
+						          + p[index(ii+1,jj+1,kk+1)] + p[index(ii,jj+1,kk+1)] + p[index(ii+1,jj,kk+1)] + p[index(ii+1,jj+1,kk)]);
+				}
+			}
+		}
+	}
 
-	// void MacMesh::refine(VectorXd& U, VectorXd& V, VectorXd& W, VectorXd& P){
-	// 	//PRESSURE AND FIRST INTERPOLATIONS
-	// 	#pragma omp parallel for collapse(3)
-	// 	for (long unsigned int k=0; k<N[2]; k++){
-	// 		for (long unsigned int j=0; j<N[1]; j++){
-	// 			for (long unsigned int i=0; i<N[0]; i++){
+	void MacMesh::refine(VectorXd& U, VectorXd& V, VectorXd& W, VectorXd& P){
+		//PRESSURE AND FIRST INTERPOLATIONS
+		#pragma omp parallel for collapse(3)
+		for (long unsigned int k=0; k<N[2]; k++){
+			for (long unsigned int j=0; j<N[1]; j++){
+				for (long unsigned int i=0; i<N[0]; i++){
 
-	// 				long unsigned int idx;
-	// 				long unsigned int ii = 2*i;
-	// 				long unsigned int jj = 2*j;
-	// 				long unsigned int kk = 2*k;
+					long unsigned int idx;
+					long unsigned int ii = 2*i;
+					long unsigned int jj = 2*j;
+					long unsigned int kk = 2*k;
 					
-	// 				for (long unsigned int x=0; x<2; x++){
-	// 					for (long unsigned int y=0; y<2; y++){
-	// 						for (long unsigned int z=0; z<2; z++){
-	// 							long unsigned int xsgn = 2*x-1;
-	// 							long unsigned int ysgn = 2*y-1;
-	// 							long unsigned int zsgn = 2*z-1;
+					for (long unsigned int x=0; x<2; x++){
+						for (long unsigned int y=0; y<2; y++){
+							for (long unsigned int z=0; z<2; z++){
+								long unsigned int xsgn = 2*x-1;
+								long unsigned int ysgn = 2*y-1;
+								long unsigned int zsgn = 2*z-1;
 
-	// 							idx = fine_index(ii+x,jj+y,kk+z);
+								idx = fine_index(ii+x,jj+y,kk+z);
 								
-	// 							if (x==0){
-	// 								U[idx] = 0.0625*(9*u[index(i,j,k)]+3*u[index(i,j+ysgn,k)]+3*u[index(i,j,k+zsgn)]+u[index(i,j+ysgn,k+zsgn)]);
-	// 								// U[idx] = 0.75*u[index(i,j,k)] + 0.25*u[index(i,j+ysgn,k+zsgn)];
-	// 								// U[idx] = u[index(i,j,k)];
-	// 							}
+								if (x==0){
+									U[idx] = 0.0625*(9*u[index(i,j,k)]+3*u[index(i,j+ysgn,k)]+3*u[index(i,j,k+zsgn)]+u[index(i,j+ysgn,k+zsgn)]);
+									// U[idx] = 0.75*u[index(i,j,k)] + 0.25*u[index(i,j+ysgn,k+zsgn)];
+									// U[idx] = u[index(i,j,k)];
+								}
 								
-	// 							if (y==0){
-	// 								V[idx] = 0.0625*(9*v[index(i,j,k)]+3*v[index(i,j,k+zsgn)]+3*v[index(i+xsgn,j,k)]+v[index(i+xsgn,j,k+zsgn)]);
-	// 								// V[idx] = 0.75*v[index(i,j,k)] + 0.25*v[index(i+xsgn,j,k+zsgn)];
-	// 								// V[idx] = v[index(i,j,k)];
-	// 							}
+								if (y==0){
+									V[idx] = 0.0625*(9*v[index(i,j,k)]+3*v[index(i,j,k+zsgn)]+3*v[index(i+xsgn,j,k)]+v[index(i+xsgn,j,k+zsgn)]);
+									// V[idx] = 0.75*v[index(i,j,k)] + 0.25*v[index(i+xsgn,j,k+zsgn)];
+									// V[idx] = v[index(i,j,k)];
+								}
 								
-	// 							if (z==0){
-	// 								W[idx] = 0.0625*(9*w[index(i,j,k)]+3*w[index(i+xsgn,j,k)]+3*w[index(i,j+ysgn,k)]+w[index(i+xsgn,j+ysgn,k)]);
-	// 								// W[idx] = 0.75*w[index(i,j,k)] + 0.25*w[index(i+zsgn,j+ysgn,k)];
-	// 								// W[idx] = w[index(i,j,k)];
-	// 							}
+								if (z==0){
+									W[idx] = 0.0625*(9*w[index(i,j,k)]+3*w[index(i+xsgn,j,k)]+3*w[index(i,j+ysgn,k)]+w[index(i+xsgn,j+ysgn,k)]);
+									// W[idx] = 0.75*w[index(i,j,k)] + 0.25*w[index(i+zsgn,j+ysgn,k)];
+									// W[idx] = w[index(i,j,k)];
+								}
 
-	// 							P[idx] = p[index(i,j,k)];
-	// 						}
-	// 					}
-	// 				}
-	// 			}
-	// 		}
-	// 	}
+								P[idx] = p[index(i,j,k)];
+							}
+						}
+					}
+				}
+			}
+		}
 
-	// 	std::cout << "second interpolations\n";
-	// 	//SECOND INTERPOLATIONS
-	// 	#pragma omp parallel for collapse(3)
-	// 	for (long unsigned int k=0; k<N[2]; k++){
-	// 		for (long unsigned int j=0; j<N[1]; j++){
-	// 			for (long unsigned int i=0; i<N[0]; i++){
+		std::cout << "second interpolations\n";
+		//SECOND INTERPOLATIONS
+		#pragma omp parallel for collapse(3)
+		for (long unsigned int k=0; k<N[2]; k++){
+			for (long unsigned int j=0; j<N[1]; j++){
+				for (long unsigned int i=0; i<N[0]; i++){
 
-	// 				long unsigned int idx, idx_low, idx_high;
-	// 				long unsigned int ii = 2*i;
-	// 				long unsigned int jj = 2*j;
-	// 				long unsigned int kk = 2*k;
+					long unsigned int idx, idx_low, idx_high;
+					long unsigned int ii = 2*i;
+					long unsigned int jj = 2*j;
+					long unsigned int kk = 2*k;
 					
-	// 				for (long unsigned int x=0; x<2; x++){
-	// 					for (long unsigned int y=0; y<2; y++){
-	// 						for (long unsigned int z=0; z<2; z++){
-	// 							idx = fine_index(ii+x,jj+y,kk+z);
+					for (long unsigned int x=0; x<2; x++){
+						for (long unsigned int y=0; y<2; y++){
+							for (long unsigned int z=0; z<2; z++){
+								idx = fine_index(ii+x,jj+y,kk+z);
 								
-	// 							if (x==1){
-	// 								idx_low  = fine_index(ii+x-1,jj+y,kk+z);
-	// 								idx_high = fine_index(ii+x+1,jj+y,kk+z);
-	// 								U[idx]   = 0.5*(U[idx_low] + U[idx_high]);
-	// 							}
+								if (x==1){
+									idx_low  = fine_index(ii+x-1,jj+y,kk+z);
+									idx_high = fine_index(ii+x+1,jj+y,kk+z);
+									U[idx]   = 0.5*(U[idx_low] + U[idx_high]);
+								}
 								
-	// 							if (y==1){
-	// 								idx_low  = fine_index(ii+x,jj+y-1,kk+z);
-	// 								idx_high = fine_index(ii+x,jj+y+1,kk+z);
-	// 								V[idx]   = 0.5*(V[idx_low] + V[idx_high]);
-	// 							}
+								if (y==1){
+									idx_low  = fine_index(ii+x,jj+y-1,kk+z);
+									idx_high = fine_index(ii+x,jj+y+1,kk+z);
+									V[idx]   = 0.5*(V[idx_low] + V[idx_high]);
+								}
 								
-	// 							if (z==1){
-	// 								idx_low  = fine_index(ii+x,jj+y,kk+z-1);
-	// 								idx_high = fine_index(ii+x,jj+y,kk+z+1);
-	// 								W[idx]   = 0.5*(W[idx_low] + W[idx_high]);
-	// 							}
-	// 						}
-	// 					}
-	// 				}
-	// 			}
-	// 		}
-	// 	}
-	// }
+								if (z==1){
+									idx_low  = fine_index(ii+x,jj+y,kk+z-1);
+									idx_high = fine_index(ii+x,jj+y,kk+z+1);
+									W[idx]   = 0.5*(W[idx_low] + W[idx_high]);
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
 
 
 	void MacMesh::saveas(const std::string filename) const{
@@ -616,8 +569,8 @@ namespace GeoVox::mac{
 		//POINTS (CENTROIDS)
 		buffer << "DATASET STRUCTURED_POINTS\n";
 		buffer << "DIMENSIONS " << N[0]+1 << " " << N[1]+1 << " " << N[2]+1 << "\n";
-		buffer << "ORIGIN " << box.low() << "\n"; //OFFSET FOR CENTROID PRESENTATION
-		buffer << "SPACING " << H << "\n\n";
+		buffer << "ORIGIN " << p_mask.box.low()-0.5*p_mask.H << "\n"; //OFFSET FOR CENTROID PRESENTATION
+		buffer << "SPACING " << p_mask.H << "\n\n";
 
 		solutionfile << buffer.rdbuf();
 		buffer.str("");
@@ -647,9 +600,9 @@ namespace GeoVox::mac{
 		for (long unsigned int k=0; k<N[2]; k++){
 			for (long unsigned int j=0; j<N[1]; j++){
 				for (long unsigned int i=0; i<N[0]; i++){
-					double vx = 0.5*(u[index(i,j,k)]+u[west(i,j,k)]);
-					double vy = 0.5*(v[index(i,j,k)]+v[north(i,j,k)]);
-					double vz = 0.5*(w[index(i,j,k)]+w[top(i,j,k)]);
+					double vx = 0.5*(u[index(i,j,k)]+u[index(i+1,j,k)]);
+					double vy = 0.5*(v[index(i,j,k)]+v[index(i+1,j,k)]);
+					double vz = 0.5*(w[index(i,j,k)]+w[index(i+1,j,k)]);
 					
 					buffer << vx << "\t" << vy << "\t" << vz << "\n";
 				}
@@ -668,7 +621,7 @@ namespace GeoVox::mac{
 		for (long unsigned int k=0; k<N[2]; k++){
 			for (long unsigned int j=0; j<N[1]; j++){
 				for (long unsigned int i=0; i<N[0]; i++){
-					buffer << markers[index(i,j,k)] << "\n";
+					buffer << p_mask(i,j,k) << "\n";
 				}
 			}
 		}
