@@ -60,6 +60,14 @@ namespace GeoVox::geometry{
 			_root = this;
 		}
 
+		// COLUMN OPTIONS:
+		// -id (IDENTIFIER, int)
+		// -rrr (TRIPLE RADIUS, double[3])
+		// -xyz (CENTER, double[3])
+		// -eps (SHAPE PARAMETERS, double[2])
+		// -v (VOLUME, double)
+		// -q (QUATERNION, double[4])
+		// -l (BOUNDING BOX LENGTH, double[3])
 		Assembly(const std::string particle_file, const std::string columns) : AssemblyNode(), _nleaves(1), _maxdepth(0), max_data_per_leaf(8) {
 			_root = this;
 			readfile(particle_file, columns);

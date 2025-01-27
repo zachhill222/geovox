@@ -202,16 +202,22 @@ namespace GeoVox::mac{
 
 
 					//UPDATE VELOCITY
-					if (u_mask(i,j,k)==MAC_DOMAIN_MARKER){
+					if (dof_type_u(i,j,k)==0){
 						u[P] = C*( f1[P] + mu*(H_2[0]*(u[E]+u[W]) + H_2[1]*(u[N]+u[S]) + H_2[2]*(u[T]+u[B])) + h_1[0]*(p[W]-p[P]) );
+					}else{
+						u[P] = 0;
 					}
 					
-					if (v_mask(i,j,k)==MAC_DOMAIN_MARKER){
+					if (dof_type_v(i,j,k)==0){
 						v[P] = C*( f2[P] + mu*(H_2[0]*(v[E]+v[W]) + H_2[1]*(v[N]+v[S]) + H_2[2]*(v[T]+v[B])) + h_1[1]*(p[S]-p[P]) );
+					}else{
+						v[P] = 0;
 					}
 					
-					if (w_mask(i,j,k)==MAC_DOMAIN_MARKER){
+					if (dof_type_w(i,j,k)==0){
 						w[P] = C*( f3[P] + mu*(H_2[0]*(w[E]+w[W]) + H_2[1]*(w[N]+w[S]) + H_2[2]*(w[T]+w[B])) + h_1[2]*(p[B]-p[P]) );
+					}else{
+						w[P] = 0;
 					}
 				}
 			}
