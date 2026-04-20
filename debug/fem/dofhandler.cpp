@@ -1,4 +1,3 @@
-#include "gutil.hpp"
 #include "mesh/voxel_mesh.hpp"
 #include "fem/dofs/dofhandler.hpp"
 #include "fem/dofs/voxel_dof_Q1.hpp"

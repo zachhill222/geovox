@@ -1,5 +1,5 @@
 #set up the include directories
-INC_DIR = -I../include -I../libs/GeometryUtility/include -I/usr/include/eigen3
+INC_DIR = -I../include -I/usr/include/eigen3
 
 #get source/target names of all files in the specified directory
 DIR    ?= .

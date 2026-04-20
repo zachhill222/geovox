@@ -1,8 +1,7 @@
-#include "gutil.hpp"
 #include "mesh/voxel_mesh.hpp"
 
 
-using Point_t = gutil::Point<3,double>;
+using Point_t = GV::Point<3,double>;
 using Mesh_t  = GV::VoxelMesh<6>;
 using Elem_t  = Mesh_t::VoxelElement;
 using Vert_t  = Mesh_t::VoxelVertex;

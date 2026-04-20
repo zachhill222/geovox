@@ -1,8 +1,6 @@
-#include "gutil.hpp"
 #include "mesh/voxel_mesh.hpp"
 
-
-using Point_t = gutil::Point<3,double>;
+using Point_t = GV::Point<3,double>;
 using Mesh_t  = GV::VoxelMesh<6>;
 using Elem_t  = Mesh_t::VoxelElement;
 using Vert_t  = Mesh_t::VoxelVertex;
@@ -28,7 +26,7 @@ int main(int argc, char* argv[])
 		auto v1 = el.vertex(0);
 		auto v2 = el.vertex(7);
 		auto center = 0.5*(mesh.ref2geo(v1)+mesh.ref2geo(v2));
-		return gutil::squaredNorm(center) < 0.25;
+		return GV::squaredNorm(center) < 0.25;
 	};
 
 	mesh.set_depth(1);
