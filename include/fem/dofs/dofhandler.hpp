@@ -148,7 +148,8 @@ namespace GV
 		}
 
 		//gather active basis sets
-		std::vector<DOF_t> basis_s(const Elem_t el) const {
+		template<typename Elem_type> requires (VoxelEquivFeature<Elem_t,Elem_type>)
+		std::vector<DOF_t> basis_s(const Elem_type el) const {
 			assert(el.is_valid());
 			std::vector<DOF_t> bs;
 			
@@ -161,7 +162,9 @@ namespace GV
 			return bs;
 		}
 
-		std::vector<DOF_t> basis_a(Elem_t el) const {
+
+		template<typename Elem_type> requires (VoxelEquivFeature<Elem_t,Elem_type>)
+		std::vector<DOF_t> basis_a(Elem_type el) const {
 			assert(el.is_valid());
 			std::vector<DOF_t> ba;
 			if (el.depth()==0) {return ba;}
@@ -177,7 +180,8 @@ namespace GV
 			return ba;
 		}
 
-		std::vector<DOF_t> basis_active(Elem_t el) const {
+		template<typename Elem_type> requires (VoxelEquivFeature<Elem_t,Elem_type>)
+		std::vector<DOF_t> basis_active(Elem_type el) const {
 			std::vector<DOF_t> b_a = basis_a(el);
 			std::vector<DOF_t> b_s = basis_s(el);
 			b_a.insert(b_a.end(),
@@ -204,8 +208,8 @@ namespace GV
 			
 			active_dofs->set(idx,false);
 			stale_dofs->set(idx,true);
-			for (Elem_t el : dof.support()) {
-				if (el.exists() and basis_s(el).empty()) {mesh.deactivate(el);}
+			for (auto el : dof.support()) {
+				if (el.exists() and basis_s(el).empty()) {mesh.deactivate(static_cast<Elem_t>(el));}
 			}
 		}
 
@@ -315,8 +319,8 @@ namespace GV
 
 		template<typename CoefContainer_t, typename EvalMethod>
 		void init_coefs_by_dof(CoefContainer_t& coefs, EvalMethod&& eval) const {
-			assert(coefs.size() == active_dof_list_curr.size());
-			for (uint64_t i=0; i<coefs.size(); ++i) {
+			assert(static_cast<size_t>(coefs.size()) == active_dof_list_curr.size());
+			for (uint64_t i=0; i<static_cast<uint64_t>(coefs.size()); ++i) {
 				const DOF_t dof = active_dof_list_curr[i];
 				assert(dof.exists());
 				assert(dof.is_valid());
@@ -331,9 +335,9 @@ namespace GV
 			//or split its contribution into its children in new
 			//or compress its contribution into its parent in new
 			//the coef lists must always be sorted so that the lookup is fast
-			assert(old_coefs.size() == active_dof_list_prev.size());
-			assert(new_coefs.size() == active_dof_list_curr.size());
-			assert(new_coefs.size() == n_dofs());
+			assert(static_cast<size_t>(old_coefs.size()) == active_dof_list_prev.size());
+			assert(static_cast<size_t>(new_coefs.size()) == active_dof_list_curr.size());
+			assert(static_cast<size_t>(new_coefs.size()) == n_dofs());
 
 			//lambda to directly transfer a coefficient
 			auto transfer = [&new_coefs, this](const double val, const DOF_t dof) {
@@ -354,7 +358,7 @@ namespace GV
 				new_coefs[idx] += val;
 			};
 
-			for (uint64_t i=0; i<old_coefs.size(); ++i) {
+			for (uint64_t i=0; i<static_cast<uint64_t>(old_coefs.size()); ++i) {
 				const DOF_t old_dof = active_dof_list_prev[i];
 				const double val    = old_coefs[i];
 

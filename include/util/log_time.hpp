@@ -54,12 +54,14 @@ namespace GV
 		std::string_view label;
 		std::chrono::steady_clock::time_point mark_start;
 
-		explicit LogTime(std::string_view label) : label{label}, mark_start{std::chrono::steady_clock::now()} {}
+		explicit LogTime(std::string_view label) : label{label}, mark_start{std::chrono::steady_clock::now()} {
+			Logger::log(std::string(label) + " : start");
+		}
 
 		~LogTime() {
 			const auto now = std::chrono::steady_clock::now();
 			const double elapsed = std::chrono::duration<double>(now - mark_start).count();
-			Logger::log(std::string(label) + " : " + std::to_string(elapsed) + "s");
+			Logger::log(std::string(label) + " : end (" + std::to_string(elapsed) + "s)");
 		}
 	};
 

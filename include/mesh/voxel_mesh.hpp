@@ -377,7 +377,8 @@ namespace GV
 		}
 
 		//geometry operations
-		inline GeoPoint_t ref2geo(const VoxelVertex vtx) const {
+		template<typename V>	requires (VoxelEquivFeature<V,VoxelVertex>)
+		inline GeoPoint_t ref2geo(const V vtx) const {
 			return low + diag*vtx.normalized_coordinate();
 		}
 

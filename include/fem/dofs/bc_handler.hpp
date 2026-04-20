@@ -61,7 +61,7 @@ namespace GV
 		void apply(SpMat_t& mat, Vec_t& rhs, const std::vector<DOF_t>& dofs) const {
 			assert(mat.rows() == rhs.size());
 			assert(mat.rows() == dofs.size());
-			assert(A.isCompressed());
+			assert(mat.isCompressed());
 
 			const auto outer_ptr = mat.outerIndexPtr();
 			const auto inner_ptr = mat.innerIndexPtr();

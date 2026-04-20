@@ -197,7 +197,15 @@ namespace GV
 		inline uint64_t size() const {return entries.size();}
 		inline void shrink_to_fit() {entries.shrink_to_fit();}
 		inline void reserve(const uint64_t sz) {entries.reserve(sz);}
+		inline void clear() {entries.clear();}
 
+		//check if an entry already exists. For example, the interaction of two basis functions
+		//has already been computed
+		bool has_entry(const ColKey_t c_id) const {
+			CIter_t c_it = lower_bound(c_id);
+			if (c_it == entries.end() || c_it->col_id!=c_id) {return false;}
+			return true;
+		}
 
 		//we can add entries to the end and then accumulate all at once
 		//TODO: write binary version (accumulate left/right and then join)
@@ -347,6 +355,14 @@ namespace GV
 			return rows.back();
 		}
 
+		//check if an entry already exists. For example, the interaction of two basis functions
+		//has already been computed
+		bool has_entry(const RowKey_t r_id, const ColKey_t c_id) const {
+			CRowIter_t r_it = lower_bound(r_id);
+			if (r_it == rows.end() || r_it->row_id!=r_id) {return false;}
+			return r_it->has_entry(c_id);
+		}
+
 
 		//when many new rows have been added, we will need to combine them with any existing
 		//rows that have the same id and ensure that they are sorted for lookups
@@ -379,6 +395,9 @@ namespace GV
 			rows.shrink_to_fit();
 			for_each_row_omp([this](Row_t& row) {row.shrink_to_fit();});
 		}
+
+		//forward common vector operations
+		inline void clear() {rows.clear();}
 
 
 		//given a selection of row and column dofs, build the Eigen CSR matrix
