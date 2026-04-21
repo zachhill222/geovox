@@ -98,12 +98,13 @@ namespace GV
 		inline constexpr void set_stale(const DOF_t dof, const bool b) {assert(dof.is_valid()); stale_dofs->set(dof.key.linear_index(), b);}
 
 		inline const std::vector<DOF_t>& last_compressed_dofs() const {return active_dof_list_prev;}
+		inline const std::vector<DOF_t>& compressed_dofs() const {return active_dof_list_curr;}
 
 		//simple management operations
 		inline void reset_active() {active_dofs->reset();}
 		inline void reset_stale() {stale_dofs->reset();}
 		void save_dof_list() {
-			active_dof_list_prev = std::move(active_dof_list_curr);
+			active_dof_list_prev = active_dof_list_curr;
 			// active_dof_list_curr.clear();
 		}
 
@@ -220,7 +221,7 @@ namespace GV
 
 		template<bool HIERARCHICAL=false>
 		void refine(const DOF_t dof) {
-			assert(dof.key.depth() < MAX_DEPTH);
+			if(dof.key.depth() >= MAX_DEPTH) {return;};
 			assert(is_active(dof));
 
 			if constexpr (HIERARCHICAL) {
@@ -241,12 +242,12 @@ namespace GV
 		}
 
 		template<bool HIERARCHICAL=false>
-		void unrefine(const std::vector<DOF_t>& dofs) {
-			for (const DOF_t dof : dofs) {unrefine<HIERARCHICAL>(dof);}
+		void coarsen(const std::vector<DOF_t>& dofs) {
+			for (const DOF_t dof : dofs) {coarsen<HIERARCHICAL>(dof);}
 		}
 
 		template<bool HIERARCHICAL=false>
-		void unrefine(const DOF_t dof) {
+		void coarsen(const DOF_t dof) {
 			if constexpr (HIERARCHICAL) {
 				assert(is_active(dof));
 
@@ -314,7 +315,7 @@ namespace GV
 
 			//TODO: allow a custom sorting comparator
 			//dofs are already sorted within each thread vector by their global linear index
-			// std::sort(active_dof_list_curr.begin(), active_dof_list_curr.end());
+			std::sort(active_dof_list_curr.begin(), active_dof_list_curr.end());
 		}
 
 		template<typename CoefContainer_t, typename EvalMethod>
@@ -396,6 +397,7 @@ namespace GV
 		std::vector<double> interpolate_to_vertices(const CoefContainer_t& coefs, uint64_t n_vertices) const {
 			//increment the position value for every active dof
 			std::vector<double> result(n_vertices, 0.0);
+			assert(static_cast<size_t>(coefs.size()) == active_dof_list_curr.size());
 			
 			//struct for tracking how to evaluate basis functions
 			//and to ensure that a basis function is evaluated only once at a given point
@@ -454,9 +456,9 @@ namespace GV
 				//evaluate the basis functions
 				for (Triple& tr : track_dof_eval) {
 					tr.dof.proj_to_support(tr.el, tr.pt);
-					auto it = std::lower_bound(active_dof_list_prev.begin(), active_dof_list_prev.end(), tr.dof);
-					assert (it != active_dof_list_prev.end());
-					uint64_t idx = std::distance(active_dof_list_prev.begin(), it);
+					auto it = std::lower_bound(active_dof_list_curr.begin(), active_dof_list_curr.end(), tr.dof);
+					assert (it != active_dof_list_curr.end());
+					uint64_t idx = std::distance(active_dof_list_curr.begin(), it);
 					result[i] += coefs[idx] * tr.dof.eval(tr.el, tr.pt);
 				}
 			}

@@ -31,18 +31,18 @@ struct MassKernel : public GV::SymmetricL2<Mesh_t, DOF_t, MassKernel>
 		#pragma omp simd
 		for (uint64_t i=0; i<N; ++i) {
 			//evaluate weight
-			w_val[i] = 0.0;
+			w_val[i] = 1.0;
 		}
 	}
 };
 
-using Kernel_t  = GV::Kernel<4,GV::TypeList<MassKernel,BiStiff_t>, GV::TypeList<>>;
+using Kernel_t  = GV::Kernel<5,GV::TypeList<MassKernel,BiStiff_t>, GV::TypeList<>>;
 
 int main(int argc, char* argv[]) {
 	GV::LogTime t0{"Program"};
 
 	//uniform depth
-	const int depth = 6;
+	const int depth = 4;
 
 	//define mesh
 	Mesh_t mesh({0,0,0}, {1,2,3});
@@ -51,6 +51,8 @@ int main(int argc, char* argv[]) {
 	//define dofhandler
 	Handler_t dofhandler(mesh);
 	dofhandler.set_depth(depth);
+	dofhandler.refine(DOF_t{DofKey_t{4,0,1,2}});
+	dofhandler.compress_dof_numbers();
 	dofhandler.save_dof_list();
 
 	//define kernel (includes bilinear form)

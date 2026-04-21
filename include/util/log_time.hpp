@@ -3,7 +3,7 @@
 #include <chrono>
 #include <mutex>
 #include <iostream>
-#include <string_view>
+#include <string>
 #include <thread>
 #include <iomanip>
 
@@ -26,7 +26,7 @@ namespace GV
 		static void set_output(std::ostream& os_) {os = &os_;}
 
 		//write to the ouput stream (thread safe)
-		static void log(std::string_view msg) {
+		static void log(const std::string msg) {
 			const auto now = std::chrono::steady_clock::now();
 			const double elapsed = std::chrono::duration<double>(now - start_time).count();
 
@@ -51,17 +51,15 @@ namespace GV
 	//Initialize it with a label and it prints on 
 	struct LogTime
 	{
-		std::string_view label;
+		const std::string label;
 		std::chrono::steady_clock::time_point mark_start;
 
-		explicit LogTime(std::string_view label) : label{label}, mark_start{std::chrono::steady_clock::now()} {
-			Logger::log(std::string(label) + " : start");
-		}
+		explicit LogTime(const std::string label) : label{label}, mark_start{std::chrono::steady_clock::now()} {}
 
 		~LogTime() {
 			const auto now = std::chrono::steady_clock::now();
 			const double elapsed = std::chrono::duration<double>(now - mark_start).count();
-			Logger::log(std::string(label) + " : end (" + std::to_string(elapsed) + "s)");
+			Logger::log(label + " : " + std::to_string(elapsed) + "s");
 		}
 	};
 

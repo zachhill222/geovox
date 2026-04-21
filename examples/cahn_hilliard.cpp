@@ -2,10 +2,13 @@
 #include "util/log_time.hpp" //time certain routines
 
 #include <cmath>
+#include <sstream>
+#include <iomanip>
 
 #include <Eigen/SparseCore>
 #include <Eigen/IterativeLinearSolvers>
 #include <unsupported/Eigen/IterativeSolvers>
+#include <Eigen/SparseLU>
 
 using namespace GV;
 
@@ -36,8 +39,10 @@ struct CahnHilliard : BaseProblem<Mesh_t>
 	Vec_t 						u, w;		//current solutions
 	SpMat_t 					LHS,A,M;	//current mass/stiffness and left hand side matrices (A,M are the same for u and w)
 
-	using Precon_t = Eigen::DiagonalPreconditioner<double>;
+	// using Precon_t = Eigen::DiagonalPreconditioner<double>;
+	using Precon_t = Eigen::IncompleteLUT<double,int>;
 	Eigen::GMRES<SpMat_t, Precon_t> solver;
+	// Eigen::SparseLU<SpMat_t>	solver;
 
 
 
@@ -69,12 +74,28 @@ struct CahnHilliard : BaseProblem<Mesh_t>
 		//call transfer solution to update u and w to the new dofs
 	}
 
+	//finalize refinement
+	void finalize_refine() {
+		mesh.process_request_deactive();
+		mesh.process_request_active();
+
+		transfer_solution();
+
+		//re-compute matrices
+		integrate_all();
+		assemble_mats();
+	}
+
 	//update solutions to a refined/coarsened mesh
 	void transfer_solution() {
 		LogTime time("CahnHilliard::transfer_solution");
 
+		dofhandler.save_dof_list();
+		dofhandler.compress_dof_numbers();
+
 		const auto n_dofs = dofhandler.n_dofs();
-		Vec_t u_new(n_dofs), w_new(n_dofs);
+		Vec_t u_new = Vec_t::Zero(n_dofs);
+		Vec_t w_new = Vec_t::Zero(n_dofs);
 
 		dofhandler.update_coefs(u, u_new);
 		dofhandler.update_coefs(w, w_new);
@@ -89,7 +110,7 @@ struct CahnHilliard : BaseProblem<Mesh_t>
 
 		mesh.set_depth(depth);
 		dofhandler.set_depth(depth);
-		dofhandler.save_dof_list();
+
 		dofhandler.compress_dof_numbers();
 
 		auto eval = [this,&fun](DOF_t dof) {
@@ -136,7 +157,7 @@ struct CahnHilliard : BaseProblem<Mesh_t>
 	//assemble LHS matrix
 	void assemble_mats() {
 		LogTime timer{"CahnHilliard::assemble_mats"};
-		const auto& dofs = dofhandler.last_compressed_dofs();
+		const auto& dofs = dofhandler.compressed_dofs();
 
 		#ifdef _OPENMP
 		#pragma omp parallel
@@ -245,40 +266,80 @@ struct CahnHilliard : BaseProblem<Mesh_t>
 		// std::cout << "u: " << u.size() << "\n";
 		// std::cout << "w: " << w.size() << "\n";
 
-		//assemble rhs
-		const int n = A.rows();
-		Vec_t rhs(2*n);
+		bool success = false;
+		for (int attempt=0; attempt<10; ++attempt) {
+			//assemble rhs
+			const int n = A.rows();
+			Vec_t rhs(2*n);
 
-		Vec_t u3 = u.array().cube().matrix();
-		rhs.head(n) = M*u;
-		rhs.tail(n) = M*u3;
+			Vec_t u3 = u.array().cube().matrix();
+			rhs.head(n) = M*u;
+			rhs.tail(n) = M*u3;
 
-		//solve system
-		Vec_t x(2*n);
-		x.head(n) = u;
-		x.tail(n) = w;
-		x = solver.solveWithGuess(rhs, x);
+			//solve system
+			Vec_t x(2*n);
+			x.head(n) = u;
+			x.tail(n) = w;
+			x = solver.solveWithGuess(rhs, x);
+			// Vec_t x = solver.solve(rhs);
 
-		//check solution. TODO: wrap fail to converge into a refinement step?
-		if (solver.info() != Eigen::Success) {
-			throw std::runtime_error("CahnHilliard::step_forward - solver failed to converge");
+			//check solution. TODO: wrap fail to converge into a refinement step?
+			if (solver.info() != Eigen::Success) {
+				const auto dofs = dofhandler.compressed_dofs();
+				for (const auto dof : dofs) {dofhandler.refine(dof);}
+				finalize_refine();
+				continue;
+			}
+
+			//store solution
+			Vec_t u0 = x.head(n);
+			Vec_t w0 = x.tail(n);
+
+			//TODO: check if we need to refine with a more sophisticated technique
+			u = std::move(u0);
+			w = std::move(w0);
+			++t_step;
+			success = true;
+			break;
 		}
 
-		//store solution
-		Vec_t u0 = x.head(n);
-		Vec_t w0 = x.tail(n);
+		if (!success) {
+			save_solution("cahn_hilliard_error");
+			throw std::runtime_error("CahnHilliard::step_forward - solver failed to converge");
+		}
+	}
 
-		//TODO: check if we need to refine
-		u = std::move(u0);
-		w = std::move(w0);
-		++t_step;
+	//refine the dofs within (1-r) of the largest A*u * 0.5^depth value. These are dofs with large gradients over large elements.
+	//coarsen the dofs within (1-c) of the smallest A*u * 0.5^depth value. These are dofs with small greadients over small elements.
+	//no coarsenings will reduce the depth of a dof below min_depth
+	void refine_interface(const Vec_t& u_tmp, const double r=0.1, const double c=0.1, const uint64_t min_depth=3) {
+		LogTime timer{"CahnHilliard::refine_interface"};
+
+		Vec_t Au = A*u_tmp;
+		const auto& dofs = dofhandler.compressed_dofs();
+		
+
+		//determine cutoffs
+		for (int i=0; i<u_tmp.size(); ++i) {
+			const auto dof = dofs[i];
+			const double U = std::fabs(u_tmp[i]);
+			if (U<r) {dofhandler.refine(dof);}
+			else if (std::fabs(U-1.0)<c and dof.depth()<min_depth) {dofhandler.coarsen(dof);}
+		}
+
+		//finalize refinement and tranfer solution
+		finalize_refine();
 	}
 
 
 	void save_solution(const std::string simulation_name) const {
 		LogTime timer{"CahnHilliard::save_solution"};
 
-		const std::string filename = simulation_name + "_" + std::to_string(t_step) + ".vtk";
+		//note not all C++20 compilers have std::format
+		std::ostringstream oss;
+		oss << std::setw(5) << std::setfill('0') << t_step;
+
+		const std::string filename = simulation_name + "_" + oss.str() + ".vtk";
 		std::ofstream file(filename);
 		if (!file.is_open()) {
 			throw std::runtime_error("CahnHilliard::save_solution - could not open file: " + filename);
@@ -307,6 +368,13 @@ struct CahnHilliard : BaseProblem<Mesh_t>
 			[&vert_vals](Vert_t vtx) {return vert_vals[vtx.linear_index()];}
 		);
 	}
+
+	void check_mats() {
+		const int n = M.rows();
+		Vec_t v = Vec_t::Ones(n);
+		const double mass = v.dot(M*v);
+		std::cout << "1*M*1 = " << mass << "\n";
+	}
 };
 
 
@@ -316,24 +384,30 @@ int main(int argc, char* argv[]) {
 	CahnHilliard problem{};
 
 	auto ic_fun = [](Point<3,double> X) {
-		X[0]-=0.5;
-		X[1]-=0.5;
-		X[2]-=0.5;
+		X[0]-=0.25;
+		X[1]-=0.25;
+		X[2]-=0.25;
 		const double r = std::sqrt(X[0]*X[0] + X[1]*X[1] + X[2]*X[2]);
 
 		double val = 0.5*std::cos(6.3*r);
 		val += 0.05*std::sin(10*r);
 		return val;
 	};
-	problem.set_ic(ic_fun,5);
+	problem.set_ic(ic_fun,3);
 
 	problem.integrate_all();
 	problem.assemble_mats();
 
-	for (int i=0; i<60; ++i) {
+	for (int i=0; i<500; ++i) {
 		if (i%10 == 0) {
-			problem.save_solution("cahn_hilliard");
+			problem.save_solution("cahn_hilliard_ref");
 		}
+
+
+		if (i%50==0) {
+			problem.refine_interface(problem.u, 0.1, 0.1, 3);
+		}
+		
 		problem.step_forward();
 	}
 }
