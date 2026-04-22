@@ -1,11 +1,11 @@
 #pragma once
 
-#include "mesh/voxel_mesh.hpp"			//the mesh class
-#include "fem/dofs/voxel_dofs.hpp"		//all dofs on voxels
-#include "fem/dofs/dofhandler.hpp"		//dofhandler to store dof hierarchies. need one handler per dof type
-#include "fem/numerics/kernel.hpp"		//a type to organize integrating linear and bilinear forms. contains references only and can have one per thread.
-#include "fem/dofs/bc_handler.hpp"		//a class to apply essential bcs
-#include "fem/forms/forms.hpp"			//base classes to define the problem. pass these to the kernel.
+#include "mesh/voxel_mesh.hpp"					//the mesh class
+#include "fem/dofs/voxel_dofs.hpp"				//all dofs on voxels
+#include "fem/handlers/dofhandler_charms.hpp"	//dofhandler to store dof hierarchies. need one handler per dof type
+#include "fem/numerics/kernel.hpp"				//a type to organize integrating linear and bilinear forms. contains references only and can have one per thread.
+#include "fem/handlers/bc_handler.hpp"				//a class to apply essential bcs
+#include "fem/forms/forms.hpp"					//base classes to define the problem. pass these to the kernel.
 
 
 #include <Eigen/SparseCore>
@@ -24,7 +24,7 @@ namespace GV
 
 		//define alias for dofhandlers
 		template<typename DOF_TYPE>
-		using DofHandler_T = DofHandler<Mesh_t,DOF_TYPE>;
+		using DofHandler_T = DofHandlerCharms<Mesh_t,DOF_TYPE>;
 
 		//bring the BChandler into this scope. templated on the DOF type.
 		// using BCHandler;

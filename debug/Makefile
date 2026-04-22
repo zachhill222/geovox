@@ -16,7 +16,7 @@ DEBUG      = -pg -g3 -Wall
 CXX        =  g++ -std=c++20
 OPT        = -O3
 PAR        = -fopenmp
-DEBUG      = -DNDEBUG
+# DEBUG      = -DNDEBUG
 
 #final compiler command
 CC = $(CXX) $(OPT) $(PAR) $(DEBUG)

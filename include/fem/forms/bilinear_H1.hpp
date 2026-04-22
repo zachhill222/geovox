@@ -13,15 +13,16 @@
 namespace GV
 {
 	//A symmetric mass kernel for bilinear forms a(psi,phi) = integral_D grad_phi*grad_psi
-	template<typename Mesh_type, typename DOF_type, typename DERIVED=void>
-	struct SymmetricH1 : public BilinearForm<Mesh_type,DOF_type,DOF_type,true>
+	template<typename 	Handler_type,
+			 typename 	ActionType 	= ScatterAction,
+			 typename 	DERIVED		= void>
+	struct SymmetricH1 : public BilinearForm<Handler_type,Handler_type,true,ActionType>
 	{
-		using BASE       = BilinearForm<Mesh_type,DOF_type,DOF_type,true>;
+		using BASE       = BilinearForm<Handler_type,Handler_type,true,ActionType>;
 		using QuadElem_t = typename BASE::QuadElem_t;
-		using DOF_t      = DOF_type;
-		using Mesh_t     = Mesh_type;
-		
-		SymmetricH1(const Mesh_t& mesh) : BASE(mesh) {}
+		using DOF_t      = typename Handler_type::DOF_t;
+
+		using BASE::BASE;
 
 		//only provides the evaluation
 		//should be vectorized with simd
@@ -85,14 +86,14 @@ namespace GV
 			static_cast<const DERIVED*>(this) -> eval_w(w_x, w_y, w_z, x, y, z);
 
 			const double jac_det = Jxx*Jyy*Jzz;
-			const double J2_ti_xx = 1.0/(Jxx*Jxx);
-			const double J2_ti_yy = 1.0/(Jyy*Jyy);
-			const double J2_ti_zz = 1.0/(Jzz*Jzz);
+			const double inv_J_xx_sq = 1.0/(Jxx*Jxx);
+			const double inv_J_yy_sq = 1.0/(Jyy*Jyy);
+			const double inv_J_zz_sq = 1.0/(Jzz*Jzz);
 			#pragma omp simd
 			for (uint64_t i=0; i<N; ++i) {
-				val[i] = ( 	psi_i_gx[i]*phi_j_gx[i]*w_x[i]*J2_ti_xx + 
-							psi_i_gy[i]*phi_j_gy[i]*w_y[i]*J2_ti_yy + 
-							psi_i_gz[i]*phi_j_gz[i]*w_z[i]*J2_ti_zz ) * jac_det;
+				val[i] = ( 	psi_i_gx[i]*phi_j_gx[i]*w_x[i]*inv_J_xx_sq + 
+							psi_i_gy[i]*phi_j_gy[i]*w_y[i]*inv_J_yy_sq + 
+							psi_i_gz[i]*phi_j_gz[i]*w_z[i]*inv_J_zz_sq ) * jac_det;
 			}
 		}
 	};

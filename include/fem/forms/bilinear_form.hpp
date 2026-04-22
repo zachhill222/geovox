@@ -6,6 +6,8 @@
 #include<vector>
 #include<span>
 
+#include<Eigen/SparseCore>
+
 namespace GV
 {
 	//A generic bilinear form type for assembling FEM matrices.
@@ -45,7 +47,17 @@ namespace GV
 	//For an octree voxel mesh, this depends only on the depth of the quadrature element and the dimensions of the domain.
 
 
+	//we may only wish to compute the action of a bilinear form against a specific vector (i.e., compute y=M*x without assembling M)
+	//these types mark which action the bilinear form should take when scattering. these actions also provide some utility that is only
+	//required with that action type (e.g., storing global values)
+	struct ScatterAction {}; //scatter the local matrix to the global so that M can be assembled
+	template<typename T>
+	concept ScatterActionType = std::same_as<T,ScatterAction>;
 
+	template<bool TRANSPOSE=false>
+	struct MatVecAction {static constexpr bool tr = TRANSPOSE;}; //scatter the local matrix to compute M*x or M^t * x without assembling M
+	template<typename T>
+	concept MatVecActionType = std::same_as<T,MatVecAction<true>> || std::same_as<T,MatVecAction<false>>;
 
 	//information required for each evaluation method.
 	//bilinear forms will be constructed and passed to the kernel. the kernel will handle dispatching evaluations
@@ -54,49 +66,86 @@ namespace GV
 	//additionally, based on boundary conditions, the bilinear form may be responsible for applying boundary conditions to the
 	//local matrix after it is assembled by the kernel (with 'natural' BC).
 	//for better convenience when applying BC as a post processing step, the full local matrix is stored, even in the symmetric case.
-	template<typename Mesh_type,
-			 typename TrialDOF_type,
-			 typename TestDOF_type,
-			 bool IS_SYMMETRIC_=false>
+	template<typename 	TrialHandler_type,
+			 typename 	TestHandler_type,
+			 bool 		IS_SYMMETRIC_=false,
+			 typename 	ActionType = ScatterAction>
 	struct BilinearForm {
-		using Mesh_t     = Mesh_type;
-		using TestDOF_t  = TestDOF_type;
-		using TrialDOF_t = TrialDOF_type;
-		
+		using Mesh_t         = typename TestHandler_type::Mesh_t;
+		using TestHandler_t  = TestHandler_type;
+		using TrialHandler_t = TrialHandler_type;
+		using TestDOF_t      = typename TestHandler_type::DOF_t;
+		using TrialDOF_t     = typename TrialHandler_type::DOF_t;
+
+		static_assert(std::same_as<typename TestHandler_type::Mesh_t,typename TrialHandler_type::Mesh_t>,
+			"BilinearForm - Test and Trial handlers must have the same mesh type.");
+
 		static constexpr bool IS_SYMMETRIC = IS_SYMMETRIC_;
-		static_assert(!IS_SYMMETRIC || (IS_SYMMETRIC && std::same_as<TrialDOF_type, TestDOF_type>),
-			"BilinearForm - The test and trial spaces/dofs must be the same for a symmetric bilinear form.");
-
-		using QuadElem_t = typename TrialDOF_t::QuadElem_t::NonPeriodicType;
-		static_assert(std::same_as<QuadElem_t, typename TestDOF_t::QuadElem_t::NonPeriodicType>,
-			"BilinearForm - The test and trial spaces/dofs must have compatible quadrature elements.");
-
-		BilinearForm(const Mesh_t& mesh) : mesh(mesh) {}
-
-		const Mesh_t&               mesh;  		//link to mesh to project reference quadrature points to geometric points for evaluating weights
-		std::vector<double>      	loc_m_v; 	//local matrix values (n_test by m_trial)
-		std::span<const TestDOF_t>  test_dofs;	//local test basis functions (row dofs) (note a span is non-owning)
-		std::span<const TrialDOF_t> trial_dofs; //local trial basis functions (column dofs)
+		static_assert(!IS_SYMMETRIC_ || (std::same_as<TrialHandler_type, TestHandler_type>),
+			"BilinearForm - Test and Trial handers must be the same type for a symmetric form.");
 
 		using MatStorage_t = CSR_COO<TestDOF_t,TrialDOF_t>;
 		using MatRow_t = typename MatStorage_t::Row_t;
-		MatStorage_t global_mat; //stores non-zero interaction between all dofs in a hybrid csr-coo format
+
+		using QuadElem_t = typename TrialDOF_t::QuadElem_t::NonPeriodicType;
+		static_assert(std::same_as<typename TrialDOF_t::QuadElem_t::NonPeriodicType, typename TestDOF_t::QuadElem_t::NonPeriodicType>,
+			"BilinearForm - The test and trial dofs must have compatible quadrature elements.");
+
 		
+		//define various constructors based symmetry
+		//to avoid constructor bloat, call set_mat() to link to the global matrix storage if needed.
+		BilinearForm(const TestHandler_t& handler)
+			requires (IS_SYMMETRIC)
+			: test_handler(handler), trial_handler(handler) {
+				assert(&test_handler.mesh == &trial_handler.mesh); //both handlers must be defined on the same mesh.
+			}
+		
+		BilinearForm(const TestHandler_t& test_handler, const TrialHandler_t& trial_handler) 
+			requires (!IS_SYMMETRIC)
+			:test_handler(test_handler), trial_handler(trial_handler) {
+				assert(&test_handler.mesh == &trial_handler.mesh); //both handlers must be defined on the same mesh.
+			}
+		
+		const TestHandler_t&		test_handler;	//link to handler for the test dofs
+		const TrialHandler_t&		trial_handler;	//link to handler for the trial dofs
+		std::vector<double>      	loc_m_v; 		//local matrix values (n_test by m_trial)
+		std::span<const TestDOF_t>  test_dofs;		//local test basis functions (row dofs) (note a span is non-owning)
+		std::span<const TrialDOF_t> trial_dofs; 	//local trial basis functions (column dofs)
+
+		//stores non-zero interaction between all dofs in a hybrid csr-coo format
+		//use a non-owning pointer so that different bilinear forms can be created per-thread
+		//synchronization of the global scatter should be handled by element coloring
+		MatStorage_t* global_mat = nullptr;
+		inline void set_mat(MatStorage_t& coo) requires ScatterActionType<ActionType> {global_mat = &coo;}
+
+		//compute the action of the global matrix on x as y (y=Mx or y=M^t*x)
+		std::span<const double> vec_x;
+		std::span<double>		vec_y;
+		
+		inline void set_vecs(Eigen::VectorXd& y, const Eigen::VectorXd& x) requires MatVecActionType<ActionType> {
+			vec_x = as_span(x);
+			vec_y = as_span(y);
+		}
+
+		//adaptors to Eigen TODO: move to separate eigen compatiblity header?
+		static std::span<double> 		as_span(Eigen::VectorXd& v) {return {v.data(), static_cast<size_t>(v.size())};}
+		static std::span<const double> 	as_span(const Eigen::VectorXd& v) {return {v.data(), static_cast<size_t>(v.size())};}
+
 		uint64_t n_test, m_trial;
 
 		void set_basis(const std::vector<TestDOF_t>& test_dofs_, const std::vector<TrialDOF_t>& trial_dofs_) requires (!IS_SYMMETRIC) {
 			trial_dofs = trial_dofs_;
 			test_dofs  = test_dofs_;
-			n_test  = test_dofs.size();
-			m_trial = trial_dofs.size();
+			n_test     = test_dofs.size();
+			m_trial    = trial_dofs.size();
 			loc_m_v.resize(n_test*m_trial, 0.0);
 		}
 
 		void set_basis(const std::vector<TestDOF_t>& test_dofs_, const std::vector<TrialDOF_t>& trial_dofs_) requires (IS_SYMMETRIC) {
 			trial_dofs = trial_dofs_;
-			test_dofs = trial_dofs_;
-			m_trial = trial_dofs.size();
-			n_test  = m_trial;
+			test_dofs  = trial_dofs_;
+			m_trial    = trial_dofs.size();
+			n_test     = m_trial;
 			loc_m_v.resize(n_test*m_trial, 0.0);
 		}
 
@@ -112,11 +161,12 @@ namespace GV
 			return loc_m_v[j + i*m_trial]; //row-major is better for BC setting
 		}
 
-		void scatter() {
+		void scatter() requires ScatterActionType<ActionType> {
+			if (global_mat==nullptr) {throw std::runtime_error("BilinearForm::to_eigen_csr - called with no global matrix (nullptr)");}
 			//add the results of the local matrix to the global matrix
 			//preserves sorted and accumulated
 			for (uint64_t i=0; i<n_test; ++i) {
-				MatRow_t& row = global_mat.get_row(test_dofs[i]);
+				MatRow_t& row = global_mat->get_row(test_dofs[i]);
 				row.reserve(row.size()+m_trial);
 				for (uint64_t j=0; j<m_trial; ++j) {
 					row.emplace_back(trial_dofs[j], local_mat(i,j));
@@ -125,8 +175,54 @@ namespace GV
 			}
 		}
 
-		inline auto to_eigen_csr(const std::vector<TestDOF_t>& test_dofs_, const std::vector<TrialDOF_t>& trial_dofs_) const {
-			return global_mat.to_eigen_csr(test_dofs_, trial_dofs_);
+		void scatter() requires MatVecActionType<ActionType> {
+			assert(!vec_x.empty());
+			assert(!vec_y.empty());
+
+			if constexpr (ActionType::tr) {
+				assert(vec_x.size() == test_handler.n_dofs());
+				assert(vec_y.size() == trial_handler.n_dofs());
+			}
+			else {
+				assert(vec_y.size() == test_handler.n_dofs());
+				assert(vec_x.size() == trial_handler.n_dofs());
+			}
+
+			//map the current dofs to the global numbers in a local cache
+			std::vector<int> test_indices(n_test), trial_indices(m_trial);
+			for (uint64_t n=0; n<n_test; ++n)  {test_indices[n]  = test_handler.compressed_index(test_dofs[n]);}
+			for (uint64_t m=0; m<m_trial; ++m) {trial_indices[m] = trial_handler.compressed_index(trial_dofs[m]);}
+
+			//compute the local contribution to the product
+			if constexpr (!ActionType::tr) {
+				for (uint64_t n=0; n<n_test; ++n) {
+					const int N = test_indices[n];
+					assert(N>=0);
+					for (uint64_t m=0; m<m_trial; ++m) {
+						const int M = trial_indices[m];
+						assert(M>=0);
+						vec_y[N] += local_mat(n,m)*vec_x[M];
+					}
+				}
+			}
+			else {
+				for (uint64_t m=0; m<m_trial; ++m) {
+					const int M = trial_indices[m];
+					assert(M>=0);
+					for (uint64_t n=0; n<n_test; ++n) {
+						const int N = test_indices[n];
+						assert(N>=0);
+						vec_y[M] += local_mat(n,m)*vec_x[N];
+					}
+				}
+			}
+		}
+
+		//TODO: because the global storage was moved out of this class, this might be unnecessary
+		inline auto to_eigen_csr(const std::vector<TestDOF_t>& test_dofs_, const std::vector<TrialDOF_t>& trial_dofs_) const 
+			requires ScatterActionType<ActionType> {
+			if (global_mat==nullptr) {throw std::runtime_error("BilinearForm::to_eigen_csr - called with no global matrix (nullptr)");}
+			return global_mat->to_eigen_csr(test_dofs_, trial_dofs_);
 		}
 
 		//for weighted forms, it is convenient to evaluate in the mesh coordinates
@@ -140,6 +236,7 @@ namespace GV
 			const std::array<double,N> Y,
 			const std::array<double,N> Z) const 
 		{
+			const Mesh_t& mesh = test_handler.mesh;
 			const auto el   = static_cast<typename Mesh_t::VoxelElement>(spt);
 			const auto low  = mesh.ref2geo(el.vertex(0));
 			const auto high = mesh.ref2geo(el.vertex(7));

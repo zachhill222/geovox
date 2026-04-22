@@ -31,10 +31,10 @@ namespace GV
 		using Point_t     = Point<3,double>;
 
 		using DOF_t       = VoxelQ1<Vert_t>;
-		using Handler_t   = typename BASE::template DofHandler_T<DOF_t>;
+		using Handler_t   = DofHandlerCharms<Mesh_t,DOF_t>;
 		using BCHandler_t = BCHandler<DOF_t>; 
 
-		using StiffForm   = typename BASE::template SymmetricH1_T<DOF_t>;
+		using StiffForm   = SymmetricH1<Handler_t>;
 
 		struct RHSForm : public LinearL2<Mesh_t,DOF_t,RHSForm>
 		{
@@ -62,6 +62,8 @@ namespace GV
 		StiffForm   	stiff_form;
 		RHSForm     	rhs_form;
 		
+		typename StiffForm::MatStorage_t stiff_mat_coo;
+
 		SpMat_t A;
 		Vec_t	solution, rhs;
 
@@ -70,7 +72,9 @@ namespace GV
 			dofhandler{mesh},
 			bchandler{},
 			stiff_form{mesh},
-			rhs_form{mesh} {}
+			rhs_form{mesh} {
+				stiff_form.set_mat(stiff_mat_coo);
+			}
 
 		//initialize/reset problem to the specified depth of the mesh
 		//the mesh will be in a conformal state after this
@@ -78,8 +82,8 @@ namespace GV
 			LogTime timer{"PoissonQ1::set_depth"};
 			mesh.set_depth(dd);
 			dofhandler.set_depth(dd);
-			dofhandler.save_dof_list();
-			assert(dofhandler.last_compressed_dofs().size() == dofhandler.n_dofs() );
+			dofhandler.compress_dof_numbers();
+			assert(dofhandler.curr_compressed_dofs().size() == dofhandler.n_dofs() );
 		}
 
 		void integrate() {
@@ -102,7 +106,7 @@ namespace GV
 
 		void build_matrices() {
 			LogTime timer{"PoissonQ1::build_matrices"};
-			const auto& dofs = dofhandler.last_compressed_dofs();
+			const auto& dofs = dofhandler.curr_compressed_dofs();
 
 			#ifdef _OPENMP
 			omp_set_max_active_levels(2);
@@ -134,7 +138,7 @@ namespace GV
 		//apply BC to A and the rhs
 		void apply_dirichlet() {
 			LogTime timer{"PoissonQ1::apply_dirichlet"};
-			bchandler.apply(A,rhs,dofhandler.last_compressed_dofs());
+			bchandler.apply(A,rhs,dofhandler.curr_compressed_dofs());
 		}
 
 		void solve() {
