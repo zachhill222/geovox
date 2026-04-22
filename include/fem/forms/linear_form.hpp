@@ -1,9 +1,10 @@
 #pragma once
 
 #include "fem/numerics/csr_storage.hpp"
-#include "util/log_time.hpp"
+#include "fem/forms/form_actions.hpp"
 
-#include <Eigen/Core>
+#include "util/log_time.hpp"
+#include "util/compatibility.hpp"
 
 #include <vector>
 #include <span>
@@ -40,44 +41,63 @@ namespace GV
 	//additionally, based on boundary conditions, the bilinear form may be responsible for applying boundary condions to the
 	//local matrix after it is assembled by the kernel (with 'natural' BC).
 	//for better convenience when applying BC as a post processing step, the full local matrix is stored, even in the symmetric case.
-	template<typename Mesh_type, typename TestDOF_type>			 
+	template<typename TestHandler_type, typename Action_type=ScatterAction>	 
 	struct LinearForm {
-		using TestDOF_t  = TestDOF_type;
-		using Mesh_t     = Mesh_type;
-		using QuadElem_t = typename TestDOF_t::QuadElem_t::NonPeriodicType;
-		
-		LinearForm(const Mesh_t& mesh) : mesh(mesh) {}
+		using TestDOF_t    = typename TestHandler_type::DOF_t;
+		using Mesh_t       = typename TestHandler_type::Mesh_t;
+		using QuadElem_t   = typename TestDOF_t::QuadElem_t::NonPeriodicType;
+		using VecStorage_t = std::unordered_map<TestDOF_t, double, typename TestDOF_t::Hash>;
 
-		const Mesh_t& 				mesh;       //link to mesh to project reference quadrature points to geometric points for evaluating weights
+		LinearForm(const TestHandler_type& handler) : handler(handler) {}
+
+		const TestHandler_type& 	handler;    //link to the dof handler
 		std::vector<double>      	loc_b_v; 	//local vector values (n_test)
 		std::span<const TestDOF_t>  test_dofs;	//local test basis functions (row dofs) (note a span is non-owning)
 
-		using VecStorage_t = std::unordered_map<TestDOF_t, double, typename TestDOF_t::Hash>;
-		VecStorage_t global_vec; //stores non-zero interaction between all dofs in a hybrid csr-coo format
 		
-		uint64_t n_test;
+		//store contributions of global dofs
+		VecStorage_t* global_vec = nullptr;
+		inline void set_storage(VecStorage_t& vec) requires ScatterActionType<Action_type> {global_vec = &vec;}
+		
+		//compute the action and store the result in a vector
+		std::span<double> vec;
+		template<typename Container_t>
+		inline void set_vec(Container_t& v) requires DotActionType<Action_type> {vec = as_span(v);}
 
-		void set_basis(const std::vector<TestDOF_t>& dofs) {
-			test_dofs = dofs;
+		uint64_t n_test;
+		template<typename Container_t> requires std::same_as<typename Container_t::value_type, TestDOF_t>
+		void set_basis(const Container_t& dofs) {
+			test_dofs = as_span(dofs);
 			n_test    = dofs.size();
 			loc_b_v.assign(n_test, 0.0);
 		}
 
-		void scatter() {
+		void scatter() requires ScatterActionType<Action_type> {
+			if (global_vec==nullptr) {throw std::runtime_error("LinearForm::scatter - called with no global vector (nullptr)");}
 			for (size_t i=0; i<loc_b_v.size(); ++i) {
-				global_vec[test_dofs[i]] += loc_b_v[i];
+				(*global_vec)[test_dofs[i]] += loc_b_v[i];
+			}
+		}
+
+		void scatter() requires DotActionType<Action_type> {
+			assert(!vec.empty());
+
+			for (size_t i=0; i<n_test; ++i) {
+				const auto N = handler.compressed_index(test_dofs[i]);
+				assert(N>=0);
+				vec[N] += loc_b_v[i];
 			}
 		}
 
 		inline double loc_val(const uint64_t i) const {assert(i<loc_b_v.size()); return loc_b_v[i];}
 		inline double& loc_val(const uint64_t i) {assert(i<loc_b_v.size()); return loc_b_v[i];}
 
-		Eigen::VectorXd to_eigen_Xd(const std::vector<TestDOF_t>& dofs) const {
+		Eigen::VectorXd to_eigen_Xd(const std::vector<TestDOF_t>& dofs) const requires ScatterActionType<Action_type> {
 			Eigen::VectorXd result(dofs.size());
 			for (size_t i=0; i<dofs.size(); ++i) {
 				const TestDOF_t dof = dofs[i];
-				auto it = global_vec.find(dof);
-				result[i] = (it!=global_vec.end()) ? it->second : 0.0;
+				auto it = global_vec->find(dof);
+				result[i] = (it!=global_vec->end()) ? it->second : 0.0;
 			}
 			return result;
 		}
@@ -93,6 +113,8 @@ namespace GV
 			const std::array<double,N> Y,
 			const std::array<double,N> Z) const 
 		{
+			const Mesh_t& mesh = handler.mesh;
+
 			const auto el   = static_cast<typename Mesh_t::VoxelElement>(spt);
 			const auto low  = mesh.ref2geo(el.vertex(0));
 			const auto high = mesh.ref2geo(el.vertex(7));

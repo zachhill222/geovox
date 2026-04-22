@@ -1,12 +1,13 @@
 #pragma once
 
 #include "fem/numerics/csr_storage.hpp"
+#include "fem/forms/form_actions.hpp"
+
 #include "util/log_time.hpp"
+#include "util/compatibility.hpp"
 
 #include<vector>
 #include<span>
-
-#include<Eigen/SparseCore>
 
 namespace GV
 {
@@ -47,17 +48,7 @@ namespace GV
 	//For an octree voxel mesh, this depends only on the depth of the quadrature element and the dimensions of the domain.
 
 
-	//we may only wish to compute the action of a bilinear form against a specific vector (i.e., compute y=M*x without assembling M)
-	//these types mark which action the bilinear form should take when scattering. these actions also provide some utility that is only
-	//required with that action type (e.g., storing global values)
-	struct ScatterAction {}; //scatter the local matrix to the global so that M can be assembled
-	template<typename T>
-	concept ScatterActionType = std::same_as<T,ScatterAction>;
-
-	template<bool TRANSPOSE=false>
-	struct MatVecAction {static constexpr bool tr = TRANSPOSE;}; //scatter the local matrix to compute M*x or M^t * x without assembling M
-	template<typename T>
-	concept MatVecActionType = std::same_as<T,MatVecAction<true>> || std::same_as<T,MatVecAction<false>>;
+	
 
 	//information required for each evaluation method.
 	//bilinear forms will be constructed and passed to the kernel. the kernel will handle dispatching evaluations
@@ -69,7 +60,7 @@ namespace GV
 	template<typename 	TrialHandler_type,
 			 typename 	TestHandler_type,
 			 bool 		IS_SYMMETRIC_=false,
-			 typename 	ActionType = ScatterAction>
+			 typename 	Action_type = ScatterAction>
 	struct BilinearForm {
 		using Mesh_t         = typename TestHandler_type::Mesh_t;
 		using TestHandler_t  = TestHandler_type;
@@ -93,7 +84,7 @@ namespace GV
 
 		
 		//define various constructors based symmetry
-		//to avoid constructor bloat, call set_mat() to link to the global matrix storage if needed.
+		//to avoid constructor bloat, call set_storage() to link to the global matrix storage if needed.
 		BilinearForm(const TestHandler_t& handler)
 			requires (IS_SYMMETRIC)
 			: test_handler(handler), trial_handler(handler) {
@@ -116,34 +107,40 @@ namespace GV
 		//use a non-owning pointer so that different bilinear forms can be created per-thread
 		//synchronization of the global scatter should be handled by element coloring
 		MatStorage_t* global_mat = nullptr;
-		inline void set_mat(MatStorage_t& coo) requires ScatterActionType<ActionType> {global_mat = &coo;}
+		inline void set_storage(MatStorage_t& coo) requires ScatterActionType<Action_type> {global_mat = &coo;}
 
 		//compute the action of the global matrix on x as y (y=Mx or y=M^t*x)
 		std::span<const double> vec_x;
 		std::span<double>		vec_y;
 		
-		inline void set_vecs(Eigen::VectorXd& y, const Eigen::VectorXd& x) requires MatVecActionType<ActionType> {
+		//conversion of vectors to a span is handled in util/compatibility.hpp
+		//add as_span functions if we need a library other than Eigen.
+		template<typename ContainerA_t, typename ContainerB_t>
+		inline void set_vecs(ContainerA_t& y, const ContainerB_t& x) requires MatVecActionType<Action_type> {
 			vec_x = as_span(x);
 			vec_y = as_span(y);
 		}
 
-		//adaptors to Eigen TODO: move to separate eigen compatiblity header?
-		static std::span<double> 		as_span(Eigen::VectorXd& v) {return {v.data(), static_cast<size_t>(v.size())};}
-		static std::span<const double> 	as_span(const Eigen::VectorXd& v) {return {v.data(), static_cast<size_t>(v.size())};}
-
 		uint64_t n_test, m_trial;
 
-		void set_basis(const std::vector<TestDOF_t>& test_dofs_, const std::vector<TrialDOF_t>& trial_dofs_) requires (!IS_SYMMETRIC) {
-			trial_dofs = trial_dofs_;
-			test_dofs  = test_dofs_;
+		template<typename ContainerA_t, typename ContainerB_t>
+			requires (!IS_SYMMETRIC) &&
+					 std::same_as<typename ContainerA_t::value_type, TestDOF_t> &&
+					 std::same_as<typename ContainerB_t::value_type, TrialDOF_t>
+		void set_basis(const ContainerA_t& test_dofs_, const ContainerB_t& trial_dofs_) {
+			trial_dofs = as_span(trial_dofs_);
+			test_dofs  = as_span(test_dofs_);
 			n_test     = test_dofs.size();
 			m_trial    = trial_dofs.size();
 			loc_m_v.resize(n_test*m_trial, 0.0);
 		}
 
-		void set_basis(const std::vector<TestDOF_t>& test_dofs_, const std::vector<TrialDOF_t>& trial_dofs_) requires (IS_SYMMETRIC) {
-			trial_dofs = trial_dofs_;
-			test_dofs  = trial_dofs_;
+		template<typename ContainerA_t>
+			requires (IS_SYMMETRIC) &&
+					 std::same_as<typename ContainerA_t::value_type, TestDOF_t>
+		void set_basis(const ContainerA_t& test_dofs_, const ContainerA_t& trial_dofs_) {
+			trial_dofs = as_span(test_dofs_);
+			test_dofs  = as_span(test_dofs_);
 			m_trial    = trial_dofs.size();
 			n_test     = m_trial;
 			loc_m_v.resize(n_test*m_trial, 0.0);
@@ -161,8 +158,8 @@ namespace GV
 			return loc_m_v[j + i*m_trial]; //row-major is better for BC setting
 		}
 
-		void scatter() requires ScatterActionType<ActionType> {
-			if (global_mat==nullptr) {throw std::runtime_error("BilinearForm::to_eigen_csr - called with no global matrix (nullptr)");}
+		void scatter() requires ScatterActionType<Action_type> {
+			if (global_mat==nullptr) {throw std::runtime_error("BilinearForm::scatter - called with no global matrix (nullptr)");}
 			//add the results of the local matrix to the global matrix
 			//preserves sorted and accumulated
 			for (uint64_t i=0; i<n_test; ++i) {
@@ -175,11 +172,11 @@ namespace GV
 			}
 		}
 
-		void scatter() requires MatVecActionType<ActionType> {
+		void scatter() requires MatVecActionType<Action_type> {
 			assert(!vec_x.empty());
 			assert(!vec_y.empty());
 
-			if constexpr (ActionType::tr) {
+			if constexpr (Action_type::tr) {
 				assert(vec_x.size() == test_handler.n_dofs());
 				assert(vec_y.size() == trial_handler.n_dofs());
 			}
@@ -194,7 +191,7 @@ namespace GV
 			for (uint64_t m=0; m<m_trial; ++m) {trial_indices[m] = trial_handler.compressed_index(trial_dofs[m]);}
 
 			//compute the local contribution to the product
-			if constexpr (!ActionType::tr) {
+			if constexpr (!Action_type::tr) {
 				for (uint64_t n=0; n<n_test; ++n) {
 					const int N = test_indices[n];
 					assert(N>=0);
@@ -220,7 +217,7 @@ namespace GV
 
 		//TODO: because the global storage was moved out of this class, this might be unnecessary
 		inline auto to_eigen_csr(const std::vector<TestDOF_t>& test_dofs_, const std::vector<TrialDOF_t>& trial_dofs_) const 
-			requires ScatterActionType<ActionType> {
+			requires ScatterActionType<Action_type> {
 			if (global_mat==nullptr) {throw std::runtime_error("BilinearForm::to_eigen_csr - called with no global matrix (nullptr)");}
 			return global_mat->to_eigen_csr(test_dofs_, trial_dofs_);
 		}

@@ -36,9 +36,9 @@ namespace GV
 
 		using StiffForm   = SymmetricH1<Handler_t>;
 
-		struct RHSForm : public LinearL2<Mesh_t,DOF_t,RHSForm>
+		struct RHSForm : public LinearL2<Handler_t,ScatterAction,RHSForm>
 		{
-			using BASE_FORM = LinearL2<Mesh_t,DOF_t,RHSForm>;
+			using BASE_FORM = LinearL2<Handler_t,ScatterAction,RHSForm>;
 			using BASE_FORM::BASE_FORM;
 		
 			template<uint64_t N>
@@ -63,6 +63,7 @@ namespace GV
 		RHSForm     	rhs_form;
 		
 		typename StiffForm::MatStorage_t stiff_mat_coo;
+		typename RHSForm::VecStorage_t rhs_storage;
 
 		SpMat_t A;
 		Vec_t	solution, rhs;
@@ -73,7 +74,8 @@ namespace GV
 			bchandler{},
 			stiff_form{mesh},
 			rhs_form{mesh} {
-				stiff_form.set_mat(stiff_mat_coo);
+				stiff_form.set_storage(stiff_mat_coo);
+				rhs_form.set_storage(rhs_storage);
 			}
 
 		//initialize/reset problem to the specified depth of the mesh
@@ -93,7 +95,7 @@ namespace GV
 			auto action = [this, &kernel](Elem_t el) {
 				const auto el_basis = dofhandler.basis_active(el);
 				kernel.set_element(el);
-				kernel.template B_set_basis<0>(el_basis, el_basis);
+				kernel.template B_set_basis<0>(el_basis,el_basis);
 				kernel.template B_compute_scatter<0>();
 
 				kernel.template L_set_basis<0>(el_basis);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "fem/forms/linear_form.hpp"
+#include "fem/forms/form_actions.hpp"
 
 #include <array>
 #include <cstdint>
@@ -12,15 +13,14 @@
 namespace GV
 {
 	//A symmetric mass kernel for bilinear forms a(psi,phi) = integral_D phi*psi
-	template<typename Mesh_type, typename DOF_type, typename DERIVED=void>
-	struct LinearL2 : public LinearForm<Mesh_type,DOF_type>
+	template<typename DofHandler_type, typename Action_type=ScatterAction, typename DERIVED=void>
+	struct LinearL2 : public LinearForm<DofHandler_type, Action_type>
 	{
-		using BASE       = LinearForm<Mesh_type,DOF_type>;
+		using BASE       = LinearForm<DofHandler_type, Action_type>;
 		using QuadElem_t = typename BASE::QuadElem_t;
-		using DOF_t      = DOF_type;
-		using Mesh_t     = Mesh_type;
+		using DOF_t      = typename BASE::TestDOF_t;
 
-		LinearL2(const Mesh_t& mesh) : BASE(mesh) {}
+		using BASE::BASE;
 
 		//only provides the evaluation
 		//should be vectorized with simd

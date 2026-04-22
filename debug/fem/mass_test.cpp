@@ -56,11 +56,11 @@ int main(int argc, char* argv[]) {
 	//bilinear forms
 	MassKernel mass_bl(dofhandler);
 	typename MassKernel::MatStorage_t mass_global_coo;
-	mass_bl.set_mat(mass_global_coo);
+	mass_bl.set_storage(mass_global_coo);
 
 	BiStiff_t stiff_bl(dofhandler);
 	typename BiStiff_t::MatStorage_t stiff_global_coo;
-	stiff_bl.set_mat(stiff_global_coo);
+	stiff_bl.set_storage(stiff_global_coo);
 
 	//kernel
 	const auto diag = mesh.high - mesh.low;
