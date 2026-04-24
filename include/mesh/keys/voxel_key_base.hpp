@@ -25,14 +25,13 @@ namespace GV
 	//the operator[] has been overloaded to access any single free bit
 	//the operator()(i,j) has been overloaded to access the free bits [i,j) cast to a uint64_t.
 	
-	//RF_W: requested free width - used by outside classes, not touched by this or inherited classes
-	//      if the index width is small, this may be increased to fill space. If that is undesirable, set O_W
-	//      to absorb the rest. the final number of free bits F_W will always be at least as large as R_W.
 	//ON_W: other width - used by inherited classes, not touched by this or outside classes. NOT USED for comparison.
 	//OC_W: other width - used by inherited classes, not touched by this or outside classes. IS USED for comparisoin.
-	//D_W : depth width - used by this and inherited classes, not touched by outside classes
 	//I_W : index width - used by this and inherited classes, not touched by outside classes
-	template<int RF_W, int ON_W_, int OC_W_, int I_W_> requires (RF_W + ON_W_ + OC_W_ + 3*I_W_ < 64)
+	//
+	//The indices for I,J,K are split into a single color bit and a remainder block (rem | clr)
+	//the three color bits are used as the lsb of _data_ for morton coloring at a single depth
+	template<int ON_W_, int OC_W_, int I_W_> requires (ON_W_ + OC_W_ + 3*I_W_ < 64)
 	struct VoxelKey
 	{
 		//compute the required number of bits to represent the number of vertices with the
@@ -43,51 +42,48 @@ namespace GV
 		static constexpr uint64_t D_W       = std::bit_width(MAX_DEPTH); //number of bits required to represent the max depth
 		static constexpr uint64_t ON_W      = ON_W_;
 		static constexpr uint64_t OC_W      = OC_W_;
+		static constexpr uint64_t C_W       = 3; //color width
 
 		//absorb any extra bits into the free bits
 		static constexpr uint64_t F_W = 64 - (ON_W + OC_W + D_W + 3*I_W_);
-		static_assert(RF_W <= F_W); //make sure we can provide the required number of free bits
-
-		//I, J, K all have the same width. define for convenience
-		static constexpr uint64_t I_W = I_W_;
-		static constexpr uint64_t J_W = I_W; //index j width
-		static constexpr uint64_t K_W = I_W; //index k width
+		
+		//width of remainder (non-color) index fields
+		static constexpr uint64_t I_W = I_W_-1;
+		static constexpr uint64_t J_W = I_W_-1; //index j width
+		static constexpr uint64_t K_W = I_W_-1; //index k width
 
 		//define offsets (data start)
-		static constexpr uint64_t F_S  = 0;         	//free start
-		static constexpr uint64_t ON_S = F_W;			//other (no compare) start
-		static constexpr uint64_t OC_S = ON_S + ON_W;	//other (compare) start
-		static constexpr uint64_t I_S  = OC_S + OC_W;	//index i start
+		static constexpr uint64_t C_S  = 0;				//color start
+		static constexpr uint64_t I_S  = 3;				//index i start
 		static constexpr uint64_t J_S  = I_S  + I_W;	//index j start
 		static constexpr uint64_t K_S  = J_S  + J_W;	//index k start
-		static constexpr uint64_t D_S  = K_S  + K_W;	//depth start
-		static_assert(D_S+D_W == 64, "VoxelKey: incorrect field starts");
+		static constexpr uint64_t OC_S = K_S  + K_W; 	//other (compare) start (e.g. axis normal)
+		static constexpr uint64_t D_S  = OC_S + OC_W;	//depth start
+		static constexpr uint64_t ON_S = D_S  + D_W;	//other (no-compare) start (e.g. periodic conditions)
+		static constexpr uint64_t F_S  = ON_S + ON_W;	//free bit start
+		static_assert(F_S+F_W == 64, "VoxelKey: incorrect field starts");
 
 		//define masks
-		static constexpr uint64_t F_M  = ((uint64_t{1} << F_W)  - 1) << F_S;  //free mask
-		static constexpr uint64_t ON_M = ((uint64_t{1} << ON_W) - 1) << ON_S; //other (no-compare) mask
+		
+		static constexpr uint64_t C_M  = 7;									  //color mask
+		static constexpr uint64_t I_M  = ((uint64_t{1} << I_W)  - 1) << I_S;  //index i mask (non-color bits)
+		static constexpr uint64_t J_M  = ((uint64_t{1} << J_W)  - 1) << J_S;  //index j mask (non-color bits)
+		static constexpr uint64_t K_M  = ((uint64_t{1} << K_W)  - 1) << K_S;  //index k mask (non-color bits)
 		static constexpr uint64_t OC_M = ((uint64_t{1} << OC_W) - 1) << OC_S; //other (compare) mask
 		static constexpr uint64_t D_M  = ((uint64_t{1} << D_W)  - 1) << D_S;  //depth mask
-		static constexpr uint64_t I_M  = ((uint64_t{1} << I_W)  - 1) << I_S;  //index i mask
-		static constexpr uint64_t J_M  = ((uint64_t{1} << J_W)  - 1) << J_S;  //index j mask
-		static constexpr uint64_t K_M  = ((uint64_t{1} << K_W)  - 1) << K_S;  //index k mask
+		static constexpr uint64_t ON_M = ((uint64_t{1} << ON_W) - 1) << ON_S; //other (no-compare) mask
+		static constexpr uint64_t F_M  = ((uint64_t{1} << F_W)  - 1) << F_S;  //free mask
 
 		//catch off-by-one shifting/width errors. each mask must be disjoint cover all 64 bits
-		static_assert( (F_M | ON_M | OC_M | D_M | I_M | J_M | K_M) == (uint64_t) -1, "VoxelKey: incorrect field masks");
-		static_assert( (F_M ^ ON_M ^ OC_M ^ D_M ^ I_M ^ J_M ^ K_M) == (uint64_t) -1, "VoxelKey: incorrect field masks");
-
-		//even though both 'other' fields are independent, it is more convenient treat them together sometimes
-		static constexpr uint64_t O_W = ON_W + OC_W;
-		static constexpr uint64_t O_S = ON_S < OC_S ? ON_S : OC_S; //both other fields must be adjacent
-		static constexpr uint64_t O_M = OC_M | ON_M;
-		static_assert( O_M == ((uint64_t{1} << O_W) -1) << O_S, "VoxelKey: 'other' fields must be adjacent");
+		static_assert( (C_M | F_M | ON_M | OC_M | D_M | I_M | J_M | K_M) == (uint64_t) -1, "VoxelKey: incorrect field masks");
+		static_assert( (C_M ^ F_M ^ ON_M ^ OC_M ^ D_M ^ I_M ^ J_M ^ K_M) == (uint64_t) -1, "VoxelKey: incorrect field masks");
 
 		//convenient key to return
 		static constexpr uint64_t DOES_NOT_EXIST = uint64_t(-1);
 
 		//other useful masks
-		static constexpr uint64_t COMPARE_MASK = OC_M | D_M | I_M | J_M | K_M;
-		static constexpr uint64_t INDEX_MASK = I_M | J_M | K_M;
+		static constexpr uint64_t COMPARE_MASK = OC_M | D_M | I_M | J_M | K_M | C_M;
+		static constexpr uint64_t INDEX_MASK = I_M | J_M | K_M | C_M;
 		static constexpr uint64_t DEPTH_INDEX_MASK = D_M | INDEX_MASK;
 
 		//store the bits
@@ -96,13 +92,14 @@ namespace GV
 		//define constructors
 		explicit constexpr VoxelKey() : _data_{DOES_NOT_EXIST} {}
 		explicit constexpr VoxelKey(const uint64_t data) : _data_{data} {}
-		constexpr VoxelKey( const uint64_t ff,
+		constexpr VoxelKey( const uint64_t cc,
+							const uint64_t ii, //note these are the non-color bits only
+							const uint64_t jj, //note these are the non-color bits only
+							const uint64_t kk, //note these are the non-color bits only
+							const uint64_t oc, 
+							const uint64_t dd, 
 							const uint64_t on,
-							const uint64_t oc,
-							const uint64_t dd,
-							const uint64_t ii, 
-							const uint64_t jj, 
-							const uint64_t kk) :
+							const uint64_t ff) :
 			_data_{
 				//shift each field into place and mask
 				((ff<<F_S)  & F_M)  |
@@ -111,19 +108,27 @@ namespace GV
 				((dd<<D_S)  & D_M)  |
 				((ii<<I_S)  & I_M)  |
 				((jj<<J_S)  & J_M)  |
-				((kk<<K_S)  & K_M)
+				((kk<<K_S)  & K_M)	|
+				((cc<<C_S) 	& C_M)
 			}
 		{}
 
 		//access each field
-		inline constexpr uint64_t free()    const {return (_data_&F_M)>>F_S;}
-		inline constexpr uint64_t other()   const {return (_data_&O_M)>>O_S;} //both 'other' fields
+		inline constexpr uint64_t color()   const {return (_data_&C_M);};
+		inline constexpr uint64_t free()    const {return (_data_&F_M) >>F_S;}
 		inline constexpr uint64_t other_n() const {return (_data_&ON_M)>>ON_S;}
 		inline constexpr uint64_t other_c() const {return (_data_&OC_M)>>OC_S;}
-		inline constexpr uint64_t depth()   const {return (_data_&D_M)>>D_S;}
-		inline constexpr uint64_t i() 	    const {return (_data_&I_M)>>I_S;}
-		inline constexpr uint64_t j() 	    const {return (_data_&J_M)>>J_S;}
-		inline constexpr uint64_t k() 	    const {return (_data_&K_M)>>K_S;}
+		inline constexpr uint64_t depth()   const {return (_data_&D_M) >>D_S;}
+		
+		inline constexpr uint64_t i() 	    const {
+			return ((_data_&I_M) >> (I_S-1)) | (_data_&1);
+		}
+		inline constexpr uint64_t j() 	    const {
+			return ((_data_&J_M) >> (J_S-1)) | ((_data_&2)>>1);
+		}
+		inline constexpr uint64_t k() 	    const {
+			return ((_data_&K_M) >> (K_S-1)) | ((_data_&4)>>2);
+		}
 
 		//access the un-shifted essential/free bits (good for comparison below)
 		constexpr uint64_t essential_bits() const {return _data_&~F_M;}
@@ -138,10 +143,6 @@ namespace GV
 			_data_ &= ~F_M;
 			_data_ |= ((bt<<F_S)&F_M);
 		}
-		constexpr void set_other(const uint64_t bt) {
-			_data_ &= ~O_M;
-			_data_ |= ((bt<<O_S)&O_M);
-		}
 		constexpr void set_on(const uint64_t bt) {
 			_data_ &= ~ON_M;
 			_data_ |= ((bt<<ON_S)&ON_M);
@@ -154,17 +155,29 @@ namespace GV
 			_data_ &= ~D_M;
 			_data_ |= ((bt<<D_S)&D_M);
 		}
-		constexpr void set_i(const uint64_t bt) {
-			_data_ &= ~I_M;
+		constexpr void set_i(uint64_t bt) {
+			//get the color and non-color bits
+			const uint64_t i0 = bt&1;
+			bt>>=1;
+			_data_ &= ~(I_M|1); //clear i bits (all)
 			_data_ |= ((bt<<I_S)&I_M);
+			_data_ |= i0;
 		}
-		constexpr void set_j(const uint64_t bt) {
-			_data_ &= ~J_M;
+		constexpr void set_j(uint64_t bt) {
+			//get the color and non-color bits
+			const uint64_t j0 = bt&1;
+			bt>>=1;
+			_data_ &= ~(J_M|2); //clear j bits (all)
 			_data_ |= ((bt<<J_S)&J_M);
+			_data_ |= (j0<<1);
 		}
-		constexpr void set_k(const uint64_t bt) {
-			_data_ &= ~K_M;
+		constexpr void set_k(uint64_t bt) {
+			//get the color and non-color bits
+			const uint64_t k0 = bt&1;
+			bt>>=1;
+			_data_ &= ~(K_M|4); //clear k bits (all)
 			_data_ |= ((bt<<K_S)&K_M);
+			_data_ |= (k0<<2);
 		}
 
 
@@ -269,41 +282,50 @@ namespace GV
 	};
 
 
-	template<int RF_W, int ON_W, int OC_W, int I_W> requires (RF_W + ON_W + OC_W + 3*I_W < 64)
-	std::ostream& operator<<(std::ostream& os, const VoxelKey<RF_W, ON_W, OC_W, I_W> k) {
-		std::bitset<64> bits(k._data_);
+	template<int ON_W, int OC_W, int I_W> requires (ON_W + OC_W + 3*I_W < 64)
+	std::ostream& operator<<(std::ostream& os, const VoxelKey<ON_W, OC_W, I_W> k) {
+	    using K = VoxelKey<ON_W, OC_W, I_W>;
+	    std::bitset<64> bits(k._data_);
 
-		//print partitioned bits
-		os << "F";
-		if (k.ON_W > 0) os << std::setw(k.F_W+1) << "ON";
-		if (k.OC_W > 0) os << std::setw(k.F_W+1) << "OC";
-		if (k.O_W == 0) os << std::setw(k.F_W+1) << "D";
-		else os << std::setw(k.O_W+1) << "D";
-		os << std::setw(k.D_W+1) << "I";
-		os << std::setw(k.I_W+1) << "J";
-		os << std::setw(k.J_W+1) << "K";
-		os << "\n";
+	    // print field labels MSB->LSB, skipping zero-width fields
+	    os << std::setw(K::F_W) << "F" << " ";
+	    if constexpr (K::ON_W > 0) os << std::setw(K::ON_W) << "ON" << " ";
+	    os << std::setw(K::D_W) << "D" << " ";
+	    if constexpr (K::OC_W > 0) os << std::setw(K::OC_W) << "OC" << " ";
+	    os << std::setw(K::K_W) << "K" << " "
+	       << std::setw(K::J_W) << "J" << " "
+	       << std::setw(K::I_W) << "I" << " "
+	       << std::setw(K::C_W) << "C" << "\n";
 
-		for (int i=0; i<64; ++i) {
-			if (i!=0 and (i==k.F_S or i==k.OC_S or i==k.ON_S or i==k.D_S or i==k.I_S or i==k.J_S or i==k.K_S)) {
-				os << " ";
-			}
-			os << bits.test(i);
-			
-		}
+	    // print bits MSB->LSB with separators at non-degenerate field boundaries
+	    for (int b=63; b>=0; --b) {
+	        os << bits.test(b);
+	        const int bs = static_cast<int>(b);
+	        bool sep = bs == static_cast<int>(K::F_S)
+	                || bs == static_cast<int>(K::D_S)
+	                || bs == static_cast<int>(K::K_S)
+	                || bs == static_cast<int>(K::J_S)
+	                || bs == static_cast<int>(K::I_S)
+	                || bs == static_cast<int>(K::C_S + K::C_W);
+	        if constexpr (K::ON_W > 0) sep = sep || bs == static_cast<int>(K::ON_S);
+	        if constexpr (K::OC_W > 0) sep = sep || bs == static_cast<int>(K::OC_S);
+	        if (sep) os << " ";
+	    }
 
-		//print fields
-		os <<"\n\nraw:   " << k._data_;
-		os <<"\nfree:    " << k.free();
-		os <<"\nother_n: " << k.other_n();
-		os <<"\n(oc,d,i,j,k): (" 
-		   << k.other_c() 
-		   <<", " << k.depth() 
-		   <<", " << k.i()
-		   <<", " << k.j()
-		   <<", " << k.k()
-		   <<")\n";
-		return os;
+	    // print decoded fields
+	    os << "\n"
+	       << "\nraw:     " << k._data_
+	       << "\nfree:    " << k.free()
+	       << "\ndepth:   " << k.depth()
+	       << "\ni:       " << k.i()
+	       << "\nj:       " << k.j()
+	       << "\nk:       " << k.k()
+	       << "\ncolor:   " << k.color();
+	    if constexpr (K::ON_W > 0) os << "\nother_n: " << k.other_n();
+	    if constexpr (K::OC_W > 0) os << "\nother_c: " << k.other_c();
+	    os << "\n";
+
+	    return os;
 	}
 
 }

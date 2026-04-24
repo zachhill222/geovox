@@ -22,7 +22,7 @@ namespace GV
 
 	//the natural BCs are already incorporated into the matrix A and the periodic BCs are already incorporated
 	//into the DOFs.
-	template <typename Dof_type>
+	template<typename Dof_type>
 	struct BCHandler
 	{
 		using DOF_t    = Dof_type;

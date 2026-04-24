@@ -12,23 +12,23 @@ namespace GV
 {
 	//concepts
 	template<typename T>
-	concept VoxelElementKeyType = requires {T::I_W; T::BC_FLAG; T::MORTON;} &&
-		std::same_as<T, VoxelElementKey<T::I_W, T::BC_FLAG, T::MORTON>>;
+	concept VoxelElementKeyType = requires {T::MAX_DEPTH; T::BC_FLAG;} &&
+		std::same_as<T, VoxelElementKey<T::MAX_DEPTH, T::BC_FLAG>>;
 	
 	static_assert(VoxelElementKeyType<VoxelElementKey<>>);
 	static_assert(!VoxelElementKeyType<VoxelVertexKey<>>);
 	static_assert(!VoxelElementKeyType<VoxelFaceKey<>>);
 
 	template<typename T>
-	concept VoxelVertexKeyType = requires {T::I_W; T::BC_FLAG; T::MORTON;} &&
-		std::same_as<T, VoxelVertexKey<T::I_W, T::BC_FLAG, T::MORTON>>;
+	concept VoxelVertexKeyType = requires {T::MAX_DEPTH; T::BC_FLAG;} &&
+		std::same_as<T, VoxelVertexKey<T::MAX_DEPTH, T::BC_FLAG>>;
 	static_assert(!VoxelVertexKeyType<VoxelElementKey<>>);
 	static_assert(VoxelVertexKeyType<VoxelVertexKey<>>);
 	static_assert(!VoxelVertexKeyType<VoxelFaceKey<>>);
 
 	template<typename T>
-	concept VoxelFaceKeyType = requires {T::I_W; T::BC_FLAG; T::MORTON;} &&
-		std::same_as<T, VoxelFaceKey<T::I_W, T::BC_FLAG, T::MORTON>>;
+	concept VoxelFaceKeyType = requires {T::MAX_DEPTH; T::BC_FLAG;} &&
+		std::same_as<T, VoxelFaceKey<T::MAX_DEPTH, T::BC_FLAG>>;
 	static_assert(!VoxelFaceKeyType<VoxelElementKey<>>);
 	static_assert(!VoxelFaceKeyType<VoxelVertexKey<>>);
 	static_assert(VoxelFaceKeyType<VoxelFaceKey<>>);
@@ -45,8 +45,7 @@ namespace GV
 	//this can be helpful as DOFs may have feature keys with boundary conditions
 	//while mesh features dont
 	template<typename A, typename B>
-	concept VoxelFeatureCompatible = (A::I_W==B::I_W) && (A::MORTON==B::MORTON) &&
-		VoxelKeyType<A> && VoxelKeyType<B>;
+	concept VoxelFeatureCompatible = (A::MAX_DEPTH==B::MAX_DEPTH) && VoxelKeyType<A> && VoxelKeyType<B>;
 
 	template<typename A, typename B>
 	concept VoxelEquivFeature = VoxelFeatureCompatible<A,B> &&
@@ -63,80 +62,80 @@ namespace GV
 
 
 	/// ELEMENT IMPLEMENTATIONS
-	template<uint64_t I_W, uint64_t BC, bool MORTON>
-	inline constexpr std::array<VoxelVertexKey<I_W,BC,MORTON>,8> VoxelElementKey<I_W,BC,MORTON>::vertices() const
+	template<uint64_t MAX_DEPTH, uint64_t BC>
+	inline constexpr std::array<VoxelVertexKey<MAX_DEPTH,BC>,8> VoxelElementKey<MAX_DEPTH,BC>::vertices() const
 	{
 		const uint64_t ii=i(), jj=j(), kk=k(), dd=depth();
 		return {
-			VoxelVertexKey<I_W,BC,MORTON>{dd,ii,  jj,  kk  },
-			VoxelVertexKey<I_W,BC,MORTON>{dd,ii+1,jj,  kk  },
-			VoxelVertexKey<I_W,BC,MORTON>{dd,ii,  jj+1,kk  },
-			VoxelVertexKey<I_W,BC,MORTON>{dd,ii+1,jj+1,kk  },
-			VoxelVertexKey<I_W,BC,MORTON>{dd,ii,  jj,  kk+1},
-			VoxelVertexKey<I_W,BC,MORTON>{dd,ii+1,jj,  kk+1},
-			VoxelVertexKey<I_W,BC,MORTON>{dd,ii,  jj+1,kk+1},
-			VoxelVertexKey<I_W,BC,MORTON>{dd,ii+1,jj+1,kk+1}
+			VoxelVertexKey<MAX_DEPTH,BC>{dd,ii,  jj,  kk  },
+			VoxelVertexKey<MAX_DEPTH,BC>{dd,ii+1,jj,  kk  },
+			VoxelVertexKey<MAX_DEPTH,BC>{dd,ii,  jj+1,kk  },
+			VoxelVertexKey<MAX_DEPTH,BC>{dd,ii+1,jj+1,kk  },
+			VoxelVertexKey<MAX_DEPTH,BC>{dd,ii,  jj,  kk+1},
+			VoxelVertexKey<MAX_DEPTH,BC>{dd,ii+1,jj,  kk+1},
+			VoxelVertexKey<MAX_DEPTH,BC>{dd,ii,  jj+1,kk+1},
+			VoxelVertexKey<MAX_DEPTH,BC>{dd,ii+1,jj+1,kk+1}
 		};
 	}
 	
-	template<uint64_t I_W, uint64_t BC, bool MORTON>
-	inline constexpr std::array<VoxelFaceKey<I_W,BC,MORTON>,6> VoxelElementKey<I_W,BC,MORTON>::faces() const
+	template<uint64_t MAX_DEPTH, uint64_t BC>
+	inline constexpr std::array<VoxelFaceKey<MAX_DEPTH,BC>,6> VoxelElementKey<MAX_DEPTH,BC>::faces() const
 	{
 		const uint64_t ii=i(), jj=j(), kk=k(), dd=depth();
 		return {
-			VoxelFaceKey<I_W,BC,MORTON>{0, dd, ii  , jj  , kk  },
-			VoxelFaceKey<I_W,BC,MORTON>{1, dd, ii  , jj  , kk  },
-			VoxelFaceKey<I_W,BC,MORTON>{2, dd, ii  , jj  , kk  },
-			VoxelFaceKey<I_W,BC,MORTON>{0, dd, ii+1, jj  , kk  },
-			VoxelFaceKey<I_W,BC,MORTON>{1, dd, ii  , jj+1, kk  },
-			VoxelFaceKey<I_W,BC,MORTON>{2, dd, ii  , jj  , kk+1}
+			VoxelFaceKey<MAX_DEPTH,BC>{0, dd, ii  , jj  , kk  },
+			VoxelFaceKey<MAX_DEPTH,BC>{1, dd, ii  , jj  , kk  },
+			VoxelFaceKey<MAX_DEPTH,BC>{2, dd, ii  , jj  , kk  },
+			VoxelFaceKey<MAX_DEPTH,BC>{0, dd, ii+1, jj  , kk  },
+			VoxelFaceKey<MAX_DEPTH,BC>{1, dd, ii  , jj+1, kk  },
+			VoxelFaceKey<MAX_DEPTH,BC>{2, dd, ii  , jj  , kk+1}
 		};
 	}
 
 	/// FACE IMPLEMENTATIONS
-	template<uint64_t I_W, uint64_t BC, bool MORTON>
-	constexpr std::array<VoxelElementKey<I_W,BC,MORTON>,2> VoxelFaceKey<I_W,BC,MORTON>::elements() const
+	template<uint64_t MAX_DEPTH, uint64_t BC>
+	constexpr std::array<VoxelElementKey<MAX_DEPTH,BC>,2> VoxelFaceKey<MAX_DEPTH,BC>::elements() const
 	{
 		const uint64_t ii=i(), jj=j(), kk=k(), dd=depth(), aa=axis();
 		switch (aa) {
 		case 0: return {
-				VoxelElementKey<I_W,BC,MORTON>{dd,ii,jj,kk},
-				VoxelElementKey<I_W,BC,MORTON>{dd,ii+1,jj,kk}
+				VoxelElementKey<MAX_DEPTH,BC>{dd,ii,jj,kk},
+				VoxelElementKey<MAX_DEPTH,BC>{dd,ii+1,jj,kk}
 			};
 		case 1: return {
-				VoxelElementKey<I_W,BC,MORTON>{dd,ii,jj,kk},
-				VoxelElementKey<I_W,BC,MORTON>{dd,ii,jj+1,kk}
+				VoxelElementKey<MAX_DEPTH,BC>{dd,ii,jj,kk},
+				VoxelElementKey<MAX_DEPTH,BC>{dd,ii,jj+1,kk}
 			};
 		case 2: return {
-				VoxelElementKey<I_W,BC,MORTON>{dd,ii,jj,kk},
-				VoxelElementKey<I_W,BC,MORTON>{dd,ii,jj,kk+1}
+				VoxelElementKey<MAX_DEPTH,BC>{dd,ii,jj,kk},
+				VoxelElementKey<MAX_DEPTH,BC>{dd,ii,jj,kk+1}
 			};
 		default: return {};
 		}
 	}
 
-	template<uint64_t I_W, uint64_t BC, bool MORTON>
-	constexpr std::array<VoxelVertexKey<I_W,BC,MORTON>,4> VoxelFaceKey<I_W,BC,MORTON>::vertices() const
+	template<uint64_t MAX_DEPTH, uint64_t BC>
+	constexpr std::array<VoxelVertexKey<MAX_DEPTH,BC>,4> VoxelFaceKey<MAX_DEPTH,BC>::vertices() const
 	{
 		const uint64_t ii=i(), jj=j(), kk=k(), dd=depth(), aa=axis();
 		switch (aa) {
 		case 0: return {
-				VoxelVertexKey<I_W,BC,MORTON>{dd,ii,jj,  kk  },
-				VoxelVertexKey<I_W,BC,MORTON>{dd,ii,jj+1,kk  },
-				VoxelVertexKey<I_W,BC,MORTON>{dd,ii,jj,  kk+1},
-				VoxelVertexKey<I_W,BC,MORTON>{dd,ii,jj+1,kk+1}
+				VoxelVertexKey<MAX_DEPTH,BC>{dd,ii,jj,  kk  },
+				VoxelVertexKey<MAX_DEPTH,BC>{dd,ii,jj+1,kk  },
+				VoxelVertexKey<MAX_DEPTH,BC>{dd,ii,jj,  kk+1},
+				VoxelVertexKey<MAX_DEPTH,BC>{dd,ii,jj+1,kk+1}
 			};
 		case 1: return {
-				VoxelVertexKey<I_W,BC,MORTON>{dd,ii,  jj,kk  },
-				VoxelVertexKey<I_W,BC,MORTON>{dd,ii+1,jj,kk  },
-				VoxelVertexKey<I_W,BC,MORTON>{dd,ii,  jj,kk+1},
-				VoxelVertexKey<I_W,BC,MORTON>{dd,ii+1,jj,kk+1}
+				VoxelVertexKey<MAX_DEPTH,BC>{dd,ii,  jj,kk  },
+				VoxelVertexKey<MAX_DEPTH,BC>{dd,ii+1,jj,kk  },
+				VoxelVertexKey<MAX_DEPTH,BC>{dd,ii,  jj,kk+1},
+				VoxelVertexKey<MAX_DEPTH,BC>{dd,ii+1,jj,kk+1}
 			};
 		case 2: return {
-				VoxelVertexKey<I_W,BC,MORTON>{dd,ii,  jj,  kk},
-				VoxelVertexKey<I_W,BC,MORTON>{dd,ii+1,jj,  kk},
-				VoxelVertexKey<I_W,BC,MORTON>{dd,ii,  jj+1,kk},
-				VoxelVertexKey<I_W,BC,MORTON>{dd,ii+1,jj+1,kk}
+				VoxelVertexKey<MAX_DEPTH,BC>{dd,ii,  jj,  kk},
+				VoxelVertexKey<MAX_DEPTH,BC>{dd,ii+1,jj,  kk},
+				VoxelVertexKey<MAX_DEPTH,BC>{dd,ii,  jj+1,kk},
+				VoxelVertexKey<MAX_DEPTH,BC>{dd,ii+1,jj+1,kk}
 			};
 		default: return {};
 		}
@@ -144,8 +143,8 @@ namespace GV
 
 	
 	/// VERTEX IMPLEMENTATIONS
-	template<uint64_t I_W, uint64_t BC, bool MORTON>
-	constexpr std::array<VoxelElementKey<I_W,BC,MORTON>,8> VoxelVertexKey<I_W,BC,MORTON>::elements() const
+	template<uint64_t MAX_DEPTH, uint64_t BC>
+	constexpr std::array<VoxelElementKey<MAX_DEPTH,BC>,8> VoxelVertexKey<MAX_DEPTH,BC>::elements() const
 	{
 		const uint64_t ii=i(), jj=j(), kk=k(), dd=depth();
 
@@ -158,14 +157,14 @@ namespace GV
 		const uint64_t km1 = PZ ? (kk-1)%me : kk-1;
 		
 		return {
-			VoxelElementKey<I_W,BC,MORTON>{dd, im1, jm1, km1},
-			VoxelElementKey<I_W,BC,MORTON>{dd, im1, jm1, kk },
-			VoxelElementKey<I_W,BC,MORTON>{dd, im1, jj,  km1},
-			VoxelElementKey<I_W,BC,MORTON>{dd, im1, jj,  kk },
-			VoxelElementKey<I_W,BC,MORTON>{dd, ii,  jm1, km1},
-			VoxelElementKey<I_W,BC,MORTON>{dd, ii,  jm1, kk },
-			VoxelElementKey<I_W,BC,MORTON>{dd, ii,  jj,  km1},
-			VoxelElementKey<I_W,BC,MORTON>{dd, ii,  jj,  kk }
+			VoxelElementKey<MAX_DEPTH,BC>{dd, im1, jm1, km1},
+			VoxelElementKey<MAX_DEPTH,BC>{dd, im1, jm1, kk },
+			VoxelElementKey<MAX_DEPTH,BC>{dd, im1, jj,  km1},
+			VoxelElementKey<MAX_DEPTH,BC>{dd, im1, jj,  kk },
+			VoxelElementKey<MAX_DEPTH,BC>{dd, ii,  jm1, km1},
+			VoxelElementKey<MAX_DEPTH,BC>{dd, ii,  jm1, kk },
+			VoxelElementKey<MAX_DEPTH,BC>{dd, ii,  jj,  km1},
+			VoxelElementKey<MAX_DEPTH,BC>{dd, ii,  jj,  kk }
 		};
 	}
 }

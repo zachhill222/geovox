@@ -11,21 +11,22 @@ namespace GV
 	//adjacency methods must be implemented in a separate file after
 	//all mesh feature keys are defined
 
-	template<uint64_t I_W, uint64_t BC, bool MORTON>
+	template<uint64_t MAX_DEPTH_, uint64_t BC>
 	struct VoxelElementKey;
 
-	template<uint64_t I_W, uint64_t BC, bool MORTON>
+	template<uint64_t MAX_DEPTH_, uint64_t BC>
 	struct VoxelVertexKey;
 
-	template<uint64_t I_W=16, uint64_t BC=0, bool MORTON_=false>
-	struct VoxelFaceKey : public VoxelKey<0,3,2,I_W>
+	template<uint64_t MAX_DEPTH_=16, uint64_t BC=0>
+	struct VoxelFaceKey : public VoxelKey<3,2,MAX_DEPTH_+1>
 	{
 		//inherit constructors
-		using BASE = VoxelKey<0,3,2,I_W>;
+		using BASE = VoxelKey<3,2,MAX_DEPTH_+1>;
 		using BASE::BASE;
 
 		//inherit the primary accessors
 		using BASE::depth;
+		using BASE::color;
 		using BASE::i;
 		using BASE::j;
 		using BASE::k;
@@ -35,18 +36,19 @@ namespace GV
 		using BASE::set_k;
 		using BASE::_data_;
 
-		//re-name other() to axis() for readability
+		//re-name other_c() to axis() for readability
 		//get the normal axis to the face
-		inline constexpr uint64_t axis() const {return this->other();}
+		inline constexpr uint64_t axis() const {return this->other_c();}
 
 		//define useful constants
-		static constexpr bool MORTON = MORTON_;
 		static constexpr uint64_t MAX_FACE_INDEX_NAX = BASE::MAX_INDEX -1;
 		static constexpr uint64_t MAX_FACE_INDEX_AX  = BASE::MAX_INDEX;
-		static constexpr uint64_t A_S                = BASE::O_S;
-		static constexpr uint64_t A_W				 = BASE::O_W;
+		static constexpr uint64_t A_S                = BASE::OC_S;
+		static constexpr uint64_t A_W				 = BASE::OC_W;
+		static constexpr uint64_t A_M				 = BASE::OC_M;
 		using BASE::MAX_DEPTH;
 		using BASE::DOES_NOT_EXIST;
+		static_assert(MAX_DEPTH_==MAX_DEPTH);
 
 		//periodic conditions. the BC bits are stored on the other_nocompare field
 		static constexpr uint64_t BC_FLAG = BC;
@@ -55,19 +57,22 @@ namespace GV
 		static constexpr bool PZ = BC&4; //periodic in k/z
 
 		//explicit conversion to the non-periodic type and to a periodic type
-		using NonPeriodicType = VoxelFaceKey<I_W,0,MORTON_>;
-		explicit operator NonPeriodicType() const {return NonPeriodicType{_data_};}
+		using NonPeriodicVariant = VoxelFaceKey<MAX_DEPTH_,0>;
+		explicit operator NonPeriodicVariant() const {return NonPeriodicVariant{_data_};}
 
 		template<uint64_t OTHER_BC>
-		using OtherPeriodicType = VoxelFaceKey<I_W,OTHER_BC,MORTON_>;
+		using PeriodicVariant = VoxelFaceKey<MAX_DEPTH_,OTHER_BC>;
 		
 		template<uint64_t OTHER_BC> requires (OTHER_BC<8)
-		explicit operator OtherPeriodicType<OTHER_BC>() const {return OtherPeriodicType<OTHER_BC>{_data_};}
+		explicit operator PeriodicVariant<OTHER_BC>() const {return PeriodicVariant<OTHER_BC>{_data_};}
 
 
 		//define face specific constructors
 		VoxelFaceKey(const uint64_t aa, const uint64_t dd, const uint64_t ii, const uint64_t jj, const uint64_t kk) :
-			BASE(0,BC,aa,dd,ii,jj,kk) {
+			BASE( (ii&1)|((jj&1)<<1)|((kk&1)<<2),
+					ii>>1, jj>>1, kk>>1,
+					aa, dd, BC, 0
+				) {
 				if (dd>MAX_DEPTH) {_data_ = DOES_NOT_EXIST; return;}
 				if constexpr (PX||PY||PZ) {
 					const uint64_t mn = (uint64_t{1} << dd); //2^d elements per axis, number of faces in non-axis directions
@@ -79,24 +84,58 @@ namespace GV
 				}
 			}
 
-		constexpr VoxelFaceKey(const uint64_t dd, uint64_t li) requires (!MORTON) {
+		constexpr VoxelFaceKey(const uint64_t dd, uint64_t li) {
 			//define by linear index
 			assert(dd <= MAX_DEPTH);
 			assert(li < 3*(uint64_t{1} << (3*dd+1)));
 
-			const uint64_t mna = (uint64_t{1} << dd) -1;     //maximum element index at this depth, non-axis indices
-			const uint64_t ma  = (uint64_t{1} << (dd+1)) -1; //maximum vertex index at this depth, axis index
+			//partition the indices into: axis0 normal | axis1 normal | axis2 normal
+			//the numbering within and across each partition is continuous as there are N = 2^d * 2^d * 2^(d+1) = 2^(3d+1) faces with a given normal axis
+			//thus axis0 uses indices [0,N), axis1 uses [N,2N), and axis2 uses [2N,3N).
+			
+			if (dd==0) {
+				switch (li) {
+				case 0: *this = VoxelFaceKey{0,0,0,0,0}; return;
+				case 1: *this = VoxelFaceKey{0,0,1,0,0}; return;
+				case 2: *this = VoxelFaceKey{1,0,0,0,0}; return;
+				case 3: *this = VoxelFaceKey{1,0,0,1,0}; return;
+				case 4: *this = VoxelFaceKey{2,0,0,0,0}; return;
+				case 5: *this = VoxelFaceKey{2,0,0,0,1}; return;
+				default: _data_ = DOES_NOT_EXIST;  		 return;
+				}
+			}
 
-			//get axis to unpack indices correctly
-			const uint64_t aa = (li >> (3*dd+1)) & 3; //get the two most significant bits of the linear index
+			const uint64_t aa 	= li >> (3*dd+1); //note li/N = li * 2^-(3d+1)
 
-			//unpack indices
-			const uint64_t ii = li & (aa==0 ? ma : mna); li >>= (aa==0 ? dd+1 : dd);
-			const uint64_t jj = li & (aa==1 ? ma : mna); li >>= (aa==1 ? dd+1 : dd);
-			const uint64_t kk = li & (aa==2 ? ma : mna);
+			const uint64_t cc 	= li&7;
+			const uint64_t mna 	= (uint64_t{1}<<(dd-1)) - 1; //mask for non-color bits for non-axis indices
+			const uint64_t ma 	= (uint64_t{1}<<(dd))   - 1; //mask for non-color bits for axis index
 
-			//construct key
-			_data_ = (dd << BASE::D_S) | (aa << A_S) | (ii << BASE::I_S) | (jj << BASE::J_S) | (kk << BASE::K_S) | (BC << BASE::ON_S);
+			uint64_t r_ii, r_jj, r_kk;
+			switch (aa) {
+			case 0:
+				r_ii = (li>>3)			& ma;
+				r_jj = (li>>(3+dd))		& mna;
+				r_kk = (li>>(2+2*dd))	& mna;
+				break;
+			
+			case 1:
+				r_ii = (li>>3)			& mna;
+				r_jj = (li>>(2+dd))		& ma;
+				r_kk = (li>>(2+2*dd))	& mna;
+				break;
+			
+			case 2:
+				r_ii = (li>>3)			& mna;
+				r_jj = (li>>(2+dd))		& mna;
+				r_kk = (li>>(1+2*dd))	& ma;
+				break;
+			default:
+				_data_ = DOES_NOT_EXIST;
+				return;
+			}
+
+			_data_ = BASE(cc,r_ii,r_jj,r_kk,aa,dd,BC,0)._data_;
 		}
 
 		//check if a face is valid
@@ -112,54 +151,42 @@ namespace GV
 		}
 
 		//partition the indices into: axis0 normal | axis1 normal | axis2 normal
-		//the numbering within and across each partion is continuous as there are 2^d * 2^d * 2^(d+1) = 2^(3d+1) faces with a given normal axis
+		//the numbering within and across each partition is continuous as there are N = 2^d * 2^d * 2^(d+1) = 2^(3d+1) faces with a given normal axis
 		//thus axis0 uses indices [0,N), axis1 uses [N,2N), and axis2 uses [2N,3N).
-		//the numbering within a partion is either standard or morton. use morton if looping by color and standard if looping by index
-		//for better memory strides
-
-		//the standard indexing within an axis group is
-		// a2 | a1 | a0 where a2 is the axis-index, a1 is the larger non-axis index and a0 is the smaller non-axis index
-		//this organizes faces in the same plane contiguously
-		//note a1 and a0 are (depth) bits wide while a2 is (depth+1) bits wide
-
-		//for morton indexing, the last two bits of a1 and a0 are moved to the LSB
-		// a2 | a1-remainder | a0-remainder | a1&1 | a0&1
-		//note that a1-rem and a0-rem are (depth-1) bits wide and a2 is still (depth+1) bits wide
-		//the color a1&1 | a0&1 is of course 2 bits wide.
 
 		constexpr uint64_t depth_linear_index() const {
+			assert(is_valid());
+
 			const uint64_t dd = depth();
 			const uint64_t aa = axis();
+			const uint64_t ps = depth_axis_start(dd,aa); //start of this partition
 
-			//we assume that the index a,i,j,k is valid and do not mask it
-			const uint64_t a0 = (aa == 0) ? j() : i(); //first index
-			const uint64_t a1 = (aa == 2) ? j() : k(); //second index
-			const uint64_t a2 = (aa == 0) ? i() : (aa==1) ? j() : k(); //axis index
+			const uint64_t cc 	= _data_&7;
+			const uint64_t r_ii	= (_data_ & BASE::I_M) >> BASE::I_S;
+			const uint64_t r_jj	= (_data_ & BASE::J_M) >> BASE::J_S;
+			const uint64_t r_kk	= (_data_ & BASE::K_M) >> BASE::K_S;
 
-			const uint64_t ps = depth_axis_start(dd,aa); //start of this partision
-			
-			if constexpr (MORTON) {
-				const uint64_t clr = (a0&1) | ((a1&1)<<1); //color bits
-				const uint64_t r0  = a0>>1; //mask and compact the low-index bits
-				const uint64_t r1  = a1>>1; //mask and compact the high-index bits
-				const uint64_t pn  = clr | (r0<<2) | (r1<<(dd+1)) | (a2<<(2*dd));
-				return ps + pn;
-			}
-			else {
-				
-				const uint64_t pn = (a0) | (a1<<dd) | (a2<<(2*dd)); //index within this axis partition
-				return ps + pn;
+			//assemble index cc | r_i | r_j | r_k
+			//r_* has width dd-1 for non-axis and width dd for axis indices (one bit was moved to the color)
+			switch (aa) {
+			case 0:
+				return ps + ( cc | (r_ii<<3) | (r_jj<<(3+dd)) | (r_kk<<(2+2*dd)) );
+			case 1:
+				return ps + ( cc | (r_ii<<3) | (r_jj<<(2+dd)) | (r_kk<<(2+2*dd)) );
+			case 2:
+				return ps + ( cc | (r_ii<<3) | (r_jj<<(2+dd)) | (r_kk<<(1+2*dd)) );
+			default: return DOES_NOT_EXIST;
 			}
 		}
 
-		static const uint64_t depth_axis_start(const uint64_t dd, const uint64_t aa) {
+		static constexpr uint64_t depth_axis_start(const uint64_t dd, const uint64_t aa) {
 			const uint64_t N = uint64_t{1} << (3*dd+1);
 			return aa*N;
 		}
 
 		static constexpr uint64_t depth_linear_start(const uint64_t dd) {
-			// 8^d + 4^d faces per axis at depth d, summed from 0 to dd-1
-			return 3 * (((uint64_t{1} << (3*dd)) - 1)/7) + ((uint64_t{1}<<(2*dd)) - 1);
+			// 3*2^(3d+1) faces per axis at depth d, summed from 0 to dd-1
+			return 6 * ( ((uint64_t{1} << (3*dd)) - 1)/7 );
 		}
 
 		constexpr uint64_t linear_index() const {
@@ -167,7 +194,7 @@ namespace GV
 		}
 
 		//geometry logic
-		const bool on_bbox_boundary() const {
+		constexpr bool on_bbox_boundary() const {
 			assert(this->exists());
 			const uint64_t mfiax = uint64_t{1} << depth();
 			const uint64_t idx   = this->index(axis());
@@ -241,17 +268,26 @@ namespace GV
 
 		//adjacency operations
 		inline constexpr auto element(const int i) const {return elements()[i];}
-		constexpr std::array<VoxelElementKey<I_W,BC,MORTON_>,2> elements() const;
+		constexpr std::array<VoxelElementKey<MAX_DEPTH_,BC>,2> elements() const;
 
 		inline constexpr auto vertex(const int i) const {return vertices()[i];}
-		constexpr std::array<VoxelVertexKey<I_W,BC,MORTON_>,4> vertices() const;
+		constexpr std::array<VoxelVertexKey<MAX_DEPTH_,BC>,4> vertices() const;
 
-		//color by the even/odd parity of the non-axis indices
-		inline constexpr uint64_t color() const {
-			const uint64_t aa = axis();
-			const uint64_t a0 = (aa == 0) ? j() : i(); //first index
-			const uint64_t a1 = (aa == 2) ? j() : k(); //second index
-			return (a0&1) | ((a1&1)<<1);
+		//iterator logic
+		VoxelFaceKey& operator++() {
+			assert(is_valid());
+
+			//this is tricky, move to the constructor
+			const uint64_t dd  	= depth();
+			const uint64_t idx 	= depth_linear_index()+1;
+			if (idx >= 3*(uint64_t{1}<<(3*dd+1))) {
+				_data_ = DOES_NOT_EXIST;
+				return *this;
+			}
+			else {
+				*this = VoxelFaceKey{dd, idx};
+			}
+			return *this;
 		}
 	};
 }

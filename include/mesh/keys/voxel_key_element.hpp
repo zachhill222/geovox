@@ -11,22 +11,23 @@ namespace GV
 	//adjacency methods must be implemented in a separate file after
 	//all mesh feature keys are defined
 
-	template<uint64_t I_W, uint64_t BC, bool MORTON>
+	template<uint64_t MAX_DEPTH_, uint64_t BC>
 	struct VoxelVertexKey;
 
-	template<uint64_t I_W, uint64_t BC, bool MORTON>
+	template<uint64_t MAX_DEPTH_, uint64_t BC>
 	struct VoxelFaceKey;
 
-	template<uint64_t I_W=16, uint64_t BC=0, bool MORTON_=false>
-	struct VoxelElementKey : public VoxelKey<0,3,0,I_W>
+	template<uint64_t MAX_DEPTH_=16, uint64_t BC=0>
+	struct VoxelElementKey : public VoxelKey<3,0,MAX_DEPTH_+1>
 	{
 		static_assert(BC<8, "VoxelElementKey: invalid boundary condition. BC must be from 0 to 7.");
 
 		//inherit constructors
-		using BASE = VoxelKey<0,3,0,I_W>;
+		using BASE = VoxelKey<3,0,MAX_DEPTH_+1>;
 		using BASE::BASE;
 
 		//inherit the primary accessors
+		using BASE::color;
 		using BASE::depth;
 		using BASE::i;
 		using BASE::j;
@@ -38,9 +39,9 @@ namespace GV
 		using BASE::_data_;
 
 		//define useful constants
-		static constexpr bool MORTON = MORTON_;
 		using BASE::MAX_DEPTH;
 		using BASE::DOES_NOT_EXIST;
+		static_assert(MAX_DEPTH_==MAX_DEPTH);
 
 		//periodic conditions. the BC bits are stored on the other_nocompare field
 		static constexpr uint64_t BC_FLAG = BC;
@@ -49,18 +50,20 @@ namespace GV
 		static constexpr bool PZ = BC&4; //periodic in k/z
 
 		//explicit conversion to the non-periodic type
-		using NonPeriodicType = VoxelElementKey<I_W,0,MORTON_>;
-		explicit operator NonPeriodicType() const {return NonPeriodicType{_data_};}
+		using NonPeriodicVariant = VoxelElementKey<MAX_DEPTH_,0>;
+		explicit operator NonPeriodicVariant() const {return NonPeriodicVariant{_data_};}
 
 		template<uint64_t OTHER_BC>
-		using OtherPeriodicType = VoxelElementKey<I_W,OTHER_BC,MORTON_>;
+		using PeriodicVariant = VoxelElementKey<MAX_DEPTH_,OTHER_BC>;
 		
 		template<uint64_t OTHER_BC> requires (OTHER_BC<8)
-		explicit operator OtherPeriodicType<OTHER_BC>() const {return OtherPeriodicType<OTHER_BC>{_data_};}
+		explicit operator PeriodicVariant<OTHER_BC>() const {return PeriodicVariant<OTHER_BC>{_data_};}
 
 		//define element specific constructors
 		constexpr VoxelElementKey(const uint64_t dd, const uint64_t ii, const uint64_t jj, const uint64_t kk) :
-			BASE(0,BC,0,dd,ii,jj,kk) {
+			BASE( 	(ii&1)|((jj&1)<<1)|((kk&1)<<2),
+					ii>>1, jj>>1, kk>>1,
+					0, dd, BC, 0) {
 				if (dd>MAX_DEPTH) {_data_ = DOES_NOT_EXIST; return;}
 				if constexpr (PX||PY||PZ) {
 					const uint64_t me = uint64_t{1} << dd; //2^d elements per axis
@@ -70,18 +73,26 @@ namespace GV
 				}
 			}
 
-		constexpr VoxelElementKey(const uint64_t dd, uint64_t li) requires (!MORTON) {
+		constexpr VoxelElementKey(const uint64_t dd, uint64_t li) {
 			assert(dd<=MAX_DEPTH);
 			assert(li < (uint64_t{1} << (3*dd)));
 
-			const uint64_t mask = (uint64_t{1} << dd) - 1;
-			const uint64_t ii   = li & mask; li >>= dd;
-			const uint64_t jj   = li & mask; li >>= dd;
-			const uint64_t kk   = li & mask;
+			if (dd==0) {*this = VoxelElementKey{0,0,0,0}; return;}
 
-			_data_ = (dd << BASE::D_S) | (ii << BASE::I_S) | (jj << BASE::J_S) | (kk << BASE::K_S) | (BC << BASE::ON_S);
+			const uint64_t r_wd   = dd-1;						//width on non-color index bits
+			const uint64_t r_mask = (uint64_t{1}<<r_wd) - 1;	//mask for the non-color index bits
+
+			//split color, i, j, k fields
+			const uint64_t cc 	= li&7;
+			const uint64_t r_ii = (li>>3) 		 	& r_mask;
+			const uint64_t r_jj = (li>>(3+r_wd)) 	& r_mask;
+			const uint64_t r_kk = (li>>(3+2*r_wd)) 	& r_mask;
+
+			//assemble data
+			_data_ = BASE(cc,r_ii,r_jj,r_kk,0,dd,BC,0)._data_;
 		}
 
+		
 		//check if a voxel is valid
 		constexpr bool is_valid() const {
 			const uint64_t mei = (uint64_t{1} << depth()) - 1; //max element index
@@ -92,48 +103,20 @@ namespace GV
 			return true;
 		}
 
-		VoxelElementKey& operator++() requires (!MORTON) {
-			uint64_t dd = depth();
-			const uint64_t mi = (uint64_t{1} << dd)-1; //2^dd elements per axis (max index)
-			uint64_t ii=i(), jj=j(), kk=k();
-			
-			//increment with carry, but we must respect the entire
-			//field width of I_W, J_W, and K_W
-			++ii;
-			if (ii>mi) {ii=0; ++jj;}
-			if (jj>mi) {jj=0; ++kk;}
-			if (kk>mi) {kk=0; ++dd;}
-
-			//reset d-i-j-k bits
-			_data_ &= ~BASE::DEPTH_INDEX_MASK;
-			_data_ |=  BASE::DEPTH_INDEX_MASK & ((ii<<BASE::I_S) | (jj<<BASE::J_S) | (kk<<BASE::K_S) | (dd<<BASE::D_S));
-			return *this;
-		}
-
 		//get the linear index of the element at the current depth
 		constexpr uint64_t depth_linear_index() const {
-			if (!is_valid()) {
-				std::cout << "INVALID ELEMENT\n" << *this << std::endl;
-			}
-
 			assert(is_valid());
-			const uint64_t dd   = depth();
-			const uint64_t mask = ((uint64_t{1} << dd) - 1); //maximum element index at this depth
-			const uint64_t ii   = (_data_ >> BASE::I_S) & mask;
-			const uint64_t jj   = (_data_ >> BASE::J_S) & mask;
-			const uint64_t kk   = (_data_ >> BASE::K_S) & mask;
-			
-			if constexpr (MORTON) {
-				//morton indexing (two features of the same color on the same depth are 8 indices from eachother)
-				//better for looping over a single color
-				const uint64_t clr = (ii&1) | ((jj&1)<<1) | ((kk&1)<<2); //color in the least significant bits
-				const uint64_t rem = ((ii>>1)) | ((jj>>1) << (dd-1)) | ((kk>>1) << (2*dd-1));
-				return (rem<<3) | clr;
-			}
-			else {
-				//standard ordering (contiguous i, loop k->j->i (outer to inner))
-				return ii | (jj << dd) | (kk << (2*dd));
-			}
+			//compress the index fields and color
+			const uint64_t dd   	= depth();
+			if (dd==0) {return 0;}
+
+			const uint64_t r_wd 	= dd-1;
+			const uint64_t cc 		= _data_&7;
+			const uint64_t r_ii		= (_data_&BASE::I_M) >> BASE::I_S;
+			const uint64_t r_jj		= (_data_&BASE::J_M) >> BASE::J_S;
+			const uint64_t r_kk 	= (_data_&BASE::K_M) >> BASE::K_S;
+
+			return cc | (r_ii<<3) | (r_jj<<(3+r_wd)) | (r_kk<<(3+2*r_wd));
 		}
 
 		static constexpr uint64_t depth_linear_start(const uint64_t dd) {
@@ -183,20 +166,45 @@ namespace GV
 
 		//adjacency logic
 		inline constexpr auto vertex(int i) const {return vertices()[i];}
-		inline constexpr std::array<VoxelVertexKey<I_W,BC,MORTON_>,8> vertices() const;
+		inline constexpr std::array<VoxelVertexKey<MAX_DEPTH_,BC>,8> vertices() const;
 		
 		inline constexpr auto face(int i) const {return faces()[i];}
-		inline constexpr std::array<VoxelFaceKey<I_W,BC,MORTON_>,6> faces() const;
+		inline constexpr std::array<VoxelFaceKey<MAX_DEPTH_,BC>,6> faces() const;
 
-		//get the color of the feature by index modding. There are 8 unique colors.
-		//coloring means different things for differnet mesh elements, but for example,
-		//two elements with the same color at the same depth share no vertices or faces
-		inline constexpr uint64_t color() const {
-			//even/even/even -> 0
-			//odd/even/even  -> 1
-			//even/odd/even  -> 2
-			//etc.
-			return (i()&1) | ((j()&1) << 1) | ((k()&1) << 2);
+		//iterator logic
+		VoxelElementKey& operator++() {
+			assert(is_valid());
+
+			const uint64_t dd = depth();
+			if (dd==0) {_data_ = DOES_NOT_EXIST; return *this;}
+
+			const uint64_t cc = _data_&7;
+
+			const uint64_t cc_n = (cc + 1)&7; //next color
+			_data_ = (_data_&~BASE::C_M) | cc_n;
+			if (cc_n!=0) {return *this;}
+			
+			//need to carry
+			const uint64_t r_wd 	= dd-1;
+			const uint64_t r_mask	= (uint64_t{1}<<r_wd) - 1; //also the maximum non-color index
+			
+			const uint64_t r_ii		= (_data_&BASE::I_M) >> BASE::I_S;
+			const uint64_t r_ii_n	= (r_ii+1) & r_mask;
+			_data_ = (_data_&~BASE::I_M) | (r_ii_n << BASE::I_S);
+			if (r_ii_n!=0) {return *this;}
+
+			const uint64_t r_jj		= (_data_&BASE::J_M) >> BASE::J_S;
+			const uint64_t r_jj_n	= (r_jj+1) & r_mask;
+			_data_ = (_data_&~BASE::J_M) | (r_jj_n << BASE::J_S);
+			if (r_jj_n!=0) {return *this;}
+			
+			const uint64_t r_kk		= (_data_&BASE::K_M) >> BASE::K_S;
+			const uint64_t r_kk_n	= (r_kk+1) & r_mask;
+			_data_ = (_data_&~BASE::K_M) | (r_kk_n << BASE::K_S);
+			if (r_kk_n!=0) {return *this;}
+
+			_data_ = DOES_NOT_EXIST;
+			return *this;
 		}
 	};
 }

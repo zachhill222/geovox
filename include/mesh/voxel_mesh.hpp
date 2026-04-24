@@ -46,15 +46,15 @@ namespace GV
 	//With the element/vertex/face keys, we must have a maximum depth of 15. If more is needed (unlikely) we can stitch together
 	//multiples of these meshes.
 
-	template<int MAX_DEPTH_=10, bool MORTON_ORDER=false> requires (MAX_DEPTH_>=0)
+	template<int MAX_DEPTH_=10> requires (MAX_DEPTH_>=0)
 	class VoxelMesh
 	{
 	public:
 		//mesh features are never periodic
-		using VoxelElement = VoxelElementKey<MAX_DEPTH_+1,0,MORTON_ORDER>;
-		using VoxelVertex  = VoxelVertexKey<MAX_DEPTH_+1,0,MORTON_ORDER>;
-		using VoxelFace    = VoxelFaceKey<MAX_DEPTH_+1,0,MORTON_ORDER>;
-		using Mesh_t       = VoxelMesh<MAX_DEPTH_,MORTON_ORDER>; //this mesh type
+		using VoxelElement = VoxelElementKey<MAX_DEPTH_,0>;
+		using VoxelVertex  = VoxelVertexKey<MAX_DEPTH_,0>;
+		using VoxelFace    = VoxelFaceKey<MAX_DEPTH_,0>;
+		using Mesh_t       = VoxelMesh<MAX_DEPTH_>; //this mesh type
 
 		static constexpr uint64_t MAX_DEPTH = MAX_DEPTH_;
 		static constexpr uint64_t TOTAL_POSSIBLE_ELEMENTS = total_possible<VoxelElement>(MAX_DEPTH);

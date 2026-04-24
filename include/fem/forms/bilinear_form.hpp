@@ -2,6 +2,7 @@
 
 #include "fem/numerics/csr_storage.hpp"
 #include "fem/forms/form_actions.hpp"
+#include "fem/forms/local_actions.hpp"
 
 #include "util/log_time.hpp"
 #include "util/compatibility.hpp"
@@ -110,15 +111,24 @@ namespace GV
 		inline void set_storage(MatStorage_t& coo) requires ScatterActionType<Action_type> {global_mat = &coo;}
 
 		//compute the action of the global matrix on x as y (y=Mx or y=M^t*x)
+		//Alternatively, apply an iterative method to approximate y=M_inv * x
 		std::span<const double> vec_x;
 		std::span<double>		vec_y;
-		
+		std::vector<double>     loc_x, loc_y;
+
+		std::vector<uint64_t> loc2global_trial, loc2global_test;
+
 		//conversion of vectors to a span is handled in util/compatibility.hpp
 		//add as_span functions if we need a library other than Eigen.
 		template<typename ContainerA_t, typename ContainerB_t>
 		inline void set_vecs(ContainerA_t& y, const ContainerB_t& x) requires MatVecActionType<Action_type> {
 			vec_x = as_span(x);
 			vec_y = as_span(y);
+
+			//pull x and y values
+			//y must be initialized before this (e.g., set to 0 or a result from a previous iteration)
+			init_loc_x();
+			init_loc_y();
 		}
 
 		uint64_t n_test, m_trial;
@@ -132,7 +142,18 @@ namespace GV
 			test_dofs  = as_span(test_dofs_);
 			n_test     = test_dofs.size();
 			m_trial    = trial_dofs.size();
-			loc_m_v.resize(n_test*m_trial, 0.0);
+			loc_m_v.assign(n_test*m_trial, 0.0);
+
+			//compute local to global dof index maps
+			loc2global_test.resize(n_test);
+			for (uint64_t n=0; n<n_test; ++n)  {loc2global_test[n]  = test_handler.compressed_index(test_dofs[n]);}
+			loc2global_trial.resize(m_trial);
+			for (uint64_t m=0; m<m_trial; ++m) {loc2global_trial[m] = trial_handler.compressed_index(trial_dofs[m]);}
+
+			if constexpr (MatVecActionType<Action_type>) {
+				loc_x.resize(m_trial);
+				loc_y.resize(n_test, 0.0);
+			}
 		}
 
 		template<typename ContainerA_t>
@@ -143,7 +164,17 @@ namespace GV
 			test_dofs  = as_span(test_dofs_);
 			m_trial    = trial_dofs.size();
 			n_test     = m_trial;
-			loc_m_v.resize(n_test*m_trial, 0.0);
+			loc_m_v.assign(n_test*m_trial, 0.0);
+
+			//compute local to global dof index maps
+			loc2global_test.resize(n_test);
+			for (uint64_t n=0; n<n_test; ++n)  {loc2global_test[n]  = test_handler.compressed_index(test_dofs[n]);}
+			loc2global_trial = loc2global_test;
+
+			if constexpr (MatVecActionType<Action_type>) {
+				loc_x.resize(m_trial);
+				loc_y.resize(n_test, 0.0);
+			}
 		}
 
 		inline double& local_mat(uint64_t i, uint64_t j) {
@@ -173,46 +204,45 @@ namespace GV
 		}
 
 		void scatter() requires MatVecActionType<Action_type> {
-			assert(!vec_x.empty());
-			assert(!vec_y.empty());
+			for (uint64_t i=0; i<n_test; ++i) {
+				vec_y[loc2global_test[i]] += loc_y[i];
+			}
+		}
 
-			if constexpr (Action_type::tr) {
-				assert(vec_x.size() == test_handler.n_dofs());
-				assert(vec_y.size() == trial_handler.n_dofs());
+		//initialize loc_y by copying the values from vec_y if needed
+		void init_loc_y() requires MatVecActionType<Action_type> {
+			for (uint64_t i=0; i<n_test; ++i) {
+				loc_y[i] = vec_y[loc2global_test[i]];
 			}
-			else {
-				assert(vec_y.size() == test_handler.n_dofs());
-				assert(vec_x.size() == trial_handler.n_dofs());
-			}
+		}
 
-			//map the current dofs to the global numbers in a local cache
-			std::vector<int> test_indices(n_test), trial_indices(m_trial);
-			for (uint64_t n=0; n<n_test; ++n)  {test_indices[n]  = test_handler.compressed_index(test_dofs[n]);}
-			for (uint64_t m=0; m<m_trial; ++m) {trial_indices[m] = trial_handler.compressed_index(trial_dofs[m]);}
+		void init_loc_x() requires MatVecActionType<Action_type> {
+			for (uint64_t j=0; j<m_trial; ++j) {
+				loc_x[j] = vec_x[loc2global_trial[j]];
+			}
+		}
 
-			//compute the local contribution to the product
-			if constexpr (!Action_type::tr) {
-				for (uint64_t n=0; n<n_test; ++n) {
-					const int N = test_indices[n];
-					assert(N>=0);
-					for (uint64_t m=0; m<m_trial; ++m) {
-						const int M = trial_indices[m];
-						assert(M>=0);
-						vec_y[N] += local_mat(n,m)*vec_x[M];
-					}
-				}
-			}
-			else {
-				for (uint64_t m=0; m<m_trial; ++m) {
-					const int M = trial_indices[m];
-					assert(M>=0);
-					for (uint64_t n=0; n<n_test; ++n) {
-						const int N = test_indices[n];
-						assert(N>=0);
-						vec_y[M] += local_mat(n,m)*vec_x[N];
-					}
-				}
-			}
+		inline void multiply() requires MatVecActionType<Action_type> {
+			//note this accumulates into loc_y
+			//for this method, the vec_y (which is used to initialize loc_y)
+			//should probably be set to 0.
+			local_multiply(as_span(loc_y),as_span(loc_x),as_span(loc_m_v));
+		}
+
+
+		inline void jacobi() requires MatVecActionType<Action_type> {
+			assert(n_test == m_trial);
+			local_jacobi(as_span(loc_y),as_span(loc_x),as_span(loc_m_v));
+		}
+
+		inline void gauss_seidel() requires MatVecActionType<Action_type> {
+			assert(n_test == m_trial);
+			local_gauss_seidel(as_span(loc_y),as_span(loc_x),as_span(loc_m_v));
+		}
+
+		inline void gauss_seidel_backwards() requires MatVecActionType<Action_type> {
+			assert(n_test == m_trial);
+			local_gauss_seidel_backwards(as_span(loc_y),as_span(loc_x),as_span(loc_m_v));
 		}
 
 		//TODO: because the global storage was moved out of this class, this might be unnecessary

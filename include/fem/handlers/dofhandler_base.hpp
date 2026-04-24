@@ -83,7 +83,7 @@ namespace GV
 		//note that eigen uses ints for its index, but this could be changed.
 		std::vector<DOF_t> active_dof_list_prev;
 		std::vector<DOF_t> active_dof_list_curr;
-		std::unordered_map<DOF_t, int, typename DOF_t::Hash> dof_to_idx_map;
+		std::unordered_map<DOF_t, uint64_t, typename DOF_t::Hash> dof_to_idx_map;
 
 		public:
 		//simple queries
@@ -99,9 +99,9 @@ namespace GV
 		inline const auto& curr_compressed_dofs() const {return active_dof_list_curr;}
 		
 		inline const auto& dof_to_idx() 		  	  const {return dof_to_idx_map;}
-		inline int compressed_index(const DOF_t dof) const {
+		inline uint64_t compressed_index(const DOF_t dof) const {
 			const auto it = dof_to_idx_map.find(dof);
-			return it != dof_to_idx_map.end() ? it->second : int{-1};
+			return it != dof_to_idx_map.end() ? it->second : uint64_t{-1};
 		}
 
 		//simple management operations
@@ -190,7 +190,7 @@ namespace GV
 			//build the map
 			dof_to_idx_map.clear();
 			for (uint64_t i=0; i<active_dof_list_curr.size(); ++i) {
-				dof_to_idx_map[active_dof_list_curr[i]] = static_cast<int>(i);
+				dof_to_idx_map[active_dof_list_curr[i]] = i;
 			}
 		}
 
