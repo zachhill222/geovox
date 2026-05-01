@@ -20,10 +20,9 @@ namespace GV
 	//compute the action of a bilinear form on some input vector.
 	//note the transpose is the same as the adjoint.
 	//this action only makes sense for bilinear forms
-	template<bool TRANSPOSE=false>
-	struct MatVecAction {static constexpr bool tr = TRANSPOSE;}; //scatter the local matrix to compute M*x or M^t * x without assembling M
+	struct MatVecAction {}; //scatter the local matrix to compute M*x without assembling M
 	template<typename T>
-	concept MatVecActionType = std::same_as<T,MatVecAction<true>> || std::same_as<T,MatVecAction<false>>;
+	concept MatVecActionType = std::same_as<T,MatVecAction> || std::same_as<T,MatVecAction>;
 
 	//compute the action of a linear form on some input vector.
 	struct DotAction {};

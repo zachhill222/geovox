@@ -12,7 +12,6 @@
 
 namespace GV
 {
-	//A symmetric mass kernel for bilinear forms a(psi,phi) = integral_D phi*psi
 	template<typename DofHandler_type, typename Action_type=ScatterAction, typename DERIVED=void>
 	struct LinearL2 : public LinearForm<DofHandler_type, Action_type>
 	{

@@ -14,11 +14,12 @@ namespace GV
 {
 	//A symmetric mass kernel for bilinear forms a(psi,phi) = integral_D phi*psi
 	template<typename 	Handler_type,
-			 typename 	ActionType 	= ScatterAction,
-			 typename 	DERIVED		= void>
-	struct SymmetricL2 : public BilinearForm<Handler_type,Handler_type,true,ActionType>
+			 bool       IS_SYMMETRIC_ = false,
+			 typename 	ActionType 	  = ScatterAction,
+			 typename 	DERIVED		  = void>
+	struct BilinearL2 : public BilinearForm<Handler_type,Handler_type,IS_SYMMETRIC_,ActionType>
 	{
-		using BASE       = BilinearForm<Handler_type,Handler_type,true,ActionType>;
+		using BASE       = BilinearForm<Handler_type,Handler_type,IS_SYMMETRIC_,ActionType>;
 		using QuadElem_t = typename BASE::QuadElem_t;
 		using DOF_t      = typename Handler_type::DOF_t;
 
@@ -90,4 +91,10 @@ namespace GV
 		}
 	};
 
+
+	//symmetric L2 form
+	template<typename 	Handler_type,
+			 typename 	ActionType 	  = ScatterAction,
+			 typename 	DERIVED		  = void>
+	using SymmetricL2 = BilinearL2<Handler_type,true,ActionType,DERIVED>;
 }

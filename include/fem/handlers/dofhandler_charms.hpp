@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <vector>
 #include <algorithm>
+#include <span>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -134,7 +135,7 @@ namespace GV
 				if (c.exists()) {
 					activate(c);
 				}
-			}		
+			}
 		}
 
 		void coarsen(const std::vector<DOF_t>& dofs) {
@@ -154,8 +155,7 @@ namespace GV
 		}
 
 		
-		template<typename CoefContainer_t>
-		void update_coefs(CoefContainer_t& old_coefs, CoefContainer_t& new_coefs) {
+		void update_coefs(std::span<double> new_coefs, std::span<const double> old_coefs) {
 			//transfer each coefficient of old into new
 			//or split its contribution into its children in new
 			//or compress its contribution into its parent in new
@@ -163,9 +163,9 @@ namespace GV
 			const auto& prev_dofs = this->prev_compressed_dofs();
 			const auto& curr_dofs = this->curr_compressed_dofs();
 
-			assert(static_cast<size_t>(old_coefs.size()) == prev_dofs.size());
-			assert(static_cast<size_t>(new_coefs.size()) == curr_dofs.size());
-			assert(static_cast<size_t>(new_coefs.size()) == this->n_dofs());
+			assert(old_coefs.size() == prev_dofs.size());
+			assert(new_coefs.size() == curr_dofs.size());
+			assert(new_coefs.size() == this->n_dofs());
 
 			//lambda to directly transfer a coefficient
 			auto transfer = [&](const double val, const DOF_t dof) {
