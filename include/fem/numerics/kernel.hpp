@@ -1,5 +1,6 @@
 #pragma once
 
+#include "mesh/keys/voxel_key.hpp"
 #include "util/quadrature_rules.hpp"
 
 #include<type_traits>
@@ -144,7 +145,7 @@ namespace GV
 	template<typename... Ts>
 	struct TypeList {};
 
-	template<uint64_t N_QUAD_POINTS, typename BilinearList, typename LinearList>
+	template<uint64_t N_QUAD_POINTS, typename BilinearList, typename LinearList = TypeList<>>
 	struct Kernel;
 
 
@@ -158,12 +159,16 @@ namespace GV
 	template<uint64_t N_QUAD_POINTS, typename... BiLinearForms_ts, typename... LinearForms_ts>
 	struct Kernel<N_QUAD_POINTS, TypeList<BiLinearForms_ts...>, TypeList<LinearForms_ts...>>
 	{
-		Kernel(const double dx, const double dy, const double dz,
-			BiLinearForms_ts&... B_forms_,
-			LinearForms_ts&...   L_forms_) : 
-		B_forms(B_forms_...),
-		L_forms(L_forms_...),
-		mesh_diag{dx,dy,dz} {}
+		Kernel(	BiLinearForms_ts&... B_forms_,
+				LinearForms_ts&...   L_forms_) : 
+			B_forms(B_forms_...),
+			L_forms(L_forms_...) {
+				//get the diagonal of the mesh to compute the jacobians
+				const auto diag = B_form<0>().trial_handler.mesh.high - B_form<0>().trial_handler.mesh.low;
+				mesh_diag[0] = diag[0];
+				mesh_diag[1] = diag[1];
+				mesh_diag[2] = diag[2];
+			}
 
 
 		//organize forms and collect types
@@ -234,7 +239,13 @@ namespace GV
 		void B_compute();
 
 		template<uint64_t I>
+		inline void B_scatter() {B_form<I>().scatter();}
+
+		template<uint64_t I>
 		void L_compute();
+
+		template<uint64_t I>
+		inline void L_scatter() {L_form<I>().scatter();}
 
 		void compute_all() {
 			[this]<uint64_t... Is>(std::index_sequence<Is...>) {
@@ -268,7 +279,7 @@ namespace GV
 		//container to handle projecting from the quadrature element to the support elements
 		QuadPointMap<QuadElem_t,N_QUAD_POINTS> q_map;
 		QuadElem_t q_elem; //current quadrature element (pass to bilinear forms for jacobian)
-		const double mesh_diag[3];
+		double mesh_diag[3];
 		double Jac[3]; //jacobian diagonal
 	};
 	

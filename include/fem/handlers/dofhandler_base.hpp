@@ -21,7 +21,7 @@ namespace GV
 		using DOF_t      = DOF_type;
 		using QuadElem_t = typename DOF_t::QuadElem_t;
 		using DOFKey_t   = typename DOF_t::Key_t;
-		using MeshKey_t  = typename DOF_t::Key_t::NonPeriodicType;
+		using MeshKey_t  = typename DOF_t::Key_t::NonPeriodicVariant;
 		using Mesh_t     = Mesh_type;
 		using Elem_t     = typename Mesh_t::VoxelElement;
 		using Vert_t     = typename Mesh_t::VoxelVertex;
@@ -37,7 +37,7 @@ namespace GV
 			VoxelEquivFeature<MeshKey_t, typename Mesh_t::VoxelFace>    ||
 			VoxelEquivFeature<MeshKey_t, typename Mesh_t::VoxelVertex>,
 			"DofHandlerBase - the feature key for the DOF must match the corresponding feature key of the mesh.");
-		static_assert(VoxelEquivFeature<Elem_t, typename DOF_type::QuadElem_t::NonPeriodicType>,
+		static_assert(VoxelEquivFeature<Elem_t, typename DOF_type::QuadElem_t::NonPeriodicVariant>,
 			"DofHandlerBase - the DOF quadrature element and the mesh element must be of an equivalent type");
 
 		//we can iterate over the mesh and REQUEST mesh refinement
@@ -101,7 +101,7 @@ namespace GV
 		inline const auto& dof_to_idx() 		  	  const {return dof_to_idx_map;}
 		inline uint64_t compressed_index(const DOF_t dof) const {
 			const auto it = dof_to_idx_map.find(dof);
-			return it != dof_to_idx_map.end() ? it->second : uint64_t{-1};
+			return it != dof_to_idx_map.end() ? it->second : uint64_t(-1);
 		}
 
 		//simple management operations

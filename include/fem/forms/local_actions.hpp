@@ -1,6 +1,7 @@
 #pragma once
 
 #include <span>
+#include <type_traits>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -9,7 +10,9 @@
 namespace GV
 {	
 	template<typename T>
-	void local_multiply(std::span<T> y, std::span<const T> x, std::span<const T> loc_mat_row_major)
+	void local_multiply(std::span<T> y, 
+						std::span<std::type_identity_t<const T>> x, 
+						std::span<std::type_identity_t<const T>> loc_mat_row_major)
 	{
 		//Compute y = M*x
 
@@ -26,7 +29,9 @@ namespace GV
 	}
 
 	template<typename T>
-	void local_multiply_transpose(std::span<T> y, std::span<const T> x, std::span<const T> loc_mat_row_major)
+	void local_multiply_transpose(std::span<T> y, 
+						std::span<std::type_identity_t<const T>> x, 
+						std::span<std::type_identity_t<const T>> loc_mat_row_major)
 	{
 		//Compute y = M^t*x
 		const uint64_t n = y.size();
@@ -42,7 +47,9 @@ namespace GV
 	}
 
 	template<typename T>
-	void local_jacobi(std::span<T> y, std::span<const T> x, std::span<const T> loc_mat_row_major)
+	void local_jacobi(	std::span<T> y, 
+						std::span<std::type_identity_t<const T>> x, 
+						std::span<std::type_identity_t<const T>> loc_mat_row_major)
 	{
 		//Compute y = D^-1 * (x - (L+U)*y) as one iteration of the jacobi method to approximate y=M_inv*x
 		const uint64_t n = y.size();
@@ -59,7 +66,9 @@ namespace GV
 	}
 
 	template<typename T>
-	void local_gauss_seidel(std::span<T> y, std::span<const T> x, std::span<const T> loc_mat_row_major)
+	void local_gauss_seidel(std::span<T> y, 
+							std::span<std::type_identity_t<const T>> x, 
+							std::span<std::type_identity_t<const T>> loc_mat_row_major)
 	{
 		//Compute y = L^-1 * (x - U*y) as one iteration of the gauss-seidel method to approximate y=M_inv*x
 		const uint64_t n = y.size();
@@ -76,7 +85,9 @@ namespace GV
 	}
 
 	template<typename T>
-	void local_gauss_seidel_backward(std::span<T> y, std::span<const T> x, std::span<const T> loc_mat_row_major)
+	void local_gauss_seidel_backward(	std::span<T> y, 
+										std::span<std::type_identity_t<const T>> x, 
+										std::span<std::type_identity_t<const T>> loc_mat_row_major)
 	{
 		//Compute y = U^-1 * (x - L*y) as one iteration of the gauss-seidel method to approximate y=M_inv*x
 		const uint64_t n = y.size();

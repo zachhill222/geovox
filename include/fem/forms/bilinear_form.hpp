@@ -58,8 +58,8 @@ namespace GV
 	//additionally, based on boundary conditions, the bilinear form may be responsible for applying boundary conditions to the
 	//local matrix after it is assembled by the kernel (with 'natural' BC).
 	//for better convenience when applying BC as a post processing step, the full local matrix is stored, even in the symmetric case.
-	template<typename 	TrialHandler_type,
-			 typename 	TestHandler_type,
+	template<typename 	TestHandler_type,
+			 typename 	TrialHandler_type,
 			 bool 		IS_SYMMETRIC_=false,
 			 typename 	Action_type = ScatterAction>
 	struct BilinearForm {
@@ -79,8 +79,8 @@ namespace GV
 		using MatStorage_t = CSR_COO<TestDOF_t,TrialDOF_t>;
 		using MatRow_t = typename MatStorage_t::Row_t;
 
-		using QuadElem_t = typename TrialDOF_t::QuadElem_t::NonPeriodicType;
-		static_assert(std::same_as<typename TrialDOF_t::QuadElem_t::NonPeriodicType, typename TestDOF_t::QuadElem_t::NonPeriodicType>,
+		using QuadElem_t = typename TrialDOF_t::QuadElem_t::NonPeriodicVariant;
+		static_assert(std::same_as<typename TrialDOF_t::QuadElem_t::NonPeriodicVariant, typename TestDOF_t::QuadElem_t::NonPeriodicVariant>,
 			"BilinearForm - The test and trial dofs must have compatible quadrature elements.");
 
 		
@@ -124,14 +124,16 @@ namespace GV
 		inline void set_vecs(ContainerA_t& y, const ContainerB_t& x) requires MatVecActionType<Action_type> {
 			vec_x = as_span(x);
 			vec_y = as_span(y);
-
-			//pull x and y values
-			//y must be initialized before this (e.g., set to 0 or a result from a previous iteration)
-			init_loc_x();
-			init_loc_y();
+			if (loc_x.size()>0) {init_loc_x();}
 		}
 
-		uint64_t n_test, m_trial;
+		inline void set_vecs(std::span<double> y, std::span<const double> x) requires MatVecActionType<Action_type> {
+			vec_x = x;
+			vec_y = y;
+			if (loc_x.size()>0) {init_loc_x();}
+		}
+
+		uint64_t n_test=0, m_trial=0;
 
 		template<typename ContainerA_t, typename ContainerB_t>
 			requires (!IS_SYMMETRIC) &&
@@ -153,6 +155,7 @@ namespace GV
 			if constexpr (MatVecActionType<Action_type>) {
 				loc_x.resize(m_trial);
 				loc_y.resize(n_test, 0.0);
+				if (loc_x.size()>0 && vec_x.size()>0) {init_loc_x();}
 			}
 		}
 
@@ -174,6 +177,7 @@ namespace GV
 			if constexpr (MatVecActionType<Action_type>) {
 				loc_x.resize(m_trial);
 				loc_y.resize(n_test, 0.0);
+				if (loc_x.size()>0 && vec_x.size()>0) {init_loc_x();}
 			}
 		}
 
@@ -209,13 +213,6 @@ namespace GV
 			}
 		}
 
-		//initialize loc_y by copying the values from vec_y if needed
-		void init_loc_y() requires MatVecActionType<Action_type> {
-			for (uint64_t i=0; i<n_test; ++i) {
-				loc_y[i] = vec_y[loc2global_test[i]];
-			}
-		}
-
 		void init_loc_x() requires MatVecActionType<Action_type> {
 			for (uint64_t j=0; j<m_trial; ++j) {
 				loc_x[j] = vec_x[loc2global_trial[j]];
@@ -235,14 +232,15 @@ namespace GV
 			local_jacobi(as_span(loc_y),as_span(loc_x),as_span(loc_m_v));
 		}
 
+		template<bool FORWARD=true>
 		inline void gauss_seidel() requires MatVecActionType<Action_type> {
 			assert(n_test == m_trial);
-			local_gauss_seidel(as_span(loc_y),as_span(loc_x),as_span(loc_m_v));
-		}
-
-		inline void gauss_seidel_backwards() requires MatVecActionType<Action_type> {
-			assert(n_test == m_trial);
-			local_gauss_seidel_backwards(as_span(loc_y),as_span(loc_x),as_span(loc_m_v));
+			if constexpr (FORWARD) {
+				local_gauss_seidel(as_span(loc_y),as_span(loc_x),as_span(loc_m_v));
+			}
+			else {
+				local_gauss_seidel_backward(as_span(loc_y),as_span(loc_x),as_span(loc_m_v));
+			}	
 		}
 
 		//TODO: because the global storage was moved out of this class, this might be unnecessary

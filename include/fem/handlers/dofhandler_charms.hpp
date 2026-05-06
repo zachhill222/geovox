@@ -24,7 +24,7 @@ namespace GV
 		using DOF_t      = DOF_type;
 		using QuadElem_t = typename DOF_t::QuadElem_t;
 		using DOFKey_t   = typename DOF_t::Key_t;
-		using MeshKey_t  = typename DOF_t::Key_t::NonPeriodicType;
+		using MeshKey_t  = typename DOF_t::Key_t::NonPeriodicVariant;
 		using Mesh_t     = Mesh_type;
 		using Elem_t     = typename Mesh_t::VoxelElement;
 		using Vert_t     = typename Mesh_t::VoxelVertex;

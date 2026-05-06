@@ -12,7 +12,7 @@
 
 namespace GV
 {
-	//A symmetric mass kernel for bilinear forms a(psi,phi) = integral_D grad_phi*grad_psi
+	//A symmetric kernel for bilinear forms a(psi,phi) = integral_D grad_phi*grad_psi
 	template<typename 	Handler_type,
 			 typename 	ActionType 	= ScatterAction,
 			 typename 	DERIVED		= void>

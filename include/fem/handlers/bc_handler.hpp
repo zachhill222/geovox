@@ -3,6 +3,7 @@
 #include <Eigen/SparseCore>
 #include <functional>
 #include <cassert>
+#include <span>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -58,10 +59,12 @@ namespace GV
 
 		//apply all dirichlet BCs to the given matrix and vector.
 		//the active BCs in the correct order must also be supplied
-		void apply(SpMat_t& mat, Vec_t& rhs, const std::vector<DOF_t>& dofs) const {
+		void apply(SpMat_t& mat, Vec_t& rhs, const std::span<const DOF_t> dofs) const {
 			assert(mat.rows() == rhs.size());
 			assert(mat.rows() == static_cast<int>(dofs.size()));
 			assert(mat.isCompressed());
+
+			if (essential_bcs.empty()) {return;}
 
 			const auto outer_ptr = mat.outerIndexPtr();
 			const auto inner_ptr = mat.innerIndexPtr();
@@ -93,7 +96,9 @@ namespace GV
 
 		//apply all dirichlet BCs to the given vector.
 		//can be used for the rhs or for the result of a matrix-vector multiply
-		void apply(Vec_t& vec, const std::vector<DOF_t>& dofs) const {
+		void apply(std::span<double> vec, const std::span<const DOF_t> dofs) const {
+			if (essential_bcs.empty()) {return;}
+
 			#ifdef _OPENMP
 			#pragma omp parallel for //note pred and fun must be thread safe
 			#endif
@@ -107,5 +112,7 @@ namespace GV
 				}
 			}
 		}
+
+
 	};
 }

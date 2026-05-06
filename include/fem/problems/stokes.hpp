@@ -2,18 +2,26 @@
 
 #include "fem/forms/bilinear_H1.hpp"
 #include "fem/forms/bilinear_L2.hpp"
+#include "fem/forms/bilinear_Hdiv.hpp"
 #include "fem/forms/linear_L2.hpp"
 #include "fem/forms/form_actions.hpp"
 
+#include "fem/numerics/kernel.hpp"
+
 #include "fem/handlers/dofhandler_charms.hpp" //TODO: replace with a multigrid specialization
 #include "fem/handlers/bc_handler.hpp"
+
 #include "fem/dofs/voxel_dof_Q1.hpp"
+
 #include "mesh/voxel_mesh.hpp"
 
 #include "util/concepts.hpp"
+#include "util/point.hpp"
 
 #include <span>
 #include <vector>
+#include <string>
+#include <fstream>
 
 #include <Eigen/SparseCore>
 
@@ -47,8 +55,15 @@ namespace GV
 	// each B_* is a non-symmetric L2-L2 mass matrix with entries
 	// B_*_ij = int_D( phi_j * psi_i ) where phi_j is a pressure trial function
 	// and psi_i is a velocity test function.
-	// 
-	// Note that because the dofs for u,v,w are the same, B_x, B_y, and B_z are identical.
+	//
+	// Following the paper "Efficient Uzawa algorithms with projection strategies for geodynamic Stokes flow" by
+	// Jang, Lee, Thieulot, Choi, and So, we use the notation
+	//
+	// [K   G][U]	[F]
+	// [G^T 0][P] = [H]
+	//
+	// Where U is the concatenation of u, v, w and similar for F, and K is the block diagonal matrix with diagonal blocks mu*A_s and
+	// G is the (tall) gradient matrix [B_x^T B_y^T B_z^T]
 	//
 	// We use the trial spaces Q1-iso-Q2 for u,v,w and Q1 for p.
 	// This is implemented by refining the geometry to depth d and setting the
@@ -58,8 +73,10 @@ namespace GV
 	template<uint64_t BC=7, uint64_t MAX_DEPTH=10>
 	class Stokes
 	{
-		using Mesh_t  		= VoxelMesh<MAX_DEPTH,false>; //TODO: use Morton order and mesh coloring
+		public:
+		using Mesh_t  		= VoxelMesh<MAX_DEPTH>; //TODO: use Morton order and mesh coloring
 		using Elem_t        = typename Mesh_t::VoxelElement;
+		using Vert_t  		= typename Mesh_t::VoxelVertex;
 		using DofKey_t 		= typename Mesh_t::VoxelVertex::PeriodicVariant<BC>;
 		using DOF_t    		= VoxelQ1<DofKey_t>;
 		using Handler_t 	= DofHandlerCharms<Mesh_t,DOF_t>; //TODO: replace with multigrid handler?
@@ -67,240 +84,333 @@ namespace GV
 
 		template<typename Action_type>
 		using BilinH1_t 	= SymmetricH1<Handler_t,Action_type>;
-		template<typename Action_type>
-		using BilinL2_t 	= BilinearL2<Handler_t,false,Action_type>;
-		template<typename Action_type>
-		using LinearL2_t	= LinearL2<Handler_t,Action_type>;
-		template<typename Action_type>
-		using Kernel_t 		= Kernel<4,TypeList<BilinH1_t<Action_type>,BilinL2_t<Action_type>>, TypeList<LinearL2_t<Action_type>>>;
-
-		using Vec_t 		= Eigen::VectorXd;
+		template<int component, typename Action_type>
+		using BilinHdiv_t   = BilinearHdiv<Handler_t,Handler_t,component,Action_type>; //for b(V,q) = -int(div(V)*q) with vector test functions V
+		template<int component, typename Action_type>
+		using BilinHdivAdj_t = BilinearHdivAdjoint<Handler_t,Handler_t,component,Action_type>; //for b(U,q) = -int(div(U)*q) with scalar test function
 
 		Mesh_t 			mesh;
 		Handler_t 		velocity_handler, pressure_handler; //all velocity dofs are the same
-		BCHandler_t		v_bc, p_bc;
-		// Vec_t 			u,v,w,p;
-		double 			mu     = 0.001; //viscisity
+		std::vector<double> U, P;
+		BCHandler_t		u_bc, v_bc, w_bc, p_bc;
+		double 			mu     = 1.0; //viscosity
+
+		Stokes() : mesh{{0,0,0},{1,1,1}}, velocity_handler{mesh}, pressure_handler{mesh} {}
 
 		void set_depth(const uint64_t depth) {
+			mesh.set_depth(depth);
 			pressure_handler.set_depth(depth);
+
+			mesh.set_depth(depth+1);
 			velocity_handler.set_depth(depth+1);
 
 			const auto np = pressure_handler.n_dofs();
 			const auto nv = velocity_handler.n_dofs();
 
-			// p = Vec_t::Zeros(np);
-			// u = Vec_t::Zeros(nv);
-			// v = Vec_t::Zeros(nv);
-			// w = Vec_t::Zeros(nv);
+			P.assign(np,0.0);
+			U.assign(3*nv,0.0);
+
+			apply_velocity_bc(as_span(U));
 		}
 
-		//apply n steps of smoothing using forward iterations for velocity
-		template<bool FORWARD>
-		void smooth(
-				int n_steps,
-				std::span<double> u,
-				std::span<double> v,
-				std::span<double> w,
-				std::span<const double> res_x,
-				std::span<const double> res_y,
-				std::span<const double> res_z,
-				std::span<const double> res_p) const {
-			
-			//sanity check inputs
-			assert(res_x.size() == res_y.size());
-			assert(res_x.size() == res_z.size());
-			assert(res_x.size() == velocity_handler.n_dofs());
-			assert(res_p.size() == pressure_handler.n_dofs());
-			assert(res_x.size() == u.size());
-			assert(res_y.size() == v.size());
-			assert(res_z.size() == w.size());
+		//apply dirichlet BC for velocity
+		template<typename Predicate, typename Function = std::nullptr_t>
+		void add_velocity_bc(Predicate&& pred, Function&& fun = nullptr) {
+			if constexpr (NULLPTR_T<Function>) {
+				u_bc.add_essential(pred, [](DOF_t dof) {return 0.0;});
+				v_bc.add_essential(pred, [](DOF_t dof) {return 0.0;});
+				w_bc.add_essential(pred, [](DOF_t dof) {return 0.0;});
+			}
+			else {
+				u_bc.add_essential(pred, [fun](DOF_t dof) {return fun(dof)[0];});
+				v_bc.add_essential(pred, [fun](DOF_t dof) {return fun(dof)[1];});
+				w_bc.add_essential(pred, [fun](DOF_t dof) {return fun(dof)[2];});
+			}
+		}
 
-			//build the forms and kernel to smooth the velocity dofs
-			using Kernel_type = Kernel<4,
-					TypeList<
-						BilinH1_t<MatVecAction>,  //Au
-						BilinH1_t<MatVecAction>,  //Av
-						BilinH1_t<MatVecAction>,  //Aw
-						BilinL2_t<MatVecAction>>; //Bp_transpose
+		//compute K*U (all three velocities times their corresponding stiffness matrix)
+		void K_U(std::span<double> KU, std::span<const double> U) const {
+			assert(KU.size()>0);
+			assert(KU.size() == U.size());
+			assert(KU.size() == 3*velocity_handler.n_dofs());
 
-			//todo: loop in parallel per-color
-			BilinH1_t<MatVecAction> Au(velocity_handler), Av(velocity_handler), Aw(velocity_handler);
-			BilinL2_t<MatVecAction> Bp(velocity_handler, pressure_handler);
 
-			const auto diag = mesh.high - mesh.low;
-			Kernel_type kernel(diag[0], diag[1], diag[2], Au, Av, Aw, Bp);
+			//get indices for subspans for u, v, w components
+			assert(U.size()%3 == 0);
+			const auto N = U.size() / 3;
 
-			//assign storage and assemble the rhs
-			std::vector<double> bp(res_x.size(), 0.0);
+			//only need one bilinear form
+			using Kernel_type = Kernel<4, TypeList<BilinH1_t<MatVecAction>>>;
+			BilinH1_t<MatVecAction> A_form(velocity_handler);
+			Kernel_type kernel(A_form);
 
-			assert(p.size() == res_p.n_dofs());
-			auto bp_action = [&, this](Elem_t el) {
-				const auto p_dofs = pressure_handler.basis_active(el);
-				const auto v_dofs = velocity_handler.basis_active(el);
+			//set up integrating action over each element
+			//TODO: is having three kernels in parallel better?
+			auto action = [&,this](Elem_t el) {
 				kernel.set_element(el);
-				Bp.set_basis(p_dofs, v_dofs);
-				kernel.template B_compute<3>(); //set up local matrix
-				Bp.multiply(); 					//compute local contribution to B*p
-				Bp.scatter();					//accumulate local contribution into the global vector
+				const auto v_dofs = velocity_handler.basis_active(el);
+				A_form.set_basis(v_dofs, v_dofs);
+				kernel.compute_all();	//compute local stiffness matrix
+				
+				//set each component, multiply, scatter
+				A_form.set_vecs(KU.subspan(0,N), U.subspan(0,N));
+				A_form.multiply();
+				A_form.scatter();
+
+				A_form.set_vecs(KU.subspan(N,N), U.subspan(N,N));
+				A_form.multiply();
+				A_form.scatter();
+
+				A_form.set_vecs(KU.subspan(2*N,N), U.subspan(2*N,N));
+				A_form.multiply();
+				A_form.scatter();
 			};
 
+			//set up predicate to only integrate over active elements (natural BC)
 			auto predicate = [this](Elem_t el) {return mesh.is_active(el);};
-			
-			Bp.set_vecs(bp,p); //current pressure
-			mesh.for_each<Elem_t>(bp_action, predicate);
 
-			//assemble the rhs vectors
-			std::vector<double> rhs_x(res_x.size());
-			std::vector<double> rhs_y(res_y.size());
-			std::vector<double> rhs_z(res_z.size());
-			
-			const double mu_1 = 1.0/mu;
-			for (size_t i=0; i<rhs_x.size(); ++i) {
-				rhs_x[i] = mu_1 * (res_x[i] - bp[i]);
-				rhs_y[i] = mu_1 * (res_y[i] - bp[i]);
-				rhs_z[i] = mu_1 * (res_z[i] - bp[i]);
+			//perform the loop
+			//TODO: parallel by element color?
+			mesh.template for_each<Elem_t>(action, false, predicate);
+
+			//scale result by the viscosity
+			for (size_t i=0; i<KU.size(); ++i) {
+				KU[i] *= mu;
 			}
-
-			//smooth each of the velocity dofs
-			auto action = [&, this](Elem_t el) {
-				const auto v_dofs = velocity_handler.basis_active(el);
-				kernel.set_element(el);
-				Au.set_basis(v_dofs, v_dofs);
-				Av.set_basis(v_dofs, v_dofs);
-				Aw.set_basis(v_dofs, v_dofs);
-				kernel.template B_compute<0>(); //Au
-				kernel.template B_compute<1>(); //Av
-				kernel.template B_compute<2>(); //Aw
-
-				if constexpr (FORWARD) {
-					Au.gauss_seidel();
-					Av.gauss_seidel();
-					Aw.gauss_seidel();
-				}
-				else {
-					Au.gauss_seidel_backwards();
-					Av.gauss_seidel_backwards();
-					Aw.gauss_seidel_backwards();
-				}
-
-				Au.scatter();
-				Av.scatter();
-				Aw.scatter();
-			};
-
-			Au.set_vecs(u,rhs_x);
-			Av.set_vecs(v,rhs_y);
-			Aw.set_vecs(w,rhs_z);
-			for (int n=0; n<n_steps; ++n) {
-				//todo change to parallel over colors
-				mesh.for_each<Elem_t>(action, predicate);
-			}
-
-			//smooth the pressure
 		}
 
-		//solve the system on a coarse grid
-		void smooth(
-				std::span<double> u,
-				std::span<double> v,
-				std::span<double> w,
-				std::span<double> p,
-				std::span<const double> res_x,
-				std::span<const double> res_y,
-				std::span<const double> res_z,
-				std::span<const double> res_p) const {
-			
-			//sanity check inputs
-			assert(res_x.size() == res_y.size());
-			assert(res_x.size() == res_z.size());
-			assert(res_x.size() == velocity_handler.n_dofs());
-			assert(res_p.size() == pressure_handler.n_dofs());
-			assert(res_x.size() == u.size());
-			assert(res_y.size() == v.size());
-			assert(res_z.size() == w.size());
+		//compute some number of iterations of Gauss-Seidel (forwards or backwards) on K*U=F
+		//using the fact that K is block-diagonal with the same matrix for each block
+		template<bool FORWARD=true>
+		void K_inv_gs(std::span<double> U, std::span<const double> F, const int n_steps=1) const {
+			assert(U.size()>0);
+			assert(U.size() == F.size());
+			assert(U.size() == 3*velocity_handler.n_dofs());
 
-			//build the forms and kernel to smooth the velocity dofs
-			using Kernel_type = Kernel<4,
-					TypeList<
-						BilinH1_t<MatVecAction>,  //Au
-						BilinH1_t<MatVecAction>,  //Av
-						BilinH1_t<MatVecAction>,  //Aw
-						BilinL2_t<MatVecAction>>; //Bp_transpose
 
-			//todo: loop in parallel per-color
-			BilinH1_t<MatVecAction> Au(velocity_handler), Av(velocity_handler), Aw(velocity_handler);
-			BilinL2_t<MatVecAction> Bp(velocity_handler, pressure_handler);
+			//get indices for subspans for u, v, w components
+			assert(U.size()%3 == 0);
+			const auto N = U.size() / 3;
 
-			const auto diag = mesh.high - mesh.low;
-			Kernel_type kernel(diag[0], diag[1], diag[2], Au, Av, Aw, Bp);
+			//only need one bilinear form
+			using Kernel_type = Kernel<4, TypeList<BilinH1_t<MatVecAction>>>;
+			BilinH1_t<MatVecAction> A_form(velocity_handler);
+			Kernel_type kernel(A_form);
 
-			//assign storage and assemble the rhs
-			std::vector<double> bp(res_x.size(), 0.0);
-
-			assert(p.size() == res_p.n_dofs());
-			auto bp_action = [&, this](Elem_t el) {
-				const auto p_dofs = pressure_handler.basis_active(el);
-				const auto v_dofs = velocity_handler.basis_active(el);
+			//set up integrating action over each element
+			//TODO: is having three kernels in parallel better?
+			auto action = [&,this](Elem_t el) {
 				kernel.set_element(el);
-				Bp.set_basis(p_dofs, v_dofs);
-				kernel.template B_compute<3>(); //set up local matrix
-				Bp.multiply(); 					//compute local contribution to B*p
-				Bp.scatter();					//accumulate local contribution into the global vector
+				const auto v_dofs = velocity_handler.basis_active(el);
+				A_form.set_basis(v_dofs, v_dofs);
+				kernel.compute_all();	//compute local stiffness matrix
+				
+				//set each component, multiply, scatter
+				A_form.set_vecs(U.subspan(0,N), F.subspan(0,N));
+				A_form.template gauss_seidel<FORWARD>();
+				A_form.scatter();
+
+				A_form.set_vecs(U.subspan(N,N), F.subspan(N,N));
+				A_form.template gauss_seidel<FORWARD>();
+				A_form.scatter();
+
+				A_form.set_vecs(U.subspan(2*N,N), F.subspan(2*N,N));
+				A_form.template gauss_seidel<FORWARD>();
+				A_form.scatter();
 			};
 
+			//set up predicate to only integrate over active elements (natural BC)
 			auto predicate = [this](Elem_t el) {return mesh.is_active(el);};
-			
-			Bp.set_vecs(bp,p); //current pressure
-			mesh.for_each<Elem_t>(bp_action, predicate);
 
-			//assemble the rhs vectors
-			std::vector<double> rhs_x(res_x.size());
-			std::vector<double> rhs_y(res_y.size());
-			std::vector<double> rhs_z(res_z.size());
-			
-			const double mu_1 = 1.0/mu;
-			for (size_t i=0; i<rhs_x.size(); ++i) {
-				rhs_x[i] = mu_1 * (res_x[i] - bp[i]);
-				rhs_y[i] = mu_1 * (res_y[i] - bp[i]);
-				rhs_z[i] = mu_1 * (res_z[i] - bp[i]);
+			//perform the loop
+			//TODO: parallel by element color?
+			for (int n=0; n<n_steps; ++n) {
+				mesh.template for_each<Elem_t>(action, false, predicate);
 			}
 
-			//smooth each of the velocity dofs
-			auto action = [&, this](Elem_t el) {
-				const auto v_dofs = velocity_handler.basis_active(el);
-				kernel.set_element(el);
-				Au.set_basis(v_dofs, v_dofs);
-				Av.set_basis(v_dofs, v_dofs);
-				Aw.set_basis(v_dofs, v_dofs);
-				kernel.template B_compute<0>(); //Au
-				kernel.template B_compute<1>(); //Av
-				kernel.template B_compute<2>(); //Aw
-
-				if constexpr (FORWARD) {
-					Au.gauss_seidel();
-					Av.gauss_seidel();
-					Aw.gauss_seidel();
-				}
-				else {
-					Au.gauss_seidel_backwards();
-					Av.gauss_seidel_backwards();
-					Aw.gauss_seidel_backwards();
-				}
-
-				Au.scatter();
-				Av.scatter();
-				Aw.scatter();
-			};
-
-			Au.set_vecs(u,rhs_x);
-			Av.set_vecs(v,rhs_y);
-			Aw.set_vecs(w,rhs_z);
-			for (int n=0; n<n_steps; ++n) {
-				//todo change to parallel over colors
-				mesh.for_each<Elem_t>(action, predicate);
+			//scale result by the viscosity
+			const double mu_inv = 1.0/mu;
+			for (size_t i=0; i<U.size(); ++i) {
+				U[i] *= mu_inv;
 			}
 		}
-	}
+
+		//compute G*p (result is a vector with the size of U)
+		void G_P(std::span<double> GP, std::span<const double> P) const {
+			assert(GP.size()>0);
+			assert(GP.size() == 3*velocity_handler.n_dofs());
+			assert(P.size()  ==   pressure_handler.n_dofs());
+
+			//get indices for subspans for u, v, w components
+			assert(GP.size()%3 == 0);
+			const auto N = GP.size() / 3;
+
+			//set up the bilinear form for each velocity (test dof) component
+			using Kernel_type = Kernel<4, TypeList<BilinHdiv_t<0,MatVecAction>, BilinHdiv_t<1,MatVecAction>, BilinHdiv_t<2,MatVecAction>>>;
+			BilinHdiv_t<0,MatVecAction> Bx_form(velocity_handler, pressure_handler);
+			BilinHdiv_t<1,MatVecAction> By_form(velocity_handler, pressure_handler);
+			BilinHdiv_t<2,MatVecAction> Bz_form(velocity_handler, pressure_handler);
+			Kernel_type kernel(Bx_form, By_form, Bz_form);
+
+			//assign subspans to each form
+			Bx_form.set_vecs(GP.subspan(0,N),   P);
+			By_form.set_vecs(GP.subspan(N,N),   P);
+			Bz_form.set_vecs(GP.subspan(2*N,N), P);
+
+			//define integration action
+			auto action = [&,this](Elem_t el) {
+				kernel.set_element(el);
+				const auto v_dofs = velocity_handler.basis_active(el);
+				const auto p_dofs = pressure_handler.basis_active(el);
+
+				Bx_form.set_basis(v_dofs, p_dofs);
+				By_form.set_basis(v_dofs, p_dofs);
+				Bz_form.set_basis(v_dofs, p_dofs);
+				
+				kernel.compute_all();
+				
+				//set each component, multiply, scatter
+				Bx_form.multiply();
+				By_form.multiply();
+				Bz_form.multiply();
+				
+				kernel.scatter_all();
+			};
+
+			//set up predicate to only integrate over active elements (natural BC)
+			auto predicate = [this](Elem_t el) {return mesh.is_active(el);};
+
+			//perform the loop
+			//TODO: parallel by element color?
+			mesh.template for_each<Elem_t>(action, false, predicate);
+		}
+
+
+		//compute GT*U (result is a vector with the size of P)
+		void GT_U(std::span<double> GTU, std::span<const double> U) const {
+			assert(GTU.size()>0);
+			assert(GTU.size() ==   pressure_handler.n_dofs());
+			assert(U.size()   == 3*velocity_handler.n_dofs());
+
+			//get indices for subspans for u, v, w components
+			assert(U.size()%3 == 0);
+			const auto N = U.size() / 3;
+
+			//set up the bilinear form for each velocity (trial dof) component
+			using Kernel_type = Kernel<4, TypeList<BilinHdivAdj_t<0,MatVecAction>, BilinHdivAdj_t<1,MatVecAction>, BilinHdivAdj_t<2,MatVecAction>>>;
+			BilinHdivAdj_t<0,MatVecAction> Bx_t_form(pressure_handler, velocity_handler);
+			BilinHdivAdj_t<1,MatVecAction> By_t_form(pressure_handler, velocity_handler);
+			BilinHdivAdj_t<2,MatVecAction> Bz_t_form(pressure_handler, velocity_handler);
+			Kernel_type kernel(Bx_t_form, By_t_form, Bz_t_form);
+
+			//assign subspans to each form
+			Bx_t_form.set_vecs(GTU, U.subspan(0,N));
+			By_t_form.set_vecs(GTU, U.subspan(N,N));
+			Bz_t_form.set_vecs(GTU, U.subspan(2*N,N));
+
+			//define integration action
+			auto action = [&,this](Elem_t el) {
+				kernel.set_element(el);
+				const auto v_dofs = velocity_handler.basis_active(el);
+				const auto p_dofs = pressure_handler.basis_active(el);
+
+				Bx_t_form.set_basis(p_dofs, v_dofs);
+				By_t_form.set_basis(p_dofs, v_dofs);
+				Bz_t_form.set_basis(p_dofs, v_dofs);
+				
+				kernel.compute_all();
+				
+				//set each component, multiply, scatter
+				Bx_t_form.multiply();
+				By_t_form.multiply();
+				Bz_t_form.multiply();
+
+				kernel.scatter_all();
+			};
+
+			//set up predicate to only integrate over active elements (natural BC)
+			auto predicate = [this](Elem_t el) {return mesh.is_active(el);};
+
+			//perform the loop
+			//TODO: parallel by element color?
+			mesh.template for_each<Elem_t>(action, false, predicate);
+		}
+
+		//apply the velocity BC
+		void apply_velocity_bc(std::span<double> U) const {
+			assert(U.size() == 3*velocity_handler.n_dofs());
+			const size_t N = U.size()/3;
+			u_bc.apply(U.subspan(0,  N), as_span(velocity_handler.curr_compressed_dofs()));
+			v_bc.apply(U.subspan(N,  N), as_span(velocity_handler.curr_compressed_dofs()));
+			w_bc.apply(U.subspan(2*N,N), as_span(velocity_handler.curr_compressed_dofs()));
+		}
+
+		//apply a standard Uzawa iterations using some number of inner Gauss-Seidel iterations
+		template<bool FORWARD=true>
+		void standard_uzawa(std::span<double> U, std::span<double> P, std::span<const double> F, std::span<const double> H, const double w, const int n) const {
+			LogTime timer{"Stokes::standard_uzawa"};
+			assert(U.size() == F.size());
+			assert(P.size() == H.size());
+			assert(w>0.0);
+
+			//update U: K*U = F - G*P
+			std::vector<double> rhs(U.size(), 0.0);
+			G_P(rhs, P);
+			#pragma omp simd
+			for (size_t i=0; i<rhs.size(); ++i) {
+				rhs[i] = F[i] - rhs[i];
+			}
+			K_inv_gs<FORWARD>(U, rhs, n);
+			apply_velocity_bc(U);
+
+			//update P: P += w*(G^T * U - H)
+			rhs.assign(P.size(), 0.0);
+			GT_U(rhs, U);
+			#pragma omp simd
+			for (size_t i=0; i<rhs.size(); ++i) {
+				P[i] += w*(rhs[i] - H[i]);
+			}
+		}
+
+		//save solution
+		void save_as(const std::string filename) const {
+			LogTime timer{"Stokes::save_as"};
+
+			std::ofstream file(filename);
+			if (!file.is_open()) {
+				throw std::runtime_error("Stokes::save_as - could not open file: " + filename);
+			}
+
+			//write the mesh and get the number of vertices
+			const auto n_verts = mesh.write_unstructured_vtk(file);
+
+			//interpolate the solution to the vertex values
+			auto p_vals = pressure_handler.interpolate_to_vertices(P, n_verts);
+
+			const auto N = U.size()/3;
+			auto u_vals = velocity_handler.interpolate_to_vertices(as_span(U, 0,  N), n_verts);
+			auto v_vals = velocity_handler.interpolate_to_vertices(as_span(U, N,  N), n_verts);
+			auto w_vals = velocity_handler.interpolate_to_vertices(as_span(U, 2*N,N), n_verts);
+
+			//append solution header
+			file << "POINT_DATA " << n_verts << "\n";
+			mesh.append_unstructured_point_data_vtk(
+				file,
+				"SCALARS pressure float 1\nLOOKUP_TABLE default",
+				n_verts,
+				[&](Vert_t vtx) {return p_vals[vtx.linear_index()];});
+
+			mesh.append_unstructured_point_data_vtk(
+				file,
+				"VECTORS velocity float 3\nLOOKUP_TABLE default",
+				n_verts,
+				[&](Vert_t vtx) {return Point<3,float>{
+							u_vals[vtx.linear_index()], 
+							v_vals[vtx.linear_index()], 
+							w_vals[vtx.linear_index()]};
+						}
+			);
+		}
+	};
 }
 

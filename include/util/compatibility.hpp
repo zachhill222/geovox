@@ -3,9 +3,9 @@
 
 #include <span>
 #include <vector>
+#include <cassert>
+
 #include <Eigen/SparseCore>
-
-
 
 namespace GV
 {
@@ -17,6 +17,18 @@ namespace GV
 
 	template<typename T>
 	inline std::span<const T> as_span(const std::vector<T>& v) {return {v.data(), v.size()};}
+
+	template<typename T>
+	inline std::span<T> as_span(std::vector<T>& v, const size_t start, const size_t length) {
+		assert(start+length <= v.size());
+		return {v.data()+start, length};
+	}
+
+	template<typename T>
+	inline std::span<const T> as_span(const std::vector<T>& v, const size_t start, const size_t length) {
+		assert(start+length <= v.size());
+		return {v.data()+start, length};
+	}
 
 	template<typename T>
 	inline std::span<T> as_span(std::span<T>& v) {return v;}

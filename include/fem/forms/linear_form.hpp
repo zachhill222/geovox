@@ -47,8 +47,7 @@ namespace GV
 		using Mesh_t       = typename TestHandler_type::Mesh_t;
 		using QuadElem_t   = typename TestDOF_t::QuadElem_t::NonPeriodicType;
 		using VecStorage_t = std::unordered_map<TestDOF_t, double, typename TestDOF_t::Hash>;
-		using Action_t     = decltype<Action_type>;
-
+		
 		LinearForm(const TestHandler_type& handler) : handler(handler) {}
 
 		const TestHandler_type& 	handler;    //link to the dof handler
