@@ -242,10 +242,22 @@ namespace GV
 		inline void B_scatter() {B_form<I>().scatter();}
 
 		template<uint64_t I>
+		inline void B_compute_scatter() {
+			B_compute<I>();
+			B_scatter<I>();
+		}
+
+		template<uint64_t I>
 		void L_compute();
 
 		template<uint64_t I>
 		inline void L_scatter() {L_form<I>().scatter();}
+
+		template<uint64_t I>
+		inline void L_compute_scatter() {
+			L_compute<I>();
+			L_scatter<I>();
+		}
 
 		void compute_all() {
 			[this]<uint64_t... Is>(std::index_sequence<Is...>) {

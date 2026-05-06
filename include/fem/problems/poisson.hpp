@@ -91,7 +91,7 @@ namespace GV
 		void integrate() {
 			LogTime timer{"PoissonQ1::integrate"};
 			const auto diag = mesh.high - mesh.low;
-			Kernel_t kernel(diag[0], diag[1], diag[2], stiff_form, rhs_form);
+			Kernel_t kernel(stiff_form, rhs_form);
 			auto action = [this, &kernel](Elem_t el) {
 				const auto el_basis = dofhandler.basis_active(el);
 				kernel.set_element(el);

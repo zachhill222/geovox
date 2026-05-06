@@ -10,7 +10,7 @@
 using Mesh_t    = GV::VoxelMesh<10>;
 using Elem_t    = Mesh_t::VoxelElement;
 using Vert_t    = Mesh_t::VoxelVertex;
-using DofKey_t  = GV::VoxelVertexKey<11,0,0>;
+using DofKey_t  = GV::VoxelVertexKey<10,0>;
 using DOF_t     = GV::VoxelQ1<DofKey_t>;
 using Handler_t = GV::DofHandlerBase<Mesh_t,DOF_t>;
 
@@ -63,8 +63,7 @@ int main(int argc, char* argv[]) {
 	stiff_bl.set_storage(stiff_global_coo);
 
 	//kernel
-	const auto diag = mesh.high - mesh.low;
-	Kernel_t kernel(diag[0], diag[1], diag[2], mass_bl, stiff_bl);
+	Kernel_t kernel(mass_bl, stiff_bl);
 
 	//integrate bilinear forms
 	auto integrate = [&kernel, &dofhandler](Elem_t el) {
@@ -77,8 +76,8 @@ int main(int argc, char* argv[]) {
 		kernel.set_element(el);
 		kernel.B_form<0>().set_basis(el_basis,el_basis);
 		kernel.B_form<1>().set_basis(el_basis,el_basis);
-		kernel.B_compute_scatter<0>();
-		kernel.B_compute_scatter<1>();
+		kernel.compute_all();
+		kernel.scatter_all();
 	};
 
 	{

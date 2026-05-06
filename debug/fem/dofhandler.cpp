@@ -9,7 +9,7 @@
 using Mesh_t   = GV::VoxelMesh<10>;
 using Elem_t   = Mesh_t::VoxelElement;
 using Vert_t   = Mesh_t::VoxelVertex;
-using DofKey_t = GV::VoxelVertexKey<11,1,0>;
+using DofKey_t = GV::VoxelVertexKey<10,1>;
 using DOF_t    = GV::VoxelQ1<DofKey_t>;
 using Basis_t  = GV::DofHandlerCharms<Mesh_t,DOF_t>;
 

@@ -45,7 +45,7 @@ namespace GV
 	struct LinearForm {
 		using TestDOF_t    = typename TestHandler_type::DOF_t;
 		using Mesh_t       = typename TestHandler_type::Mesh_t;
-		using QuadElem_t   = typename TestDOF_t::QuadElem_t::NonPeriodicType;
+		using QuadElem_t   = typename TestDOF_t::QuadElem_t::NonPeriodicVariant;
 		using VecStorage_t = std::unordered_map<TestDOF_t, double, typename TestDOF_t::Hash>;
 		
 		LinearForm(const TestHandler_type& handler) : handler(handler) {}
