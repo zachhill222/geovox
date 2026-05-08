@@ -74,9 +74,13 @@ namespace GV
 			//check that the index logic is correct
 			assert(el.is_valid());
 			assert(key.depth() == el.depth());
-			assert(key.i() - el.i() <= 1);
-			assert(key.j() - el.j() <= 1);
-			assert(key.k() - el.k() <= 1);
+			#ifndef NDEBUG
+				bool found=false;
+				for (const auto spt : support_impl()) {
+					if (spt == static_cast<QuadElem_t>(el)) {found=true; break;}
+				}
+				assert(found);
+			#endif
 			
 			const bool bx = static_cast<bool>(key.i() - el.i());
 			const bool by = static_cast<bool>(key.j() - el.j());
@@ -104,9 +108,13 @@ namespace GV
 
 			//check that the index logic is correct
 			assert(el.is_valid());
-			assert(key.i() - el.i() <= 1);
-			assert(key.j() - el.j() <= 1);
-			assert(key.k() - el.k() <= 1);
+			#ifndef NDEBUG
+				bool found=false;
+				for (const auto spt : support_impl()) {
+					if (spt == static_cast<QuadElem_t>(el)) {found=true; break;}
+				}
+				assert(found);
+			#endif
 			
 			const bool bx = static_cast<bool>(key.i() - el.i());
 			const bool by = static_cast<bool>(key.j() - el.j());

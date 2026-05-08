@@ -1,5 +1,15 @@
-#include "fem/problems/problem_base.hpp" //includes dofs, mesh, and other standard things. defines convenient aliases
-#include "util/log_time.hpp" //time certain routines
+#include "mesh/voxel_mesh.hpp"
+#include "fem/handlers/dofhandler_charms.hpp"
+#include "fem/handlers/bc_handler.hpp"
+#include "fem/forms/bilinear_H1.hpp"
+#include "fem/forms/bilinear_L2.hpp"
+#include "fem/forms/linear_L2.hpp"
+#include "fem/numerics/kernel.hpp"
+#include "fem/dofs/voxel_dof_Q1.hpp"
+
+#include "util/log_time.hpp"
+#include "util/concepts.hpp"
+#include "util/point.hpp"
 
 #include <cmath>
 #include <sstream>
@@ -12,29 +22,30 @@
 
 using namespace GV;
 
-using Mesh_t = VoxelMesh<8,false>;
-
-struct CahnHilliard : BaseProblem<Mesh_t>
+struct CahnHilliard
 {
-	using BASE 		= BaseProblem<Mesh_t>;
-	using DofKey_t  = typename Mesh_t::VoxelVertex::OtherPeriodicType<7>; //periodic BC
+	using Mesh_t 	= VoxelMesh<6>;
+	using DofKey_t  = typename Mesh_t::VoxelVertex::PeriodicVariant<0>; //periodic BC
 	using DOF_t     = VoxelQ1<DofKey_t>;
+	using Handler_t = DofHandlerCharms<Mesh_t,DOF_t>;
 	using Elem_t    = typename Mesh_t::VoxelElement;
 	using Vert_t    = typename Mesh_t::VoxelVertex;
 
-	using H1      	= SymmetricH1<Mesh_t,DOF_t>; //unweighted bilinear form grad u/w * grad phi for both u and w
-	using L2      	= SymmetricL2<Mesh_t,DOF_t>; //unweighted bilinear form u/w * phi for both u and w
-	using Kernel_t	= Kernel<4,TypeList<H1,L2>,TypeList<>>; //kernel for integrating mass and stiffness matrices
+	using H1      	= SymmetricH1<Handler_t>; //unweighted bilinear form grad u/w * grad phi for both u and w
+	using L2      	= SymmetricL2<Handler_t>; //unweighted bilinear form u/w * phi for both u and w
+	using Kernel_t	= Kernel<4,TypeList<H1,L2>>; //kernel for integrating mass and stiffness matrices
+	using COO_t     = typename H1::MatStorage_t; //structure to store sparse matrices in pseudo COO format
 
-	using Vec_t		= typename BASE::Vec_t;		//Eigen::VectorXd for solutions
-	using SpMat_t	= typename BASE::SpMat_t;	//Eigen::SparseMat in RowMajor (CSR)
+	using Vec_t		= Eigen::VectorXd;		//Eigen::VectorXd for solutions
+	using SpMat_t	= Eigen::SparseMatrix<double,Eigen::RowMajor>;	//Eigen::SparseMat in RowMajor (CSR)
 
 	Mesh_t 						mesh;		//primary mesh
-
-	DofHandler<Mesh_t,DOF_t> 	dofhandler;	//dof handler for both u and w
+	Handler_t 					dofhandler;	//dof handler for both u and w
 
 	H1							stif_form;	//bilinear form for grad w * grad phi
 	L2 							mass_form;	//bilinear form for w * phi
+
+	COO_t 						stif_coo, mass_coo;
 
 	Vec_t 						u, w;		//current solutions
 	SpMat_t 					LHS,A,M;	//current mass/stiffness and left hand side matrices (A,M are the same for u and w)
@@ -44,8 +55,6 @@ struct CahnHilliard : BaseProblem<Mesh_t>
 	Eigen::GMRES<SpMat_t, Precon_t> solver;
 	// Eigen::SparseLU<SpMat_t>	solver;
 
-
-
 	//problem parameters
 	double alpha=0.01, k=0.1, dt=0.01;
 	int t_step = 0;
@@ -53,13 +62,16 @@ struct CahnHilliard : BaseProblem<Mesh_t>
 	CahnHilliard() :
 		mesh{{0,0,0},{1,1,1}},
 		dofhandler{mesh},
-		stif_form{mesh},
-		mass_form{mesh}
+		stif_form{dofhandler},
+		mass_form{dofhandler}
 		{
 			#ifdef _OPENMP
 			omp_set_max_active_levels(2);
 			omp_set_nested(1);
 			#endif
+
+			stif_form.set_storage(stif_coo);
+			mass_form.set_storage(mass_coo);
 
 			Logger::log("CahnHilliard initialized");
 		}
@@ -90,12 +102,13 @@ struct CahnHilliard : BaseProblem<Mesh_t>
 	void transfer_solution() {
 		LogTime time("CahnHilliard::transfer_solution");
 
-		dofhandler.save_dof_list();
 		dofhandler.compress_dof_numbers();
 
 		const auto n_dofs = dofhandler.n_dofs();
 		Vec_t u_new = Vec_t::Zero(n_dofs);
 		Vec_t w_new = Vec_t::Zero(n_dofs);
+
+		std::cout << n_dofs << std::endl;
 
 		dofhandler.update_coefs(u, u_new);
 		dofhandler.update_coefs(w, w_new);
@@ -128,22 +141,21 @@ struct CahnHilliard : BaseProblem<Mesh_t>
 		LogTime time("CahnHilliard::integrate_all");
 
 		//clear old data
-		stif_form.global_mat.clear();
-		mass_form.global_mat.clear();
+		stif_coo.clear();
+		mass_coo.clear();
 
 		//initialize kernel for numerical integration. TODO: change to per-thread and loop by element color
-		const auto diag = mesh.high - mesh.low;
-		Kernel_t kernel(diag[0], diag[1], diag[2], stif_form, mass_form);
+		Kernel_t kernel(stif_form, mass_form);
 		
 		//define operations to do on each active element
 		auto action = [this, &kernel](Elem_t el) {
 			const auto el_basis = dofhandler.basis_active(el);
 			kernel.set_element(el);
-			kernel.template B_set_basis<0>(el_basis,el_basis);
-			kernel.template B_set_basis<1>(el_basis,el_basis);
+			stif_form.set_basis(el_basis,el_basis);
+			mass_form.set_basis(el_basis,el_basis);
 
-			kernel.template B_compute_scatter<0>();
-			kernel.template B_compute_scatter<1>();
+			kernel.compute_all();
+			kernel.scatter_all();
 		};
 
 		//define which elements to integrate over
@@ -157,7 +169,7 @@ struct CahnHilliard : BaseProblem<Mesh_t>
 	//assemble LHS matrix
 	void assemble_mats() {
 		LogTime timer{"CahnHilliard::assemble_mats"};
-		const auto& dofs = dofhandler.compressed_dofs();
+		const auto& dofs = dofhandler.curr_compressed_dofs();
 
 		#ifdef _OPENMP
 		#pragma omp parallel
@@ -179,14 +191,25 @@ struct CahnHilliard : BaseProblem<Mesh_t>
 			}
 		}
 
+		check_mats();
+
 		//assemble block matrix left hand side
 		//
 		//	LHS = [M       k*dt*A]
 		//		  [M-a*A   M     ]
 		//
 		//note A and M have the same sparsity structure
-		const auto n = A.rows();
+		const auto n   = A.rows();
 		const auto nnz = A.nonZeros();
+
+		assert(A.nonZeros() == M.nonZeros());
+		for (int r=0; r<n; ++r) {
+		    assert(A.outerIndexPtr()[r] == M.outerIndexPtr()[r]);
+		    assert(A.outerIndexPtr()[r+1] == M.outerIndexPtr()[r+1]);
+		    for (int idx=A.outerIndexPtr()[r]; idx<A.outerIndexPtr()[r+1]; ++idx) {
+		        assert(A.innerIndexPtr()[idx] == M.innerIndexPtr()[idx]);
+		    }
+		}
 
 		LHS = SpMat_t{2*n,2*n};
 		LHS.resizeNonZeros(4*nnz);
@@ -243,6 +266,7 @@ struct CahnHilliard : BaseProblem<Mesh_t>
 		}
 
 		//initialize solver to the new LHS
+		LHS.makeCompressed();
 		init_solver();
 	}
 
@@ -260,11 +284,11 @@ struct CahnHilliard : BaseProblem<Mesh_t>
 		LogTime time("CahnHilliard::step_forward " + std::to_string(t_step));
 
 		//print sizes of matrices and vectors
-		// std::cout << "A: " << A.rows() << " x " << A.cols() << " nnz=" << A.nonZeros() << "\n";
-		// std::cout << "M: " << M.rows() << " x " << M.cols() << " nnz=" << M.nonZeros() << "\n";
-		// std::cout << "LHS: " << LHS.rows() << " x " << LHS.cols() << " nnz=" << LHS.nonZeros() << "\n";
-		// std::cout << "u: " << u.size() << "\n";
-		// std::cout << "w: " << w.size() << "\n";
+		std::cout << "A: " << A.rows() << " x " << A.cols() << " nnz=" << A.nonZeros() << "\n";
+		std::cout << "M: " << M.rows() << " x " << M.cols() << " nnz=" << M.nonZeros() << "\n";
+		std::cout << "LHS: " << LHS.rows() << " x " << LHS.cols() << " nnz=" << LHS.nonZeros() << "\n";
+		std::cout << "u: " << u.size() << "\n";
+		std::cout << "w: " << w.size() << "\n";
 
 		bool success = false;
 		for (int attempt=0; attempt<10; ++attempt) {
@@ -285,7 +309,7 @@ struct CahnHilliard : BaseProblem<Mesh_t>
 
 			//check solution. TODO: wrap fail to converge into a refinement step?
 			if (solver.info() != Eigen::Success) {
-				const auto dofs = dofhandler.compressed_dofs();
+				const auto dofs = dofhandler.curr_compressed_dofs();
 				for (const auto dof : dofs) {dofhandler.refine(dof);}
 				finalize_refine();
 				continue;
@@ -316,7 +340,7 @@ struct CahnHilliard : BaseProblem<Mesh_t>
 		LogTime timer{"CahnHilliard::refine_interface"};
 
 		Vec_t Au = A*u_tmp;
-		const auto& dofs = dofhandler.compressed_dofs();
+		const auto& dofs = dofhandler.curr_compressed_dofs();
 		
 
 		//determine cutoffs
@@ -372,8 +396,8 @@ struct CahnHilliard : BaseProblem<Mesh_t>
 	void check_mats() {
 		const int n = M.rows();
 		Vec_t v = Vec_t::Ones(n);
-		const double mass = v.dot(M*v);
-		std::cout << "1*M*1 = " << mass << "\n";
+		std::cout << "1*M*1 = " << v.dot(M*v) << "\n";
+		std::cout << "1*A*1 = " << v.dot(A*v) << "\n";
 	}
 };
 

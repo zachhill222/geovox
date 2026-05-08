@@ -86,13 +86,13 @@ namespace GV
 		
 		//define various constructors based symmetry
 		//to avoid constructor bloat, call set_storage() to link to the global matrix storage if needed.
-		BilinearForm(const TestHandler_t& handler)
+		explicit BilinearForm(const TestHandler_t& handler)
 			requires (IS_SYMMETRIC)
 			: test_handler(handler), trial_handler(handler) {
 				assert(&test_handler.mesh == &trial_handler.mesh); //both handlers must be defined on the same mesh.
 			}
 		
-		BilinearForm(const TestHandler_t& test_handler, const TrialHandler_t& trial_handler) 
+		explicit BilinearForm(const TestHandler_t& test_handler, const TrialHandler_t& trial_handler) 
 			requires (!IS_SYMMETRIC)
 			:test_handler(test_handler), trial_handler(trial_handler) {
 				assert(&test_handler.mesh == &trial_handler.mesh); //both handlers must be defined on the same mesh.
@@ -110,8 +110,10 @@ namespace GV
 		MatStorage_t* global_mat = nullptr;
 		inline void set_storage(MatStorage_t& coo) requires ScatterActionType<Action_type> {global_mat = &coo;}
 
-		//compute the action of the global matrix on x as y (y=Mx or y=M^t*x)
+		//compute the action of the global matrix on x as y (y=Mx)
 		//Alternatively, apply an iterative method to approximate y=M_inv * x
+		//note that these methods accumulate into the global vector y so it should be initialized to 0 if needed.
+		//we are actually computing y+=Mx or y+=M_inv*x
 		std::span<const double> vec_x;
 		std::span<double>		vec_y;
 		std::vector<double>     loc_x, loc_y;
@@ -122,15 +124,13 @@ namespace GV
 		//add as_span functions if we need a library other than Eigen.
 		template<typename ContainerA_t, typename ContainerB_t>
 		inline void set_vecs(ContainerA_t& y, const ContainerB_t& x) requires MatVecActionType<Action_type> {
-			vec_x = as_span(x);
-			vec_y = as_span(y);
-			if (loc_x.size()>0) {init_loc_x();}
+			set_vecs(as_span(y), as_span(x));
 		}
 
 		inline void set_vecs(std::span<double> y, std::span<const double> x) requires MatVecActionType<Action_type> {
 			vec_x = x;
 			vec_y = y;
-			if (loc_x.size()>0) {init_loc_x();}
+			if (loc_x.size()>0) {init_loc_x();} //if current basis on an element is set
 		}
 
 		uint64_t n_test=0, m_trial=0;
@@ -154,7 +154,7 @@ namespace GV
 
 			if constexpr (MatVecActionType<Action_type>) {
 				loc_x.resize(m_trial);
-				loc_y.resize(n_test, 0.0);
+				loc_y.assign(n_test, 0.0);
 				if (loc_x.size()>0 && vec_x.size()>0) {init_loc_x();}
 			}
 		}
@@ -176,7 +176,7 @@ namespace GV
 
 			if constexpr (MatVecActionType<Action_type>) {
 				loc_x.resize(m_trial);
-				loc_y.resize(n_test, 0.0);
+				loc_y.assign(n_test, 0.0);
 				if (loc_x.size()>0 && vec_x.size()>0) {init_loc_x();}
 			}
 		}
@@ -247,6 +247,7 @@ namespace GV
 		inline auto to_eigen_csr(const std::vector<TestDOF_t>& test_dofs_, const std::vector<TrialDOF_t>& trial_dofs_) const 
 			requires ScatterActionType<Action_type> {
 			if (global_mat==nullptr) {throw std::runtime_error("BilinearForm::to_eigen_csr - called with no global matrix (nullptr)");}
+			global_mat->accumulate();
 			return global_mat->to_eigen_csr(test_dofs_, trial_dofs_);
 		}
 

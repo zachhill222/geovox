@@ -70,27 +70,34 @@ namespace GV
 	// pressure Q1 dofs. Then for each active element, we refine and activate all of its children at depth d+1.
 	// Then the u,v,w dofs are simply the Q1 dofs at this depth d+1.
 
-	template<uint64_t BC=7, uint64_t MAX_DEPTH=10>
+	template<uint64_t V_BC=7, uint64_t P_BC=0, uint64_t MAX_DEPTH=8>
 	class Stokes
 	{
 		public:
 		using Mesh_t  		= VoxelMesh<MAX_DEPTH>; //TODO: use Morton order and mesh coloring
 		using Elem_t        = typename Mesh_t::VoxelElement;
 		using Vert_t  		= typename Mesh_t::VoxelVertex;
-		using DofKey_t 		= typename Mesh_t::VoxelVertex::PeriodicVariant<BC>;
-		using DOF_t    		= VoxelQ1<DofKey_t>;
-		using Handler_t 	= DofHandlerCharms<Mesh_t,DOF_t>; //TODO: replace with multigrid handler?
-		using BCHandler_t	= BCHandler<DOF_t>;
+		using V_DofKey_t 	= typename Mesh_t::VoxelVertex::PeriodicVariant<V_BC>;
+		using P_DofKey_t 	= typename Mesh_t::VoxelVertex::PeriodicVariant<P_BC>;
+		using V_DOF_t    	= VoxelQ1<V_DofKey_t>;
+		using P_DOF_t    	= VoxelQ1<P_DofKey_t>;
+		using V_Handler_t 	= DofHandlerCharms<Mesh_t,V_DOF_t>; //TODO: replace with multigrid handler?
+		using P_Handler_t 	= DofHandlerCharms<Mesh_t,P_DOF_t>; //TODO: replace with multigrid handler?
+		using BCHandler_t	= BCHandler<V_DOF_t>;
 
 		template<typename Action_type>
-		using BilinH1_t 	= SymmetricH1<Handler_t,Action_type>;
+		using BilinL2_t 	= SymmetricL2<P_Handler_t,Action_type>;
+		template<typename Action_type>
+		using BilinH1_t 	= SymmetricH1<V_Handler_t,Action_type>;
 		template<int component, typename Action_type>
-		using BilinHdiv_t   = BilinearHdiv<Handler_t,Handler_t,component,Action_type>; //for b(V,q) = -int(div(V)*q) with vector test functions V
+		using BilinHdiv_t   = BilinearHdiv<V_Handler_t,P_Handler_t,component,Action_type>; //for b(V,q) = -int(div(V)*q) with vector test functions V
 		template<int component, typename Action_type>
-		using BilinHdivAdj_t = BilinearHdivAdjoint<Handler_t,Handler_t,component,Action_type>; //for b(U,q) = -int(div(U)*q) with scalar test function
+		using BilinHdivAdj_t = BilinearHdivAdjoint<P_Handler_t,V_Handler_t,component,Action_type>; //for b(U,q) = -int(div(U)*q) with scalar test function
 
 		Mesh_t 			mesh;
-		Handler_t 		velocity_handler, pressure_handler; //all velocity dofs are the same
+		V_Handler_t 	velocity_handler; //all velocity dofs are the same
+		P_Handler_t		pressure_handler; 
+
 		std::vector<double> U, P;
 		BCHandler_t		u_bc, v_bc, w_bc, p_bc;
 		double 			mu     = 1.0; //viscosity
@@ -109,23 +116,28 @@ namespace GV
 
 			P.assign(np,0.0);
 			U.assign(3*nv,0.0);
-
-			apply_velocity_bc(as_span(U));
 		}
 
 		//apply dirichlet BC for velocity
 		template<typename Predicate, typename Function = std::nullptr_t>
 		void add_velocity_bc(Predicate&& pred, Function&& fun = nullptr) {
 			if constexpr (NULLPTR_T<Function>) {
-				u_bc.add_essential(pred, [](DOF_t dof) {return 0.0;});
-				v_bc.add_essential(pred, [](DOF_t dof) {return 0.0;});
-				w_bc.add_essential(pred, [](DOF_t dof) {return 0.0;});
+				u_bc.add_essential(pred, [](V_DOF_t dof) {return 0.0;});
+				v_bc.add_essential(pred, [](V_DOF_t dof) {return 0.0;});
+				w_bc.add_essential(pred, [](V_DOF_t dof) {return 0.0;});
 			}
 			else {
-				u_bc.add_essential(pred, [fun](DOF_t dof) {return fun(dof)[0];});
-				v_bc.add_essential(pred, [fun](DOF_t dof) {return fun(dof)[1];});
-				w_bc.add_essential(pred, [fun](DOF_t dof) {return fun(dof)[2];});
+				u_bc.add_essential(pred, [fun](V_DOF_t dof) {return fun(dof)[0];});
+				v_bc.add_essential(pred, [fun](V_DOF_t dof) {return fun(dof)[1];});
+				w_bc.add_essential(pred, [fun](V_DOF_t dof) {return fun(dof)[2];});
 			}
+		}
+
+		//cache the dofs that need the dirichlet bc
+		void cache_bc() {
+			u_bc.cache(velocity_handler.curr_compressed_dofs());
+			v_bc.cache(velocity_handler.curr_compressed_dofs());
+			w_bc.cache(velocity_handler.curr_compressed_dofs());
 		}
 
 		//compute K*U (all three velocities times their corresponding stiffness matrix)
@@ -177,6 +189,11 @@ namespace GV
 			for (size_t i=0; i<KU.size(); ++i) {
 				KU[i] *= mu;
 			}
+
+			//apply the boundary conditions to treat each corresponding row as an identity row
+			u_bc.apply_matvec(KU.subspan(0,N),   U.subspan(0,N));
+			v_bc.apply_matvec(KU.subspan(N,N),   U.subspan(N,N));
+			w_bc.apply_matvec(KU.subspan(2*N,N), U.subspan(2*N,N));
 		}
 
 		//compute some number of iterations of Gauss-Seidel (forwards or backwards) on K*U=F
@@ -233,6 +250,9 @@ namespace GV
 			for (size_t i=0; i<U.size(); ++i) {
 				U[i] *= mu_inv;
 			}
+
+			//apply the boundary conditions
+			apply_velocity_bc(U);
 		}
 
 		//compute G*p (result is a vector with the size of U)
@@ -336,6 +356,74 @@ namespace GV
 			mesh.template for_each<Elem_t>(action, false, predicate);
 		}
 
+		//compute M*P (pressure component of the block diagonal preconditioner)
+		void M_P(std::span<double> MP, std::span<const double> P) const {
+			assert(MP.size()>0);
+			assert(MP.size() == P.size());
+			assert(MP.size() == pressure_handler.n_dofs());
+
+			using Kernel_type = Kernel<4, TypeList<BilinL2_t<MatVecAction>>>;
+			BilinL2_t<MatVecAction> M_form(velocity_handler);
+			Kernel_type kernel(M_form);
+
+			//set up integrating action over each element
+			auto action = [&,this](Elem_t el) {
+				kernel.set_element(el);
+				const auto v_dofs = velocity_handler.basis_active(el);
+				M_form.set_basis(v_dofs, v_dofs);
+				kernel.compute_all();	//compute local stiffness matrix
+				
+				//set each component, multiply, scatter
+				M_form.set_vecs(MP,P);
+				M_form.multiply();
+				M_form.scatter();
+			};
+
+			//set up predicate to only integrate over active elements (natural BC)
+			auto predicate = [this](Elem_t el) {return mesh.is_active(el);};
+
+			//perform the loop
+			//TODO: parallel by element color?
+			mesh.template for_each<Elem_t>(action, false, predicate);
+		}
+
+		//compute some number of iterations of Gauss-Seidel (forwards or backwards) on M*P=H
+		//using the fact that K is block-diagonal with the same matrix for each block
+		template<bool FORWARD=true>
+		void M_inv_gs(std::span<double> P, std::span<const double> H, const int n_steps=1) const {
+			assert(P.size()>0);
+			assert(P.size() == H.size());
+			assert(P.size() == pressure_handler.n_dofs());
+
+			//get indices for subspans for u, v, w components
+			using Kernel_type = Kernel<4, TypeList<BilinL2_t<MatVecAction>>>;
+			BilinL2_t<MatVecAction> M_form(velocity_handler);
+			Kernel_type kernel(M_form);
+
+			//set up integrating action over each element
+			//TODO: is having three kernels in parallel better?
+			auto action = [&,this](Elem_t el) {
+				kernel.set_element(el);
+				const auto v_dofs = velocity_handler.basis_active(el);
+				M_form.set_basis(v_dofs, v_dofs);
+				kernel.compute_all();	//compute local stiffness matrix
+				
+				//set each component, multiply, scatter
+				M_form.set_vecs(P, H);
+				M_form.template gauss_seidel<FORWARD>();
+				M_form.scatter();
+			};
+
+			//set up predicate to only integrate over active elements (natural BC)
+			auto predicate = [this](Elem_t el) {return mesh.is_active(el);};
+
+			//perform the loop
+			//TODO: parallel by element color?
+			for (int n=0; n<n_steps; ++n) {
+				mesh.template for_each<Elem_t>(action, false, predicate);
+			}
+		}
+
 		//apply the velocity BC
 		void apply_velocity_bc(std::span<double> U) const {
 			assert(U.size() == 3*velocity_handler.n_dofs());
@@ -361,13 +449,13 @@ namespace GV
 				rhs[i] = F[i] - rhs[i];
 			}
 			K_inv_gs<FORWARD>(U, rhs, n);
-			apply_velocity_bc(U);
 
 			//update P: P += w*(G^T * U - H)
 			rhs.assign(P.size(), 0.0);
 			GT_U(rhs, U);
+			P[0] = 0.0;
 			#pragma omp simd
-			for (size_t i=0; i<rhs.size(); ++i) {
+			for (size_t i=1; i<rhs.size(); ++i) {
 				P[i] += w*(rhs[i] - H[i]);
 			}
 		}
@@ -393,16 +481,18 @@ namespace GV
 			auto w_vals = velocity_handler.interpolate_to_vertices(as_span(U, 2*N,N), n_verts);
 
 			//append solution header
-			file << "POINT_DATA " << n_verts << "\n";
+			file << "POINT_DATA " << n_verts << "\n"
+				 << "FIELD solution 2\n";
+
 			mesh.append_unstructured_point_data_vtk(
 				file,
-				"SCALARS pressure float 1\nLOOKUP_TABLE default",
+				"pressure 1 " + std::to_string(n_verts) + " float",
 				n_verts,
 				[&](Vert_t vtx) {return p_vals[vtx.linear_index()];});
 
 			mesh.append_unstructured_point_data_vtk(
 				file,
-				"VECTORS velocity float 3\nLOOKUP_TABLE default",
+				"velocity 3 " + std::to_string(n_verts) + " float",
 				n_verts,
 				[&](Vert_t vtx) {return Point<3,float>{
 							u_vals[vtx.linear_index()], 
@@ -412,5 +502,12 @@ namespace GV
 			);
 		}
 	};
+
+
+	
+
+
+
+	
 }
 

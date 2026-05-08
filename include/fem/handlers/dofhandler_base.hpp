@@ -50,7 +50,7 @@ namespace GV
 		static constexpr bool OPENMP = Mesh_t::OPENMP;
 
 		//constructor and destructor
-		DofHandlerBase(const Mesh_t& mesh) : mesh(mesh) {}
+		explicit DofHandlerBase(const Mesh_t& mesh) : mesh(mesh) {}
 		virtual ~DofHandlerBase() {
 			delete active_dofs;
 		}
@@ -101,7 +101,7 @@ namespace GV
 		inline const auto& dof_to_idx() 		  	  const {return dof_to_idx_map;}
 		inline uint64_t compressed_index(const DOF_t dof) const {
 			const auto it = dof_to_idx_map.find(dof);
-			return it != dof_to_idx_map.end() ? it->second : uint64_t(-1);
+			return it    != dof_to_idx_map.end() ? it->second : uint64_t(-1);
 		}
 
 		//simple management operations
@@ -113,13 +113,19 @@ namespace GV
 			active_dofs->reset();
 
 			auto action = [this](MeshKey_t key) {
-				const DOF_t dof{static_cast<DOFKey_t>(key)};
+				const DOFKey_t dof_key = static_cast<DOFKey_t>(key);
+
+				//check if the dof can be placed on this feature
+				//this might not happen near periodic boundaries where
+				//the lower index is used
+				if (key != static_cast<MeshKey_t>(dof_key)) {return;}
+
+				const DOF_t dof{dof_key};
 				if (has_active_support(dof)) {
 					active_dofs->set(dof.linear_index());
 				}
 			};
 
-			//TODO: call in parallel if needed
 			#ifdef _OPENMP
 			mesh.template for_each_depth_omp<MeshKey_t>(dd,action);
 			#else

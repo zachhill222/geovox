@@ -2,6 +2,7 @@
 
 #include "mesh/voxel_mesh.hpp"
 #include "fem/handlers/dofhandler_base.hpp"
+#include "util/compatibility.hpp"
 
 #include <type_traits>
 #include <cstdint>
@@ -155,6 +156,12 @@ namespace GV
 		}
 
 		
+		//automatically convert various containers (e.g., std::vector, std::array, Eigen::VectorXd) to spans
+		template<typename ContainerA_t, typename ContainerB_t>
+		inline void update_coefs(ContainerA_t& new_coefs, const ContainerB_t& old_coefs) {
+			update_coefs(as_span(new_coefs), as_span(old_coefs));
+		}
+
 		void update_coefs(std::span<double> new_coefs, std::span<const double> old_coefs) {
 			//transfer each coefficient of old into new
 			//or split its contribution into its children in new
@@ -284,9 +291,7 @@ namespace GV
 				//evaluate the basis functions
 				for (Triple& tr : track_dof_eval) {
 					tr.dof.proj_to_support(tr.el, tr.pt);
-					auto it = std::lower_bound(curr_dofs.begin(), curr_dofs.end(), tr.dof);
-					assert (it != curr_dofs.end());
-					uint64_t idx = std::distance(curr_dofs.begin(), it);
+					uint64_t idx = this->compressed_index(tr.dof);
 					result[i] += coefs[idx] * tr.dof.eval(tr.el, tr.pt);
 				}
 			}

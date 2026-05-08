@@ -53,14 +53,15 @@ namespace GV
 
 		//explicit conversion to the non-periodic type
 		using NonPeriodicVariant = VoxelVertexKey<MAX_DEPTH_,0>;
-		explicit operator NonPeriodicVariant() const {return NonPeriodicVariant{_data_};}
+		explicit operator NonPeriodicVariant() const {return NonPeriodicVariant{_data_&~BASE::ON_M};}
 
 		template<uint64_t OTHER_BC>
 		using PeriodicVariant = VoxelVertexKey<MAX_DEPTH_,OTHER_BC>;
 		
 		template<uint64_t OTHER_BC> requires (OTHER_BC<8)
-		explicit operator PeriodicVariant<OTHER_BC>() const {return PeriodicVariant<OTHER_BC>{_data_};}
-
+		inline explicit operator PeriodicVariant<OTHER_BC>() const {
+			return PeriodicVariant<OTHER_BC>{depth(), i(), j(), k()};
+		}
 
 		//define vertex specific constructors
 		constexpr VoxelVertexKey(const uint64_t dd, const uint64_t ii, const uint64_t jj, const uint64_t kk) :
@@ -69,7 +70,10 @@ namespace GV
 					0, dd, BC, 0) {
 				if (dd>MAX_DEPTH) {_data_ = DOES_NOT_EXIST; return;}
 				if constexpr (PX||PY||PZ) {
-					const uint64_t mv = (uint64_t{1} << dd)+1; //2^d elements per axis, one extra vertex
+					//2^d elements per axis, one extra vertex
+					//note that the vertices need to wrap at the index of the largest element
+					//so that the upper index of the largest element is the lower vertex of the smallest element
+					const uint64_t mv = (uint64_t{1} << dd);
 					if constexpr (PX) {if (ii>=mv) {set_i(0);}}
 					if constexpr (PY) {if (jj>=mv) {set_j(0);}}
 					if constexpr (PZ) {if (kk>=mv) {set_k(0);}}

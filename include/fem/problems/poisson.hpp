@@ -1,6 +1,14 @@
 #pragma once
 
-#include "fem/problems/problem_base.hpp"
+
+#include "mesh/voxel_mesh.hpp"
+#include "fem/handlers/dofhandler_charms.hpp"
+#include "fem/handlers/bc_handler.hpp"
+#include "fem/forms/bilinear_H1.hpp"
+#include "fem/forms/linear_L2.hpp"
+#include "fem/numerics/kernel.hpp"
+#include "fem/dofs/voxel_dof_Q1.hpp"
+
 #include "util/log_time.hpp"
 #include "util/concepts.hpp"
 #include "util/point.hpp"
@@ -20,17 +28,15 @@
 
 namespace GV
 {
-	template<typename Mesh_type>
-	struct Poisson : BaseProblem<Mesh_type>
+	template<typename Mesh_type, uint64_t BC=0>
+	struct Poisson
 	{
-		using BASE = BaseProblem<Mesh_type>;
-
-		using Mesh_t      = typename BASE::Mesh_t;
-		using Elem_t      = typename BASE::Elem_t;
-		using Vert_t      = typename BASE::Vert_t;
+		using Mesh_t      = VoxelMesh<8>;
+		using Elem_t      = typename Mesh_t::VoxelElement;
+		using Vert_t      = typename Mesh_t::VoxelVertex;
 		using Point_t     = Point<3,double>;
 
-		using DOF_t       = VoxelQ1<Vert_t>;
+		using DOF_t       = VoxelQ1<typename Vert_t::PeriodicVariant<BC>>;
 		using Handler_t   = DofHandlerCharms<Mesh_t,DOF_t>;
 		using BCHandler_t = BCHandler<DOF_t>; 
 
@@ -46,15 +52,15 @@ namespace GV
 			{
 				#pragma omp simd
 				for (uint64_t i=0; i<N; ++i) {
-					val[i] = x[i]+y[i]+z[i];
+					val[i] = x[i] < 0.5 ? -1.0 : 1.0;
 				}
 			}
 		};
 
 		using Kernel_t = Kernel<4,TypeList<StiffForm>, TypeList<RHSForm>>;
 
-		using SpMat_t = typename BASE::SpMat_t;
-		using Vec_t   = typename BASE::Vec_t;
+		using SpMat_t = Eigen::SparseMatrix<double,Eigen::RowMajor>;
+		using Vec_t   = Eigen::VectorXd;
 
 		Mesh_t			mesh;
 		Handler_t   	dofhandler;
@@ -72,8 +78,8 @@ namespace GV
 			mesh{low, high},
 			dofhandler{mesh},
 			bchandler{},
-			stiff_form{mesh},
-			rhs_form{mesh} {
+			stiff_form{dofhandler},
+			rhs_form{dofhandler} {
 				stiff_form.set_storage(stiff_mat_coo);
 				rhs_form.set_storage(rhs_storage);
 			}
@@ -85,6 +91,7 @@ namespace GV
 			mesh.set_depth(dd);
 			dofhandler.set_depth(dd);
 			dofhandler.compress_dof_numbers();
+			bchandler.cache(dofhandler.curr_compressed_dofs());
 			assert(dofhandler.curr_compressed_dofs().size() == dofhandler.n_dofs() );
 		}
 
@@ -135,6 +142,12 @@ namespace GV
 			omp_set_max_active_levels(1);
 			omp_set_nested(0);
 			#endif
+		}
+
+		//cache the boundary dofs
+		void cache_bc() {
+			LogTime timer{"PoissonQ1::cache_bc"};
+			bchandler.cache(dofhandler.curr_compressed_dofs());
 		}
 
 		//apply BC to A and the rhs

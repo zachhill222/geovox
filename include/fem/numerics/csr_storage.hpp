@@ -2,8 +2,7 @@
 
 #include<vector>
 #include<algorithm>
-#include<numeric>
-#include<memory_resource> //TODO: arena allocating didn't seem to do much. think about this.
+#include<numeric> //for iota
 #include<Eigen/SparseCore>
 #include "util/log_time.hpp"
 
@@ -64,16 +63,15 @@ namespace GV
 	struct SparseRow
 	{
 		using Entry_t = SparseRowEntry<ColKey_t>;
-		using Iter_t  = std::pmr::vector<Entry_t>::iterator;
-		using CIter_t = std::pmr::vector<Entry_t>::const_iterator;
+		using Iter_t  = std::vector<Entry_t>::iterator;
+		using CIter_t = std::vector<Entry_t>::const_iterator;
 
 		RowKey_t row_id;
-		std::pmr::vector<Entry_t> entries; 
+		std::vector<Entry_t> entries; 
 		SparseRow() : row_id{} {}
 		explicit SparseRow( const RowKey_t r_id, 
-							uint64_t nz=0,
-							std::pmr::memory_resource* mr = std::pmr::get_default_resource() //use arena/pool allocators
-							) : row_id{r_id}, entries{mr} {entries.reserve(nz);}
+							uint64_t nz=0
+							) : row_id{r_id}, entries{} {entries.reserve(nz);}
 		
 		//for accessing, the entries must be sorted
 		inline void sort() {std::sort(entries.begin(), entries.end());}
@@ -229,8 +227,9 @@ namespace GV
 		}
 
 		//comparison for sorting rows by their id
+		constexpr bool operator<(const SparseRow& other)  const {return row_id < other.row_id;}
 		constexpr bool operator==(const SparseRow& other) const {return row_id == other.row_id;}
-		constexpr bool operator==(const RowKey_t& r_id) const {return row_id < r_id;}
+		constexpr bool operator==(const RowKey_t& r_id) const {return row_id == r_id;}
 
 		//add two rows with the same id
 		//this can be used as either a row sum (two different row ids) or as an accumulation
@@ -274,15 +273,13 @@ namespace GV
 	template<typename RowKey_t=uint64_t, typename ColKey_t=uint64_t>
 	struct CSR_COO
 	{
-		std::pmr::monotonic_buffer_resource arena;
-
-		std::pmr::vector<SparseRow<RowKey_t,ColKey_t>> rows;
+		std::vector<SparseRow<RowKey_t,ColKey_t>> rows;
 		using Row_t      = SparseRow<RowKey_t,ColKey_t>;
 		using Entry_t    = typename Row_t::Entry_t;
-		using CRowIter_t = std::pmr::vector<Row_t>::const_iterator;
-		using RowIter_t  = std::pmr::vector<Row_t>::iterator;
+		using CRowIter_t = std::vector<Row_t>::const_iterator;
+		using RowIter_t  = std::vector<Row_t>::iterator;
 
-		explicit CSR_COO(const uint64_t initial_size = 1<<20) : arena{initial_size}, rows{&arena} {}
+		explicit CSR_COO(const uint64_t initial_size = 1<<20) : rows{} {}
 
 		//accumulate and compress the rows
 		void accumulate_each_row() {
@@ -327,12 +324,12 @@ namespace GV
 		Row_t& get_row(const RowKey_t r_id) {
 			RowIter_t it = lower_bound(r_id);
 			if (it==rows.end()) {
-				rows.emplace_back(r_id, 0, &arena);
+				rows.emplace_back(r_id, 0);
 				return rows.back();
 			}
 			
 			if (it->row_id != r_id) {
-				return *rows.insert(it, Row_t{r_id, 0, &arena});
+				return *rows.insert(it, Row_t{r_id, 0});
 			}
 			else {
 				return *it;
@@ -351,7 +348,7 @@ namespace GV
 		//accumulating two rows with the same id later, we can quickly append a new row
 		//and return a reference to it
 		Row_t& new_row(const RowKey_t r_id) {
-			rows.emplace_back(r_id, 0, &arena);
+			rows.emplace_back(r_id, 0);
 			return rows.back();
 		}
 
@@ -373,7 +370,7 @@ namespace GV
 			RowIter_t it = rows.begin(); //write iterator
 			for (RowIter_t cur = it+1; cur != rows.end(); ++cur) {
 				if (cur->row_id == it->row_id) {
-					it->append(*cur);
+					it->append(std::move(*cur));
 				}
 				else {
 					++it; //done writing to this spot

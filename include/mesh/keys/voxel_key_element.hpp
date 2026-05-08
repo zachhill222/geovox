@@ -51,13 +51,15 @@ namespace GV
 
 		//explicit conversion to the non-periodic type
 		using NonPeriodicVariant = VoxelElementKey<MAX_DEPTH_,0>;
-		explicit operator NonPeriodicVariant() const {return NonPeriodicVariant{_data_};}
+		explicit operator NonPeriodicVariant() const {return NonPeriodicVariant{_data_&~BASE::ON_M};}
 
 		template<uint64_t OTHER_BC>
 		using PeriodicVariant = VoxelElementKey<MAX_DEPTH_,OTHER_BC>;
 		
 		template<uint64_t OTHER_BC> requires (OTHER_BC<8)
-		explicit operator PeriodicVariant<OTHER_BC>() const {return PeriodicVariant<OTHER_BC>{_data_};}
+		inline explicit operator PeriodicVariant<OTHER_BC>() const {
+			return PeriodicVariant<OTHER_BC>{depth(), i(), j(), k()};
+		}
 
 		//define element specific constructors
 		constexpr VoxelElementKey(const uint64_t dd, const uint64_t ii, const uint64_t jj, const uint64_t kk) :

@@ -58,13 +58,15 @@ namespace GV
 
 		//explicit conversion to the non-periodic type and to a periodic type
 		using NonPeriodicVariant = VoxelFaceKey<MAX_DEPTH_,0>;
-		explicit operator NonPeriodicVariant() const {return NonPeriodicVariant{_data_};}
+		explicit operator NonPeriodicVariant() const {return NonPeriodicVariant{_data_&~BASE::ON_M};}
 
 		template<uint64_t OTHER_BC>
 		using PeriodicVariant = VoxelFaceKey<MAX_DEPTH_,OTHER_BC>;
 		
 		template<uint64_t OTHER_BC> requires (OTHER_BC<8)
-		explicit operator PeriodicVariant<OTHER_BC>() const {return PeriodicVariant<OTHER_BC>{_data_};}
+		inline explicit operator PeriodicVariant<OTHER_BC>() const {
+			return PeriodicVariant<OTHER_BC>{axis(), depth(), i(), j(), k()};
+		}
 
 
 		//define face specific constructors
@@ -75,12 +77,13 @@ namespace GV
 				) {
 				if (dd>MAX_DEPTH) {_data_ = DOES_NOT_EXIST; return;}
 				if constexpr (PX||PY||PZ) {
-					const uint64_t mn = (uint64_t{1} << dd); //2^d elements per axis, number of faces in non-axis directions
-					const uint64_t ma = mn+1; //number of faces in the axis direction
 
-					if constexpr (PX) {if (ii>= (aa==0 ? ma : mn) ) {set_i(0);}}
-					if constexpr (PY) {if (jj>= (aa==1 ? ma : mn) ) {set_j(0);}}
-					if constexpr (PZ) {if (kk>= (aa==2 ? ma : mn) ) {set_k(0);}}
+					//for wrapping occurs at the smaller index regardless of the axis direction
+					const uint64_t mi = (uint64_t{1} << dd);
+
+					if constexpr (PX) {if (ii>= mi ) {set_i(0);}}
+					if constexpr (PY) {if (jj>= mi ) {set_j(0);}}
+					if constexpr (PZ) {if (kk>= mi ) {set_k(0);}}
 				}
 			}
 

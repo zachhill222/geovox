@@ -5,6 +5,8 @@
 #include <cassert>
 #include <span>
 
+#include "util/compatibility.hpp"
+
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -52,6 +54,34 @@ namespace GV
 		//store BCs
 		std::vector<EssentialBC> essential_bcs;
 
+		//cache boundary dof indices and which BC they belong to
+		std::vector<uint64_t> boundary_dofs;
+		std::vector<uint64_t> bc_idx;
+		uint64_t compressed_dof_size=0;
+
+		//call this whenever the compressed dof list changes or the list of boundary conditions are updated
+		template<typename Container_t>
+		inline void cache(const Container_t& dofs) {cache(as_span(dofs));}
+
+		void cache(std::span<const DOF_t> dofs) {
+			boundary_dofs.clear();
+			bc_idx.clear();
+			compressed_dof_size = dofs.size();
+
+			for (size_t r=0; r<dofs.size(); ++r) {
+				const DOF_t dof = dofs[r];
+				for (uint64_t b_idx=0; b_idx<essential_bcs.size(); ++b_idx) {
+					const auto& bc = essential_bcs[b_idx];
+					if (bc.pred(dof)) {
+						boundary_dofs.push_back(r);
+						bc_idx.push_back(b_idx);
+						break;
+					}
+				}
+			}
+		}
+
+		//add boundary condition
 		template<typename Pred, typename Fun>
 		inline void add_essential(Pred&& pred, Fun&& fun) {
 			essential_bcs.emplace_back(std::forward<Pred>(pred), std::forward<Fun>(fun));
@@ -59,9 +89,14 @@ namespace GV
 
 		//apply all dirichlet BCs to the given matrix and vector.
 		//the active BCs in the correct order must also be supplied
-		void apply(SpMat_t& mat, Vec_t& rhs, const std::span<const DOF_t> dofs) const {
-			assert(mat.rows() == rhs.size());
-			assert(mat.rows() == static_cast<int>(dofs.size()));
+		inline void apply(SpMat_t& mat, Vec_t& rhs, const std::vector<DOF_t>& dofs) const {
+			apply(mat,rhs,as_span(dofs));
+		}
+
+		void apply(SpMat_t& mat, Vec_t& rhs, std::span<const DOF_t> dofs) const {
+			assert(mat.rows()  == rhs.size());
+			assert(mat.rows()  == static_cast<int>(dofs.size()));
+			assert(dofs.size() == compressed_dof_size);
 			assert(mat.isCompressed());
 
 			if (essential_bcs.empty()) {return;}
@@ -71,48 +106,72 @@ namespace GV
 			const auto val_ptr   = mat.valuePtr();
 
 			#ifdef _OPENMP
-			#pragma omp parallel for //note pred and fun must be thread safe
+			#pragma omp parallel for
 			#endif
-			for (size_t r=0; r<dofs.size(); ++r) {
-				const DOF_t dof = dofs[r];
-				for (const auto& bc : essential_bcs) {
-					if (bc.pred(dof)) {
-						//set row to the identity
-						const int r_start = outer_ptr[r];
-						const int r_end   = outer_ptr[r+1];
+			for (size_t r=0; r<boundary_dofs.size(); ++r) {
+				const int row_idx = static_cast<int>(boundary_dofs[r]);
+				const DOF_t dof   = dofs[boundary_dofs[r]];
+				const auto& bc    = essential_bcs[bc_idx[r]];
+				
+				//set row to the identity
+				const int r_start = outer_ptr[row_idx];
+				const int r_end   = outer_ptr[row_idx+1];
 
-						#pragma omp simd
-						for (int idx=r_start; idx<r_end; ++idx) {
-							val_ptr[idx] = (inner_ptr[idx] == static_cast<int>(r)) ? 1.0 : 0.0;
-						}
-
-						//set rhs
-						rhs[r] = bc.fun(dof);
-						break; //at most one BC per dof
-					}
+				#pragma omp simd
+				for (int idx=r_start; idx<r_end; ++idx) {
+					val_ptr[idx] = (inner_ptr[idx] == row_idx) ? 1.0 : 0.0;
 				}
+
+				//set rhs
+				rhs[row_idx] = bc.fun(dof);
 			}
 		}
 
 		//apply all dirichlet BCs to the given vector.
 		//can be used for the rhs or for the result of a matrix-vector multiply
-		void apply(std::span<double> vec, const std::span<const DOF_t> dofs) const {
+		template<typename ContainerA_t, typename ContainerB_t>
+		inline void apply(ContainerA_t& vec, const ContainerB_t& dofs) const {
+			apply(as_span(vec), as_span(dofs));
+		}
+
+		void apply(std::span<double> vec, std::span<const DOF_t> dofs) const {
+			assert(dofs.size() == compressed_dof_size);
+			assert(vec.size()  == compressed_dof_size);
+
 			if (essential_bcs.empty()) {return;}
 
 			#ifdef _OPENMP
-			#pragma omp parallel for //note pred and fun must be thread safe
+			#pragma omp parallel for
 			#endif
-			for (size_t r=0; r<dofs.size(); ++r) {
-				const DOF_t dof = dofs[r];
-				for (const auto& bc : essential_bcs) {
-					if (bc.pred(dof)) {
-						vec[r] = bc.fun(dof);
-						break;
-					}
-				}
+			for (size_t r=0; r<boundary_dofs.size(); ++r) {
+				const uint64_t row_idx = boundary_dofs[r];
+				const DOF_t dof        = dofs[row_idx];
+				const auto& bc         = essential_bcs[bc_idx[r]];
+				vec[row_idx]           = bc.fun(dof);
 			}
 		}
 
+		//set copy the values of x to y that correspond to a boundary dof
+		//this is useful when computing y=Ax without forming A but when the BCs
+		//still need to be applied
+		
+		template<typename ContainerA_t, typename ContainerB_t>
+		inline void apply_matvec(ContainerA_t& y, const ContainerB_t& x) const {
+			apply_matvec(as_span(y), as_span(x));
+		}
 
+		void apply_matvec(std::span<double> y, std::span<const double> x) const {
+			assert(y.size()==x.size());
+			assert(y.size()==compressed_dof_size);
+			
+			#pragma omp simd
+			for (size_t i=0; i<boundary_dofs.size(); ++i) {
+				const uint64_t idx = boundary_dofs[i];
+				y[idx] = x[idx];
+			}
+		}
 	};
+
+
+	
 }

@@ -48,7 +48,7 @@ namespace GV
 		using QuadElem_t   = typename TestDOF_t::QuadElem_t::NonPeriodicVariant;
 		using VecStorage_t = std::unordered_map<TestDOF_t, double, typename TestDOF_t::Hash>;
 		
-		LinearForm(const TestHandler_type& handler) : handler(handler) {}
+		explicit LinearForm(const TestHandler_type& handler) : handler(handler) {}
 
 		const TestHandler_type& 	handler;    //link to the dof handler
 		std::vector<double>      	loc_b_v; 	//local vector values (n_test)
