@@ -28,7 +28,7 @@
 
 namespace GV
 {
-	template<typename Mesh_type, uint64_t BC=0>
+	template<typename Mesh_type, uint64_t BC=1>
 	struct Poisson
 	{
 		using Mesh_t      = VoxelMesh<8>;
@@ -42,20 +42,14 @@ namespace GV
 
 		using StiffForm   = SymmetricH1<Handler_t>;
 
-		struct RHSForm : public LinearL2<Handler_t,ScatterAction,RHSForm>
-		{
-			using BASE_FORM = LinearL2<Handler_t,ScatterAction,RHSForm>;
-			using BASE_FORM::BASE_FORM;
-		
-			template<uint64_t N>
-			constexpr void eval_w(std::array<double,N>& val, const std::array<double,N>& x, const std::array<double,N>& y, const std::array<double,N>& z) const
-			{
-				#pragma omp simd
-				for (uint64_t i=0; i<N; ++i) {
-					val[i] = x[i] < 0.5 ? -1.0 : 1.0;
-				}
-			}
-		};
+		#pragma omp declare simd
+		static double rhs_fun(double x, double y, double z) {
+			return -100.0*(x*x+y*y+z*z-0.25);}
+
+		#pragma omp declare simd
+		static bool rhs_spt(double x, double y, double z) {return (x*x + y*y + z*z < 0.25);}
+
+		using RHSForm = LinearL2<Handler_t,ScatterAction,decltype(&rhs_fun),decltype(&rhs_spt)>;
 
 		using Kernel_t = Kernel<4,TypeList<StiffForm>, TypeList<RHSForm>>;
 
@@ -79,7 +73,7 @@ namespace GV
 			dofhandler{mesh},
 			bchandler{},
 			stiff_form{dofhandler},
-			rhs_form{dofhandler} {
+			rhs_form{dofhandler,&rhs_fun, &rhs_spt} {
 				stiff_form.set_storage(stiff_mat_coo);
 				rhs_form.set_storage(rhs_storage);
 			}
@@ -91,8 +85,29 @@ namespace GV
 			mesh.set_depth(dd);
 			dofhandler.set_depth(dd);
 			dofhandler.compress_dof_numbers();
-			bchandler.cache(dofhandler.curr_compressed_dofs());
 			assert(dofhandler.curr_compressed_dofs().size() == dofhandler.n_dofs() );
+		}
+
+		//refine the mesh and prolong/interpolate the current solution
+		template<typename DOF_Predicate_t = std::nullptr_t>
+		void refine(DOF_Predicate_t&& pred = nullptr) {
+			for (size_t i=0; i<dofhandler.curr_compressed_dofs().size(); ++i) {
+				const DOF_t dof = dofhandler.get_dof(i);
+				if constexpr (!NULLPTR_T<DOF_Predicate_t>) {
+					if (!pred(dof)) {continue;}
+				}
+
+				dofhandler.refine(dof);
+			}
+
+			//update mesh and compress dofs
+			mesh.process_request_active();
+			dofhandler.compress_dof_numbers();
+
+			//transfer solution to the fine grid
+			const Vec_t solution_copy = solution;
+			solution = Vec_t::Zero(dofhandler.curr_compressed_dofs().size());
+			dofhandler.update_coefs(solution,solution_copy);
 		}
 
 		void integrate() {
@@ -159,12 +174,12 @@ namespace GV
 		void solve() {
 			LogTime timer{"PoissonQ1::solve"};
 
-			// Eigen::ConjugateGradient<SpMat_t, Eigen::Lower|Eigen::Upper> cg;
-			// cg.compute(A);
-			// solution = cg.solve(rhs);
-			Eigen::SparseLU<SpMat_t> lu;
-			lu.compute(A);
-			solution = lu.solve(rhs);
+			Eigen::ConjugateGradient<SpMat_t, Eigen::Lower|Eigen::Upper> cg;
+			cg.compute(A);
+			solution = cg.solve(rhs);
+			// Eigen::SparseLU<SpMat_t> lu;
+			// lu.compute(A);
+			// solution = lu.solve(rhs);
 		}
 
 		void save_as(const std::string filename) const {

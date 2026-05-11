@@ -103,6 +103,7 @@ namespace GV
 			const auto it = dof_to_idx_map.find(dof);
 			return it    != dof_to_idx_map.end() ? it->second : uint64_t(-1);
 		}
+		inline DOF_t get_dof(const uint64_t idx) const {assert(idx<active_dof_list_curr.size()); return active_dof_list_curr[idx];}
 
 		//simple management operations
 		inline void set_all_inactive() 	{active_dofs->reset();}

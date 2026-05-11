@@ -126,6 +126,22 @@ namespace GV
 			return ii==0 || ii==mvi || jj==0 || jj==mvi || kk==0 || kk==mvi;
 		}
 
+		constexpr bool on_bbox_boundary_x() const {
+			const uint64_t mvi = uint64_t{1} << depth();
+			const uint64_t idx = i();
+			return idx==0 || idx==mvi;
+		}
+		constexpr bool on_bbox_boundary_y() const {
+			const uint64_t mvi = uint64_t{1} << depth();
+			const uint64_t idx = j();
+			return idx==0 || idx==mvi;
+		}
+		constexpr bool on_bbox_boundary_z() const {
+			const uint64_t mvi = uint64_t{1} << depth();
+			const uint64_t idx = k();
+			return idx==0 || idx==mvi;
+		}
+
 		inline constexpr double x() const {return std::ldexp(static_cast<double>(i()), -static_cast<int>(depth()));}
 		inline constexpr double y() const {return std::ldexp(static_cast<double>(j()), -static_cast<int>(depth()));}
 		inline constexpr double z() const {return std::ldexp(static_cast<double>(k()), -static_cast<int>(depth()));}

@@ -184,7 +184,7 @@ namespace GV
 				VoxelQ1{Key_t{dd, ii+1, jj,   kk+1}},
 				VoxelQ1{Key_t{dd, ii-1, jj+1, kk+1}},
 				VoxelQ1{Key_t{dd, ii ,  jj+1, kk+1}},
-				VoxelQ1{Key_t{dd, ii+1, jj+1, kk+1}},
+				VoxelQ1{Key_t{dd, ii+1, jj+1, kk+1}}
 			};
 		}
 

@@ -39,7 +39,16 @@ namespace internal {
 namespace GV
 {
 	template<uint64_t V_BC, uint64_t P_BC, uint64_t MAX_DEPTH>
-	class StokesPreconditioner : public Eigen::EigenBase<StokesPreconditioner>
+	class StokesOperator : public Eigen::EigenBase<StokesOperator<V_BC,P_BC,MAX_DEPTH>>
+	{
+	public:
+
+	};
+
+
+
+	template<uint64_t V_BC, uint64_t P_BC, uint64_t MAX_DEPTH>
+	class StokesPreconditioner : public Eigen::EigenBase<StokesPreconditioner<V_BC,P_BC,MAX_DEPTH>>
 	{
 	public:
 		using Scalar 		= double;
@@ -50,7 +59,7 @@ namespace GV
 		const Stokes<V_BC,P_BC,MAX_DEPTH>& stokes; //link to problem
 		Eigen::Index n_vel, n_pres, n_total;
 
-		explicit StokesOperator(const Stokes<V_BC, P_BC, MAX_DEPTH>& s) :
+		explicit StokesPreconditioner(const Stokes<V_BC, P_BC, MAX_DEPTH>& s) :
 			stokes(s), n_vel(3*s.velocity_handler.n_dofs()), n_pres(s.pressure_handler.n_dofs()), n_total(n_vel+n_pres) {}
 
 		StorageIndex rows() const {return static_cast<StorageIndex>(return stokes.U.size() + stokes.P.size());}

@@ -155,7 +155,7 @@ namespace GV
 		const uint64_t im1 = PX ? (ii-1)%me : ii-1;
 		const uint64_t jm1 = PY ? (jj-1)%me : jj-1;
 		const uint64_t km1 = PZ ? (kk-1)%me : kk-1;
-		
+
 		return {
 			VoxelElementKey<MAX_DEPTH,BC>{dd, im1, jm1, km1},
 			VoxelElementKey<MAX_DEPTH,BC>{dd, im1, jm1, kk },

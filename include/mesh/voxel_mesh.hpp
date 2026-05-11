@@ -168,7 +168,6 @@ namespace GV
 
 		inline void set(const VoxelElement el, const bool flag = true) {assert(el.is_valid()); active_elem->set(el.linear_index(), flag);}
 
-
 		//process requested activations
 		void process_request_active() {
 			#ifndef _OPENMP

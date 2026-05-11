@@ -7,7 +7,7 @@ using Stokes = GV::Stokes<1,0,8>;
 int main(int argc, char* argv[])
 {
 	Stokes stokes;
-	stokes.set_depth(0);
+	stokes.set_depth(2);
 	stokes.set_body_force(1.0,0.0,0.0);
 
 	using DOF_t = typename Stokes::V_DOF_t;
@@ -28,7 +28,7 @@ int main(int argc, char* argv[])
 
 		H.assign(stokes.P.size(), 0.0);
 
-		for (int m=0; m<50; ++m) {
+		for (int m=0; m<10; ++m) {
 			stokes.standard_uzawa<true>(GV::as_span(stokes.U), GV::as_span(stokes.P), GV::as_span(F), GV::as_span(H), 0.5, 10);
 			stokes.standard_uzawa<false>(GV::as_span(stokes.U), GV::as_span(stokes.P), GV::as_span(F), GV::as_span(H), 0.5, 10);
 		}

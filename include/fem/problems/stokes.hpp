@@ -94,7 +94,12 @@ namespace GV
 		template<int component, typename Action_type>
 		using BilinHdivAdj_t= BilinearHdivAdjoint<P_Handler_t,V_Handler_t,component,Action_type>; //for b(U,q) = -int(div(U)*q) with scalar test function
 
-		using V_LinearL2    = LinearL2<V_Handler_t,DotAction>; //for setting body forces
+
+		//body force terms
+		double fu{0}, fv{0}, fw{0};
+		using Fu_Form    = LinearL2<V_Handler_t,DotAction>;
+		using Fv_Form    = LinearL2<V_Handler_t,DotAction>;
+		using Fw_Form    = LinearL2<V_Handler_t,DotAction>;
 
 		Mesh_t 			mesh;
 		V_Handler_t 	velocity_handler; //all velocity dofs are the same
@@ -103,9 +108,6 @@ namespace GV
 		std::vector<double> U, P;
 		BCHandler_t		u_bc, v_bc, w_bc, p_bc;
 		double 			mu     = 1.0; //viscosity
-
-		//body force terms
-		double fu{0}, fv{0}, fw{0};
 
 		Stokes() : 
 			mesh{{0,0,0},{1,1,1}}, 
@@ -201,15 +203,15 @@ namespace GV
 			assert(F.size()==3*velocity_handler.n_dofs());
 
 			const auto N = U.size()/3;
-			V_LinearL2 F_u{velocity_handler}; F_u.weight=fu;
-			V_LinearL2 F_v{velocity_handler}; F_v.weight=fv;
-			V_LinearL2 F_w{velocity_handler}; F_w.weight=fw;
+			Fu_Form F_u{velocity_handler}; F_u.set_constant(fu);
+			Fv_Form F_v{velocity_handler}; F_v.set_constant(fv);
+			Fw_Form F_w{velocity_handler}; F_w.set_constant(fw);
 
 			F_u.set_vec(F.subspan(0,N));
 			F_v.set_vec(F.subspan(N,N));
 			F_w.set_vec(F.subspan(2*N,N));
 
-			using Kernel_type = Kernel<4,TypeList<>,TypeList<V_LinearL2,V_LinearL2,V_LinearL2>>;
+			using Kernel_type = Kernel<4,TypeList<>,TypeList<Fu_Form,Fv_Form,Fw_Form>>;
 			Kernel_type kernel(F_u,F_v,F_w);
 
 			auto action = [&,this](Elem_t el) {
