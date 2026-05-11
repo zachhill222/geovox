@@ -82,14 +82,14 @@ namespace GV
 
 		//standard constructor handles out-of bounds and periodic wrapping of dofs
 		//this is very helpful when constructing child dofs
-		constexpr VoxelDOFBase(Key_t k) : key(k) {
+		explicit constexpr VoxelDOFBase(Key_t k) : key(k) {
 			//periodic part is handled in the Key_t constructor
 			if (!key.is_valid()) {key._data_ = Key_t::DOES_NOT_EXIST;}
 		}
 
 		//convert compatible keys to the dof
 		template<typename OtherKey_t> requires (VoxelEquivFeature<Key_t,OtherKey_t>)
-		constexpr VoxelDOFBase(OtherKey_t ok) : VoxelDOFBase(static_cast<Key_t>(ok)) {}
+		explicit constexpr VoxelDOFBase(OtherKey_t ok) : VoxelDOFBase(static_cast<Key_t>(ok)) {}
 
 		//xi are normalized coordinates to quad_elem
 		//each component of xi is in [-1,1]

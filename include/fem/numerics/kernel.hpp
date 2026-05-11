@@ -145,8 +145,18 @@ namespace GV
 	template<typename... Ts>
 	struct TypeList {};
 
-	template<uint64_t N_QUAD_POINTS, typename BilinearList, typename LinearList = TypeList<>>
+	template<uint64_t N_QUAD_POINTS, typename BilinearList=TypeList<>, typename LinearList = TypeList<>>
 	struct Kernel;
+
+	//helper types to get the quadrature element type if one of the form lists are empty
+	template<bool HAS_B, typename BList, typename LList>
+	struct GetQuadElem;
+
+	template<typename B0, typename... Bs, typename... Ls>
+	struct GetQuadElem<true, TypeList<B0,Bs...>, TypeList<Ls...>> {using type = typename B0::QuadElem_t;};
+
+	template<typename... Bs, typename L0, typename... Ls>
+	struct GetQuadElem<false, TypeList<Bs...>, TypeList<L0,Ls...>> {using type = typename L0::QuadElem_t;};
 
 
 	//Kernel class allows multiple interactions (bilinear forms) to be integrated simultaneously
@@ -159,22 +169,41 @@ namespace GV
 	template<uint64_t N_QUAD_POINTS, typename... BiLinearForms_ts, typename... LinearForms_ts>
 	struct Kernel<N_QUAD_POINTS, TypeList<BiLinearForms_ts...>, TypeList<LinearForms_ts...>>
 	{
+		//organize forms and collect types
+		static constexpr uint64_t N_L_FORMS = sizeof...(LinearForms_ts);
+		static constexpr uint64_t N_B_FORMS = sizeof...(BiLinearForms_ts);
+		static_assert(N_B_FORMS+N_L_FORMS>0, "Kernel - no form was provided");
+
+		//validity checks
+		using QuadElem_t = typename GetQuadElem< (N_B_FORMS>0), TypeList<BiLinearForms_ts...>, TypeList<LinearForms_ts...>>::type;
+
+		static_assert((std::same_as<typename BiLinearForms_ts::QuadElem_t, QuadElem_t> && ...),
+			"Kernel - all bilinear forms must share the same type of quadrature element (QuadElem_t).");
+
+		static_assert((std::same_as<typename LinearForms_ts::QuadElem_t, QuadElem_t> && ...),
+			"Kernel - all linear forms must share the same type of quadrature element (QuadElem_t).");
+
 		Kernel(	BiLinearForms_ts&... B_forms_,
 				LinearForms_ts&...   L_forms_) : 
 			B_forms(B_forms_...),
 			L_forms(L_forms_...) {
 				//get the diagonal of the mesh to compute the jacobians
-				const auto diag = B_form<0>().trial_handler.mesh.high - B_form<0>().trial_handler.mesh.low;
-				mesh_diag[0] = diag[0];
-				mesh_diag[1] = diag[1];
-				mesh_diag[2] = diag[2];
+				if constexpr (N_B_FORMS>0) {
+					const auto diag = B_form<0>().trial_handler.mesh.high - B_form<0>().trial_handler.mesh.low;
+					mesh_diag[0] = diag[0];
+					mesh_diag[1] = diag[1];
+					mesh_diag[2] = diag[2];
+				}
+				else {
+					const auto diag = L_form<0>().handler.mesh.high - L_form<0>().handler.mesh.low;
+					mesh_diag[0] = diag[0];
+					mesh_diag[1] = diag[1];
+					mesh_diag[2] = diag[2];
+				}
 			}
 
 
-		//organize forms and collect types
-		static constexpr uint64_t N_L_FORMS = sizeof...(LinearForms_ts);
-		static constexpr uint64_t N_B_FORMS = sizeof...(BiLinearForms_ts);
-		static_assert(N_B_FORMS>0, "Kernel - no bilenar form was provided");
+		
 
 		template<uint64_t I>
 		using B_Form = std::tuple_element_t<I, std::tuple<BiLinearForms_ts...>>;
@@ -191,14 +220,9 @@ namespace GV
 		template<uint64_t I>
 		using L_TestDOF_t = typename L_Form<I>::TestDOF_t;
 
-		using QuadElem_t = typename B_Form<0>::QuadElem_t;
+		
 
-		//validity checks
-		static_assert((std::same_as<typename BiLinearForms_ts::QuadElem_t, QuadElem_t> && ...),
-			"Kernel - all bilinear forms must share the same type of quadrature element (QuadElem_t).");
-
-		static_assert((std::same_as<typename LinearForms_ts::QuadElem_t, QuadElem_t> && ...),
-			"Kernel - all linear forms must share the same type of quadrature element (QuadElem_t).");
+		
 
 		//access individual bilinear forms
 		template<int I>

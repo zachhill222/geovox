@@ -92,7 +92,9 @@ namespace GV
 		template<int component, typename Action_type>
 		using BilinHdiv_t   = BilinearHdiv<V_Handler_t,P_Handler_t,component,Action_type>; //for b(V,q) = -int(div(V)*q) with vector test functions V
 		template<int component, typename Action_type>
-		using BilinHdivAdj_t = BilinearHdivAdjoint<P_Handler_t,V_Handler_t,component,Action_type>; //for b(U,q) = -int(div(U)*q) with scalar test function
+		using BilinHdivAdj_t= BilinearHdivAdjoint<P_Handler_t,V_Handler_t,component,Action_type>; //for b(U,q) = -int(div(U)*q) with scalar test function
+
+		using V_LinearL2    = LinearL2<V_Handler_t,DotAction>; //for setting body forces
 
 		Mesh_t 			mesh;
 		V_Handler_t 	velocity_handler; //all velocity dofs are the same
@@ -102,7 +104,18 @@ namespace GV
 		BCHandler_t		u_bc, v_bc, w_bc, p_bc;
 		double 			mu     = 1.0; //viscosity
 
-		Stokes() : mesh{{0,0,0},{1,1,1}}, velocity_handler{mesh}, pressure_handler{mesh} {}
+		//body force terms
+		double fu{0}, fv{0}, fw{0};
+
+		Stokes() : 
+			mesh{{0,0,0},{1,1,1}}, 
+			velocity_handler{mesh}, pressure_handler{mesh} {}
+
+		void set_body_force(const double x, const double y, const double z) {
+			fu = x;
+			fv = y;
+			fw = z;
+		}
 
 		void set_depth(const uint64_t depth) {
 			mesh.set_depth(depth);
@@ -116,6 +129,45 @@ namespace GV
 
 			P.assign(np,0.0);
 			U.assign(3*nv,0.0);
+		}
+
+		//TODO: add dof and mesh predicates (i.e., refine low accuracy dofs and only activate relevant elements)
+		void refine() {
+			//refine all pressure dofs and update the coefficients
+			pressure_handler.refine(pressure_handler.curr_compressed_dofs());
+			mesh.process_request_active(); //somewhat unnecessary
+
+			pressure_handler.compress_dof_numbers();
+			std::vector<double> temp_vals(P.begin(), P.end());
+			P.assign(pressure_handler.n_dofs(), 0.0);
+			pressure_handler.update_coefs(P, temp_vals);
+
+			//for each active pressure dof, activate each child as a velocity dof
+			//for each active support element in the pressure, activate all 8 children
+			//the element activation is done by request when activating the velocity dofs
+			//note that the pressure and velocity handlers are compatible in the sense that keys
+			//for pressure dofs are also keys for velocity dofs
+			const auto N_old = velocity_handler.n_dofs();
+			velocity_handler.set_all_inactive();
+
+			for (const P_DOF_t p : pressure_handler.curr_compressed_dofs()) {
+				const V_DOF_t v(p.key);
+				for (const V_DOF_t child : v.children()) {
+					if (child.exists()) {
+						velocity_handler.activate(child);
+					}
+				}
+			}
+			mesh.process_request_active();
+			velocity_handler.compress_dof_numbers();
+
+			temp_vals.assign(U.begin(), U.end());
+			const auto N_new = velocity_handler.n_dofs();
+			U.assign(3*N_new, 0.0);
+
+			velocity_handler.update_coefs(as_span(U,0,N_new),       as_span(temp_vals,0,N_old));
+			velocity_handler.update_coefs(as_span(U,N_new,N_new),   as_span(temp_vals,N_old,N_old));
+			velocity_handler.update_coefs(as_span(U,2*N_new,N_new), as_span(temp_vals,2*N_old,N_old));
 		}
 
 		//apply dirichlet BC for velocity
@@ -139,6 +191,45 @@ namespace GV
 			v_bc.cache(velocity_handler.curr_compressed_dofs());
 			w_bc.cache(velocity_handler.curr_compressed_dofs());
 		}
+
+		//compute the body force (effectively M*F)
+		template<typename Container_t>
+		inline void compute_F(Container_t& F) const {compute_F(as_span(F));}
+
+		void compute_F(std::span<double> F) const {
+			assert(F.size()==U.size());
+			assert(F.size()==3*velocity_handler.n_dofs());
+
+			const auto N = U.size()/3;
+			V_LinearL2 F_u{velocity_handler}; F_u.weight=fu;
+			V_LinearL2 F_v{velocity_handler}; F_v.weight=fv;
+			V_LinearL2 F_w{velocity_handler}; F_w.weight=fw;
+
+			F_u.set_vec(F.subspan(0,N));
+			F_v.set_vec(F.subspan(N,N));
+			F_w.set_vec(F.subspan(2*N,N));
+
+			using Kernel_type = Kernel<4,TypeList<>,TypeList<V_LinearL2,V_LinearL2,V_LinearL2>>;
+			Kernel_type kernel(F_u,F_v,F_w);
+
+			auto action = [&,this](Elem_t el) {
+				kernel.set_element(el);
+				const auto v_dofs = velocity_handler.basis_active(el);
+				F_u.set_basis(v_dofs);
+				F_v.set_basis(v_dofs);
+				F_w.set_basis(v_dofs);
+				kernel.compute_all();
+				kernel.scatter_all();
+			};
+
+			//set up predicate to only integrate over active elements (natural BC)
+			auto predicate = [this](Elem_t el) {return mesh.is_active(el);};
+
+			//perform the loop
+			//TODO: parallel by element color?
+			mesh.template for_each<Elem_t>(action, false, predicate);
+		}
+
 
 		//compute K*U (all three velocities times their corresponding stiffness matrix)
 		void K_U(std::span<double> KU, std::span<const double> U) const {

@@ -62,7 +62,9 @@ namespace GV
 		//compute the action and store the result in a vector
 		std::span<double> vec;
 		template<typename Container_t>
-		inline void set_vec(Container_t& v) requires DotActionType<Action_type> {vec = as_span(v);}
+		inline void set_vec(Container_t& v) requires DotActionType<Action_type> {set_vec(as_span(v));}
+		inline void set_vec(std::span<double> v) requires DotActionType<Action_type> {vec = v;}
+
 
 		uint64_t n_test;
 		template<typename Container_t> requires std::same_as<typename Container_t::value_type, TestDOF_t>

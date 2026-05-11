@@ -21,6 +21,10 @@ namespace GV
 
 		using BASE::BASE;
 
+		//default is constant value
+		//if an eval_w method is available (in the DERIVED class), this is not used
+		double weight = 1.0;
+
 		//only provides the evaluation
 		//should be vectorized with simd
 		template<uint64_t N>
@@ -43,7 +47,7 @@ namespace GV
 				static_cast<const DERIVED*>(this) -> eval_w(w_vals, x, y, z);
 			}
 			else {
-				w_vals.fill(0.0);
+				w_vals.fill(weight);
 			}
 			
 			const double jac_det = Jxx*Jyy*Jzz;

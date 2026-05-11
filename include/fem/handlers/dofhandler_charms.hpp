@@ -177,9 +177,11 @@ namespace GV
 			//lambda to directly transfer a coefficient
 			auto transfer = [&](const double val, const DOF_t dof) {
 				assert(dof.is_valid());
-				auto it = std::lower_bound(curr_dofs.begin(), curr_dofs.end(), dof);
-				assert(it != curr_dofs.end());
-				uint64_t idx = std::distance(curr_dofs.begin(), it);
+				// auto it = std::lower_bound(curr_dofs.begin(), curr_dofs.end(), dof);
+				// assert(it != curr_dofs.end());
+				// uint64_t idx = std::distance(curr_dofs.begin(), it);
+				const uint64_t idx = this->compressed_index(dof);
+				assert(idx < uint64_t(-1));
 				new_coefs[idx] = val;
 				return true;
 			};
@@ -187,9 +189,11 @@ namespace GV
 			//lambda to increment a child or parent dof
 			auto increment = [&](const double val, const DOF_t dof) {
 				assert(dof.is_valid());
-				auto it = std::lower_bound(curr_dofs.begin(), curr_dofs.end(), dof);
-				assert(it != curr_dofs.end());
-				uint64_t idx = std::distance(curr_dofs.begin(), it);
+				// auto it = std::lower_bound(curr_dofs.begin(), curr_dofs.end(), dof);
+				// assert(it != curr_dofs.end());
+				// uint64_t idx = std::distance(curr_dofs.begin(), it);
+				const uint64_t idx = this->compressed_index(dof);
+				assert(idx < uint64_t(-1));
 				new_coefs[idx] += val;
 			};
 
@@ -291,7 +295,7 @@ namespace GV
 				//evaluate the basis functions
 				for (Triple& tr : track_dof_eval) {
 					tr.dof.proj_to_support(tr.el, tr.pt);
-					uint64_t idx = this->compressed_index(tr.dof);
+					const uint64_t idx = this->compressed_index(tr.dof);
 					result[i] += coefs[idx] * tr.dof.eval(tr.el, tr.pt);
 				}
 			}

@@ -105,7 +105,7 @@ namespace GV
 		}
 
 		//simple management operations
-		inline void reset_active() 	{active_dofs->reset();}
+		inline void set_all_inactive() 	{active_dofs->reset();}
 
 		//activate all dofs at a certain depth if they have an active support element all other dofs are inactive.
 		//that this method will only be called when the user intends to "set/reset" the problem.

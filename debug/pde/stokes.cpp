@@ -7,7 +7,8 @@ using Stokes = GV::Stokes<1,0,8>;
 int main(int argc, char* argv[])
 {
 	Stokes stokes;
-	stokes.set_depth(4);
+	stokes.set_depth(0);
+	stokes.set_body_force(1.0,0.0,0.0);
 
 	using DOF_t = typename Stokes::V_DOF_t;
 
@@ -15,20 +16,23 @@ int main(int argc, char* argv[])
 	stokes.add_velocity_bc([](DOF_t dof){
 		return 	dof.key.y()==0.0 or dof.key.y()==1.0 or
 				dof.key.z()==0.0 or dof.key.z()==1.0;});
-	stokes.cache_bc();
+	
+	std::vector<double> F,H;
+	for (int r=0; r<4; ++r) {
+		if (r>0) {stokes.refine();}
 
-	std::vector<double> F(stokes.U.size(), 0.0);
-	for (size_t i=0; i<stokes.U.size()/3; ++i) {F[i]=0.0001;}
+		stokes.cache_bc();
 
-	std::vector<double> H(stokes.P.size(), 0.0);
+		F.assign(stokes.U.size(), 0.0);
+		stokes.compute_F(F);
 
-	for (int m=0; m<10; ++m) {
-		stokes.standard_uzawa<true>(GV::as_span(stokes.U), GV::as_span(stokes.P), GV::as_span(F), GV::as_span(H), 0.5, 10);
+		H.assign(stokes.P.size(), 0.0);
+
+		for (int m=0; m<50; ++m) {
+			stokes.standard_uzawa<true>(GV::as_span(stokes.U), GV::as_span(stokes.P), GV::as_span(F), GV::as_span(H), 0.5, 10);
+			stokes.standard_uzawa<false>(GV::as_span(stokes.U), GV::as_span(stokes.P), GV::as_span(F), GV::as_span(H), 0.5, 10);
+		}
+		stokes.save_as("stokes_"+std::to_string(r)+".vtk");
 	}
-	for (int m=0; m<10; ++m) {
-		stokes.standard_uzawa<false>(GV::as_span(stokes.U), GV::as_span(stokes.P), GV::as_span(F), GV::as_span(H), 0.5, 10);
-	}
-
-	stokes.save_as("stokes.vtk");
 	return 0;
 }
