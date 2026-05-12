@@ -65,6 +65,8 @@ namespace GV
 		}
 	}
 
+
+	//TODO: vecorize Gauss Seidel
 	template<typename T>
 	void local_gauss_seidel(std::span<T> y, 
 							std::span<std::type_identity_t<const T>> x, 
@@ -94,7 +96,7 @@ namespace GV
 		assert(n==x.size());
 
 		for (uint64_t ii=0; ii<n; ++ii) {
-			const uint64_t i = n-ii; //loop backwards and guard against integer underflow
+			const uint64_t i = n-1-ii; //loop backwards and guard against integer underflow
 			const uint64_t offset = i*n;
 			y[i] = x[i];
 			for (uint64_t j=0; j<n; ++j) {

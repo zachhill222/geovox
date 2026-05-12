@@ -1,7 +1,7 @@
 #pragma once
 
 #include "fem/numerics/csr_storage.hpp"
-#include "fem/forms/form_actions.hpp"
+#include "fem/forms/form_options.hpp"
 
 #include "util/log_time.hpp"
 #include "util/compatibility.hpp"
@@ -41,13 +41,21 @@ namespace GV
 	//additionally, based on boundary conditions, the bilinear form may be responsible for applying boundary condions to the
 	//local matrix after it is assembled by the kernel (with 'natural' BC).
 	//for better convenience when applying BC as a post processing step, the full local matrix is stored, even in the symmetric case.
-	template<typename TestHandler_type, typename Action_type=ScatterAction>	 
+	template<typename TestHandler_type, LinearFormOptions OPTIONS = LinearFormOptions::assemble()>	 
 	struct LinearForm {
 		using TestDOF_t    = typename TestHandler_type::DOF_t;
 		using Mesh_t       = typename TestHandler_type::Mesh_t;
 		using QuadElem_t   = typename TestDOF_t::QuadElem_t::NonPeriodicVariant;
 		using VecStorage_t = std::unordered_map<TestDOF_t, double, typename TestDOF_t::Hash>;
 		
+		static constexpr LinearFormOptions OPTS  = OPTIONS;
+		static constexpr bool ACTION_ASSEMBLE    = OPTIONS.action == LinearFormOptions::Action::Assemble;
+		static constexpr bool ACTION_DOT 	     = OPTIONS.action == LinearFormOptions::Action::Dot;
+		static constexpr bool SCATTER_ACCUMULATE = OPTIONS.scatter_mode == LinearFormOptions::ScatterMode::Accumulate;
+		static constexpr bool SCATTER_SET        = OPTIONS.scatter_mode == LinearFormOptions::ScatterMode::Set;
+		static_assert(ACTION_ASSEMBLE ^ ACTION_DOT);
+		static_assert(SCATTER_ACCUMULATE ^ SCATTER_SET);
+
 		explicit LinearForm(const TestHandler_type& handler) : handler(handler) {}
 
 		const TestHandler_type& 	handler;    //link to the dof handler
@@ -57,13 +65,13 @@ namespace GV
 		
 		//store contributions of global dofs
 		VecStorage_t* global_vec = nullptr;
-		inline void set_storage(VecStorage_t& vec) requires ScatterActionType<Action_type> {global_vec = &vec;}
+		inline void set_storage(VecStorage_t& vec) requires (ACTION_ASSEMBLE) {global_vec = &vec;}
 		
 		//compute the action and store the result in a vector
 		std::span<double> vec;
 		template<typename Container_t>
-		inline void set_vec(Container_t& v) requires DotActionType<Action_type> {set_vec(as_span(v));}
-		inline void set_vec(std::span<double> v) requires DotActionType<Action_type> {vec = v;}
+		inline void set_vec(Container_t& v) requires (ACTION_DOT) {set_vec(as_span(v));}
+		inline void set_vec(std::span<double> v) requires (ACTION_DOT) {vec = v;}
 
 
 		uint64_t n_test;
@@ -74,27 +82,30 @@ namespace GV
 			loc_b_v.assign(n_test, 0.0);
 		}
 
-		void scatter() requires ScatterActionType<Action_type> {
+		void scatter() requires (ACTION_ASSEMBLE) {
 			if (global_vec==nullptr) {throw std::runtime_error("LinearForm::scatter - called with no global vector (nullptr)");}
 			for (size_t i=0; i<loc_b_v.size(); ++i) {
 				(*global_vec)[test_dofs[i]] += loc_b_v[i];
 			}
 		}
 
-		void scatter() requires DotActionType<Action_type> {
+		void scatter() requires (ACTION_DOT) {
 			assert(!vec.empty());
 
 			for (size_t i=0; i<n_test; ++i) {
 				const auto N = handler.compressed_index(test_dofs[i]);
-				assert(N>=0);
-				vec[N] += loc_b_v[i];
+				if constexpr (SCATTER_ACCUMULATE) {
+					vec[N] += loc_b_v[i];	
+				} else {
+					vec[N] = loc_b_v[i];
+				}
 			}
 		}
 
 		inline double loc_val(const uint64_t i) const {assert(i<loc_b_v.size()); return loc_b_v[i];}
 		inline double& loc_val(const uint64_t i) {assert(i<loc_b_v.size()); return loc_b_v[i];}
 
-		Eigen::VectorXd to_eigen_Xd(const std::vector<TestDOF_t>& dofs) const requires ScatterActionType<Action_type> {
+		Eigen::VectorXd to_eigen_Xd(const std::vector<TestDOF_t>& dofs) const requires (ACTION_ASSEMBLE) {
 			Eigen::VectorXd result(dofs.size());
 			for (size_t i=0; i<dofs.size(); ++i) {
 				const TestDOF_t dof = dofs[i];

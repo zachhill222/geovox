@@ -49,7 +49,7 @@ namespace GV
 		#pragma omp declare simd
 		static bool rhs_spt(double x, double y, double z) {return (x*x + y*y + z*z < 0.25);}
 
-		using RHSForm = LinearL2<Handler_t,ScatterAction,decltype(&rhs_fun),decltype(&rhs_spt)>;
+		using RHSForm = LinearL2<Handler_t,LinearFormOptions::assemble(),decltype(&rhs_fun),decltype(&rhs_spt)>;
 
 		using Kernel_t = Kernel<4,TypeList<StiffForm>, TypeList<RHSForm>>;
 

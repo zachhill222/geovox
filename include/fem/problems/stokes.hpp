@@ -6,7 +6,7 @@
 #include "fem/forms/bilinear_L2.hpp"
 #include "fem/forms/bilinear_Hdiv.hpp"
 #include "fem/forms/linear_L2.hpp"
-#include "fem/forms/form_actions.hpp" //TODO: delete
+// #include "fem/forms/form_actions.hpp" //TODO: delete
 #include "fem/forms/form_options.hpp"
 
 #include "fem/numerics/kernel.hpp"
@@ -100,9 +100,9 @@ namespace GV
 
 		//body force terms
 		double fu{0}, fv{0}, fw{0};
-		using Fu_Form    = LinearL2<V_Handler_t,DotAction>;
-		using Fv_Form    = LinearL2<V_Handler_t,DotAction>;
-		using Fw_Form    = LinearL2<V_Handler_t,DotAction>;
+		using Fu_Form    = LinearL2<V_Handler_t,LinearFormOptions::dot()>;
+		using Fv_Form    = LinearL2<V_Handler_t,LinearFormOptions::dot()>;
+		using Fw_Form    = LinearL2<V_Handler_t,LinearFormOptions::dot()>;
 
 		Mesh_t 			mesh;
 		V_Handler_t 	velocity_handler; //all velocity dofs are the same
@@ -675,8 +675,8 @@ namespace GV
 			LogTime timer{"Stokes::smooth"};
 
 			using Operator = StokesOperator<V_BC,P_BC,MAX_DEPTH>;
-			// using Preconditioner = StokesPreconditioner<V_BC,P_BC,MAX_DEPTH,2>;
-			using Preconditioner = Eigen::IdentityPreconditioner;
+			using Preconditioner = StokesPreconditioner<V_BC,P_BC,MAX_DEPTH,2>;
+			// using Preconditioner = Eigen::IdentityPreconditioner;
 
 			Operator op(*this);
 

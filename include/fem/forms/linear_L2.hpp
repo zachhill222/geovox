@@ -1,7 +1,7 @@
 #pragma once
 
 #include "fem/forms/linear_form.hpp"
-#include "fem/forms/form_actions.hpp"
+#include "fem/forms/form_options.hpp"
 
 #include "util/concepts.hpp"
 
@@ -16,10 +16,10 @@
 
 namespace GV
 {
-	template<typename DofHandler_type, typename Action_type=ScatterAction, typename WeightFun_t = std::nullptr_t, typename PredFun_t = std::nullptr_t>
-	struct LinearL2 : public LinearForm<DofHandler_type, Action_type>
+	template<typename DofHandler_type, LinearFormOptions OPTIONS=LinearFormOptions::assemble(), typename WeightFun_t = std::nullptr_t, typename PredFun_t = std::nullptr_t>
+	struct LinearL2 : public LinearForm<DofHandler_type, OPTIONS>
 	{
-		using BASE       = LinearForm<DofHandler_type, Action_type>;
+		using BASE       = LinearForm<DofHandler_type, OPTIONS>;
 		using QuadElem_t = typename BASE::QuadElem_t;
 		using DOF_t      = typename BASE::TestDOF_t;
 		
