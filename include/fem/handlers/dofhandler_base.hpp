@@ -99,7 +99,7 @@ namespace GV
 		inline const auto& prev_compressed_dofs() const {return active_dof_list_prev;}
 		inline const auto& curr_compressed_dofs() const {return active_dof_list_curr;}
 		
-		inline const auto& dof_to_idx() 		  	  const {return dof_to_idx_map;}
+		inline const auto& dof_to_idx() const {return dof_to_idx_map;}
 		inline uint64_t compressed_index(const DOF_t dof) const {
 			const auto it = dof_to_idx_map.find(dof);
 			return it    != dof_to_idx_map.end() ? it->second : uint64_t(-1);

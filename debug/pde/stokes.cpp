@@ -31,7 +31,7 @@ int main(int argc, char* argv[])
 		stokes.save_as("stokes_"+std::to_string(r)+".vtk");
 	}
 
-	stokes.smooth(100,rhs,1e-10,true);
+	// stokes.smooth(100,rhs,1e-10,true);
 
 
 	return 0;

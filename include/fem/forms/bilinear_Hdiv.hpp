@@ -1,6 +1,7 @@
 #pragma once
 
 #include "fem/forms/bilinear_form.hpp"
+#include "fem/forms/form_options.hpp"
 
 #include <array>
 #include <cstdint>
@@ -18,12 +19,12 @@ namespace GV
 	template<typename 	TestHandler_type, 	//vector component
 			 typename 	TrialHandler_type,  //scalar
 			 int        k, 				    //component to use
-			 typename 	ActionType 	= ScatterAction>
-	struct BilinearHdiv : public BilinearForm<TestHandler_type,TrialHandler_type,false,ActionType>
+			 BilinearFormOptions OPTIONS = BilinearFormOptions::assemble(false)>
+	struct BilinearHdiv : public BilinearForm<TestHandler_type,TrialHandler_type,OPTIONS>
 	{
 		static_assert(k>=0 && k<3, "BilinearHdiv - the component k must be between 0 and 2");
 
-		using BASE       = BilinearForm<TestHandler_type,TrialHandler_type,false,ActionType>;
+		using BASE       = BilinearForm<TestHandler_type,TrialHandler_type,OPTIONS>;
 		using QuadElem_t = typename BASE::QuadElem_t;
 		using TestDOF_t  = typename TestHandler_type::DOF_t;
 		using TrialDOF_t = typename TrialHandler_type::DOF_t;
@@ -76,12 +77,12 @@ namespace GV
 	template<typename 	TestHandler_type, 	//scalar
 			 typename 	TrialHandler_type,  //vector component
 			 int        k, 				    //component to use
-			 typename 	ActionType 	= ScatterAction>
-	struct BilinearHdivAdjoint : public BilinearForm<TestHandler_type,TrialHandler_type,false,ActionType>
+			 BilinearFormOptions OPTIONS = BilinearFormOptions::assemble(false)>
+	struct BilinearHdivAdjoint : public BilinearForm<TestHandler_type,TrialHandler_type,OPTIONS>
 	{
 		static_assert(k>=0 && k<3, "BilinearHdivAdjoint - the component k must be between 0 and 2");
 
-		using BASE       = BilinearForm<TestHandler_type,TrialHandler_type,false,ActionType>;
+		using BASE       = BilinearForm<TestHandler_type,TrialHandler_type,OPTIONS>;
 		using QuadElem_t = typename BASE::QuadElem_t;
 		using TestDOF_t  = typename TestHandler_type::DOF_t;
 		using TrialDOF_t = typename TrialHandler_type::DOF_t;

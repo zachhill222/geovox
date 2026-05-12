@@ -5,6 +5,7 @@
 #include "fem/forms/bilinear_L2.hpp"
 #include "fem/forms/bilinear_H1.hpp"
 #include "fem/forms/bilinear_Hdiv.hpp"
+#include "fem/forms/form_options.hpp"
 
 #include "util/log_time.hpp"
 #include "util/compatibility.hpp"
@@ -16,10 +17,10 @@ using DofKey_t  = GV::VoxelVertexKey<10,0>;
 using DOF_t     = GV::VoxelQ1<DofKey_t>;
 using Handler_t = GV::DofHandlerCharms<Mesh_t,DOF_t>;
 
-using BiMass_t  = GV::SymmetricL2<Handler_t, GV::MatVecAction>;
-using BiStiff_t = GV::SymmetricH1<Handler_t, GV::MatVecAction>;
-using DivForm_t = GV::BilinearHdiv<Handler_t,Handler_t,0,GV::MatVecAction>;
-using DivFormAdj_t = GV::BilinearHdivAdjoint<Handler_t,Handler_t,0,GV::MatVecAction>;
+using BiMass_t  = GV::SymmetricL2<Handler_t, GV::BilinearFormOptions::multiply(true)>;
+using BiStiff_t = GV::SymmetricH1<Handler_t, GV::BilinearFormOptions::multiply(true)>;
+using DivForm_t = GV::BilinearHdiv<Handler_t,Handler_t,0,GV::BilinearFormOptions::multiply(false)>;
+using DivFormAdj_t = GV::BilinearHdivAdjoint<Handler_t,Handler_t,0,GV::BilinearFormOptions::multiply(false)>;
 
 using Kernel_t  = GV::Kernel<5,GV::TypeList<BiMass_t,BiStiff_t,DivForm_t,DivFormAdj_t>>;
 

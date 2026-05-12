@@ -6,7 +6,8 @@
 #include "fem/forms/bilinear_L2.hpp"
 #include "fem/forms/bilinear_Hdiv.hpp"
 #include "fem/forms/linear_L2.hpp"
-#include "fem/forms/form_actions.hpp"
+#include "fem/forms/form_actions.hpp" //TODO: delete
+#include "fem/forms/form_options.hpp"
 
 #include "fem/numerics/kernel.hpp"
 
@@ -87,14 +88,14 @@ namespace GV
 		using P_Handler_t 	= DofHandlerCharms<Mesh_t,P_DOF_t>; //TODO: replace with multigrid handler?
 		using BCHandler_t	= BCHandler<V_DOF_t>;
 
-		template<typename Action_type>
-		using BilinL2_t 	= SymmetricL2<P_Handler_t,Action_type>;
-		template<typename Action_type>
-		using BilinH1_t 	= SymmetricH1<V_Handler_t,Action_type>;
-		template<int component, typename Action_type>
-		using BilinHdiv_t   = BilinearHdiv<V_Handler_t,P_Handler_t,component,Action_type>; //for b(V,q) = -int(div(V)*q) with vector test functions V
-		template<int component, typename Action_type>
-		using BilinHdivAdj_t= BilinearHdivAdjoint<P_Handler_t,V_Handler_t,component,Action_type>; //for b(U,q) = -int(div(U)*q) with scalar test function
+		template<BilinearFormOptions OPTIONS>
+		using BilinL2_t 	= SymmetricL2<P_Handler_t,OPTIONS>;
+		template<BilinearFormOptions OPTIONS>
+		using BilinH1_t 	= SymmetricH1<V_Handler_t,OPTIONS>;
+		template<int component, BilinearFormOptions OPTIONS>
+		using BilinHdiv_t   = BilinearHdiv<V_Handler_t,P_Handler_t,component,OPTIONS>; //for b(V,q) = -int(div(V)*q) with vector test functions V
+		template<int component, BilinearFormOptions OPTIONS>
+		using BilinHdivAdj_t= BilinearHdivAdjoint<P_Handler_t,V_Handler_t,component,OPTIONS>; //for b(U,q) = -int(div(U)*q) with scalar test function
 
 
 		//body force terms
@@ -323,7 +324,8 @@ namespace GV
 
 			//perform the loop
 			//TODO: parallel by element color?
-			mesh.template for_each<Elem_t>(action, false, predicate);
+			// mesh.template for_each<Elem_t>(action, false, predicate);
+			mesh.for_each_active_element(action);
 		}
 
 
@@ -339,8 +341,9 @@ namespace GV
 			const auto N = U.size() / 3;
 
 			//only need one bilinear form
-			using Kernel_type = Kernel<4, TypeList<BilinH1_t<MatVecAction>>>;
-			BilinH1_t<MatVecAction> A_form(velocity_handler);
+			using Form_type   = BilinH1_t<BilinearFormOptions::multiply(true)>;
+			using Kernel_type = Kernel<4, TypeList<Form_type>>;
+			Form_type A_form(velocity_handler);
 			Kernel_type kernel(A_form);
 
 			//set up integrating action over each element
@@ -370,7 +373,8 @@ namespace GV
 
 			//perform the loop
 			//TODO: parallel by element color?
-			mesh.template for_each<Elem_t>(action, false, predicate);
+			// mesh.template for_each<Elem_t>(action, false, predicate);
+			mesh.for_each_active_element(action);
 
 			//scale result by the viscosity
 			for (size_t i=0; i<KU.size(); ++i) {
@@ -397,8 +401,10 @@ namespace GV
 			const auto N = U.size() / 3;
 
 			//only need one bilinear form
-			using Kernel_type = Kernel<4, TypeList<BilinH1_t<MatVecAction>>>;
-			BilinH1_t<MatVecAction> A_form(velocity_handler);
+			constexpr BilinearFormOptions OPTS = FORWARD ? BilinearFormOptions::gauss_seidel_fwd(true) : BilinearFormOptions::gauss_seidel_bwd(true);
+			using Form_type   = BilinH1_t<OPTS>;
+			using Kernel_type = Kernel<4, TypeList<Form_type>>;
+			Form_type   A_form(velocity_handler);
 			Kernel_type kernel(A_form);
 
 			//set up integrating action over each element
@@ -429,7 +435,8 @@ namespace GV
 			//perform the loop
 			//TODO: parallel by element color?
 			for (int n=0; n<n_steps; ++n) {
-				mesh.template for_each<Elem_t>(action, false, predicate);
+				// mesh.template for_each<Elem_t>(action, false, predicate);
+				mesh.for_each_active_element(action);
 			}
 
 			//scale result by the viscosity
@@ -453,10 +460,13 @@ namespace GV
 			const auto N = GP.size() / 3;
 
 			//set up the bilinear form for each velocity (test dof) component
-			using Kernel_type = Kernel<4, TypeList<BilinHdiv_t<0,MatVecAction>, BilinHdiv_t<1,MatVecAction>, BilinHdiv_t<2,MatVecAction>>>;
-			BilinHdiv_t<0,MatVecAction> Bx_form(velocity_handler, pressure_handler);
-			BilinHdiv_t<1,MatVecAction> By_form(velocity_handler, pressure_handler);
-			BilinHdiv_t<2,MatVecAction> Bz_form(velocity_handler, pressure_handler);
+			using Form0_type = BilinHdiv_t<0,BilinearFormOptions::multiply(false)>;
+			using Form1_type = BilinHdiv_t<1,BilinearFormOptions::multiply(false)>;
+			using Form2_type = BilinHdiv_t<2,BilinearFormOptions::multiply(false)>;
+			using Kernel_type = Kernel<4, TypeList<Form0_type, Form1_type, Form2_type>>;
+			Form0_type  Bx_form(velocity_handler, pressure_handler);
+			Form1_type  By_form(velocity_handler, pressure_handler);
+			Form2_type  Bz_form(velocity_handler, pressure_handler);
 			Kernel_type kernel(Bx_form, By_form, Bz_form);
 
 			//assign subspans to each form
@@ -489,7 +499,8 @@ namespace GV
 
 			//perform the loop
 			//TODO: parallel by element color?
-			mesh.template for_each<Elem_t>(action, false, predicate);
+			// mesh.template for_each<Elem_t>(action, false, predicate);
+			mesh.for_each_active_element(action);
 		}
 
 
@@ -504,10 +515,13 @@ namespace GV
 			const auto N = U.size() / 3;
 
 			//set up the bilinear form for each velocity (trial dof) component
-			using Kernel_type = Kernel<4, TypeList<BilinHdivAdj_t<0,MatVecAction>, BilinHdivAdj_t<1,MatVecAction>, BilinHdivAdj_t<2,MatVecAction>>>;
-			BilinHdivAdj_t<0,MatVecAction> Bx_t_form(pressure_handler, velocity_handler);
-			BilinHdivAdj_t<1,MatVecAction> By_t_form(pressure_handler, velocity_handler);
-			BilinHdivAdj_t<2,MatVecAction> Bz_t_form(pressure_handler, velocity_handler);
+			using Form0_type = BilinHdivAdj_t<0,BilinearFormOptions::multiply(false)>;
+			using Form1_type = BilinHdivAdj_t<1,BilinearFormOptions::multiply(false)>;
+			using Form2_type = BilinHdivAdj_t<2,BilinearFormOptions::multiply(false)>;
+			using Kernel_type = Kernel<4, TypeList<Form0_type, Form1_type, Form2_type>>;
+			Form0_type  Bx_t_form(pressure_handler, velocity_handler);
+			Form1_type  By_t_form(pressure_handler, velocity_handler);
+			Form2_type  Bz_t_form(pressure_handler, velocity_handler);
 			Kernel_type kernel(Bx_t_form, By_t_form, Bz_t_form);
 
 			//assign subspans to each form
@@ -540,7 +554,8 @@ namespace GV
 
 			//perform the loop
 			//TODO: parallel by element color?
-			mesh.template for_each<Elem_t>(action, false, predicate);
+			// mesh.template for_each<Elem_t>(action, false, predicate);
+			mesh.for_each_active_element(action);
 		}
 
 		//compute M*P (pressure component of the block diagonal preconditioner)
@@ -549,15 +564,16 @@ namespace GV
 			assert(MP.size() == P.size());
 			assert(MP.size() == pressure_handler.n_dofs());
 
-			using Kernel_type = Kernel<4, TypeList<BilinL2_t<MatVecAction>>>;
-			BilinL2_t<MatVecAction> M_form(velocity_handler);
+			using Form_type   = BilinL2_t<BilinearFormOptions::multiply(true)>;
+			using Kernel_type = Kernel<4, TypeList<Form_type>>;
+			Form_type   M_form(pressure_handler);
 			Kernel_type kernel(M_form);
 
 			//set up integrating action over each element
 			auto action = [&,this](Elem_t el) {
 				kernel.set_element(el);
-				const auto v_dofs = velocity_handler.basis_active(el);
-				M_form.set_basis(v_dofs, v_dofs);
+				const auto p_dofs = pressure_handler.basis_active(el);
+				M_form.set_basis(p_dofs, p_dofs);
 				kernel.compute_all();	//compute local stiffness matrix
 				
 				//set each component, multiply, scatter
@@ -571,7 +587,8 @@ namespace GV
 
 			//perform the loop
 			//TODO: parallel by element color?
-			mesh.template for_each<Elem_t>(action, false, predicate);
+			// mesh.template for_each<Elem_t>(action, false, predicate);
+			mesh.for_each_active_element(action);
 		}
 
 		//compute some number of iterations of Gauss-Seidel (forwards or backwards) on M*P=H
@@ -583,16 +600,18 @@ namespace GV
 			assert(P.size() == pressure_handler.n_dofs());
 
 			//get indices for subspans for u, v, w components
-			using Kernel_type = Kernel<4, TypeList<BilinL2_t<MatVecAction>>>;
-			BilinL2_t<MatVecAction> M_form(velocity_handler);
+			constexpr BilinearFormOptions OPTS = FORWARD ? BilinearFormOptions::gauss_seidel_fwd(true) : BilinearFormOptions::gauss_seidel_bwd(true);
+			using Form_type   = BilinL2_t<OPTS>;
+			using Kernel_type = Kernel<4, TypeList<Form_type>>;
+			Form_type   M_form(pressure_handler);
 			Kernel_type kernel(M_form);
 
 			//set up integrating action over each element
 			//TODO: is having three kernels in parallel better?
 			auto action = [&,this](Elem_t el) {
 				kernel.set_element(el);
-				const auto v_dofs = velocity_handler.basis_active(el);
-				M_form.set_basis(v_dofs, v_dofs);
+				const auto p_dofs = pressure_handler.basis_active(el);
+				M_form.set_basis(p_dofs, p_dofs);
 				kernel.compute_all();	//compute local stiffness matrix
 				
 				//set each component, multiply, scatter
@@ -607,7 +626,8 @@ namespace GV
 			//perform the loop
 			//TODO: parallel by element color?
 			for (int n=0; n<n_steps; ++n) {
-				mesh.template for_each<Elem_t>(action, false, predicate);
+				// mesh.template for_each<Elem_t>(action, false, predicate);
+				mesh.for_each_active_element(action);
 			}
 		}
 
@@ -655,11 +675,14 @@ namespace GV
 			LogTime timer{"Stokes::smooth"};
 
 			using Operator = StokesOperator<V_BC,P_BC,MAX_DEPTH>;
-			
+			// using Preconditioner = StokesPreconditioner<V_BC,P_BC,MAX_DEPTH,2>;
+			using Preconditioner = Eigen::IdentityPreconditioner;
+
 			Operator op(*this);
-			Eigen::GMRES<Operator, Eigen::IdentityPreconditioner> solver;
+
+			Eigen::GMRES<Operator, Preconditioner> solver;
 			solver.setMaxIterations(n_iter);
-			solver.setTolerance(tol); //always do the requested number of iterations
+			solver.setTolerance(tol);
 			solver.compute(op);
 
 			//wrap data into Eigen::VectorXd

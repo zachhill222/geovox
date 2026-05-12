@@ -1,6 +1,7 @@
 #pragma once
 
 #include "fem/forms/bilinear_form.hpp"
+#include "fem/forms/form_options.hpp"
 
 #include <array>
 #include <cstdint>
@@ -13,12 +14,12 @@
 namespace GV
 {
 	//A symmetric kernel for bilinear forms a(psi,phi) = integral_D grad_phi*grad_psi
-	template<typename 	Handler_type,
-			 typename 	ActionType 	= ScatterAction,
-			 typename 	DERIVED		= void>
-	struct SymmetricH1 : public BilinearForm<Handler_type,Handler_type,true,ActionType>
+	template<typename 			 Handler_type,
+			 BilinearFormOptions OPTIONS = BilinearFormOptions::assemble(true),
+			 typename 			 DERIVED = void>
+	struct SymmetricH1 : public BilinearForm<Handler_type,Handler_type,OPTIONS>
 	{
-		using BASE       = BilinearForm<Handler_type,Handler_type,true,ActionType>;
+		using BASE       = BilinearForm<Handler_type,Handler_type,OPTIONS>;
 		using QuadElem_t = typename BASE::QuadElem_t;
 		using DOF_t      = typename Handler_type::DOF_t;
 

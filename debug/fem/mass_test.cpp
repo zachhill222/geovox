@@ -4,6 +4,7 @@
 #include "mesh/voxel_mesh.hpp"
 #include "fem/forms/bilinear_L2.hpp"
 #include "fem/forms/bilinear_H1.hpp"
+#include "fem/forms/form_options.hpp"
 #include "util/log_time.hpp"
 
 
@@ -17,9 +18,9 @@ using Handler_t = GV::DofHandlerBase<Mesh_t,DOF_t>;
 using BiMass_t  = GV::SymmetricL2<Handler_t>;
 using BiStiff_t = GV::SymmetricH1<Handler_t>;
 
-struct MassKernel : public GV::SymmetricL2<Handler_t, GV::ScatterAction, MassKernel>
+struct MassKernel : public GV::SymmetricL2<Handler_t, GV::BilinearFormOptions::assemble(true), MassKernel>
 {
-	using BASE = GV::SymmetricL2<Handler_t, GV::ScatterAction, MassKernel>;
+	using BASE = GV::SymmetricL2<Handler_t, GV::BilinearFormOptions::assemble(true), MassKernel>;
 	using BASE::BASE;
 
 	template<uint64_t N>

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "fem/forms/bilinear_form.hpp"
+#include "fem/forms/form_options.hpp"
 
 #include <array>
 #include <cstdint>
@@ -13,15 +14,16 @@
 namespace GV
 {
 	//A symmetric mass kernel for bilinear forms a(psi,phi) = integral_D phi*psi
-	template<typename 	Handler_type,
-			 bool       IS_SYMMETRIC_ = false,
-			 typename 	ActionType 	  = ScatterAction,
-			 typename 	DERIVED		  = void>
-	struct BilinearL2 : public BilinearForm<Handler_type,Handler_type,IS_SYMMETRIC_,ActionType>
+	template<typename 				TestHandler_type,
+			 typename 				TrialHandler_type,
+			 BilinearFormOptions 	OPTIONS = BilinearFormOptions::assemble(false),
+			 typename 				DERIVED	= void>
+	struct BilinearL2 : public BilinearForm<TestHandler_type,TrialHandler_type,OPTIONS>
 	{
-		using BASE       = BilinearForm<Handler_type,Handler_type,IS_SYMMETRIC_,ActionType>;
+		using BASE       = BilinearForm<TestHandler_type,TrialHandler_type,OPTIONS>;
 		using QuadElem_t = typename BASE::QuadElem_t;
-		using DOF_t      = typename Handler_type::DOF_t;
+		using TestDOF_t  = typename TestHandler_type::DOF_t;
+		using TrialDOF_t = typename TrialHandler_type::DOF_t;
 
 		using BASE::BASE;
 
@@ -31,12 +33,12 @@ namespace GV
 		constexpr void eval(
 			std::array<double,N>& val, 
 			const double Jxx, const double Jyy, const double Jzz, 
-			const DOF_t psi_i,
+			const TestDOF_t psi_i,
 			const QuadElem_t spt_i,
 			const std::array<double,N>& X_i,
 			const std::array<double,N>& Y_i,
 			const std::array<double,N>& Z_i, 
-			const DOF_t phi_j,
+			const TrialDOF_t phi_j,
 			const QuadElem_t spt_j,
 			const std::array<double,N>& X_j,
 			const std::array<double,N>& Y_j,
@@ -60,12 +62,12 @@ namespace GV
 		constexpr void eval(
 			std::array<double,N>& val, 
 			const double Jxx, const double Jyy, const double Jzz, 
-			const DOF_t psi_i,
+			const TestDOF_t psi_i,
 			const QuadElem_t spt_i,
 			const std::array<double,N>& X_i,
 			const std::array<double,N>& Y_i,
 			const std::array<double,N>& Z_i, 
-			const DOF_t phi_j,
+			const TrialDOF_t phi_j,
 			const QuadElem_t spt_j,
 			const std::array<double,N>& X_j,
 			const std::array<double,N>& Y_j,
@@ -93,8 +95,8 @@ namespace GV
 
 
 	//symmetric L2 form
-	template<typename 	Handler_type,
-			 typename 	ActionType 	  = ScatterAction,
-			 typename 	DERIVED		  = void>
-	using SymmetricL2 = BilinearL2<Handler_type,true,ActionType,DERIVED>;
+	template<typename 				Handler_type,
+			 BilinearFormOptions 	OPTIONS = BilinearFormOptions::assemble(true),
+			 typename 				DERIVED	= void>
+	using SymmetricL2 = BilinearL2<Handler_type,Handler_type,OPTIONS,DERIVED>;
 }

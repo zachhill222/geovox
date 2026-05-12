@@ -13,14 +13,6 @@
 #include <omp.h>
 #endif
 
-template<uint64_t V_BC, uint64_t P_BC, uint64_t MAX_DEPTH>
-class StokesPreconditioner;
-
-template<uint64_t V_BC, uint64_t P_BC, uint64_t MAX_DEPTH>
-class StokesOperator;
-
-using Eigen::SparseMatrix;
-
 namespace GV
 {
 	template<uint64_t V_BC, uint64_t P_BC, uint64_t MAX_DEPTH>
@@ -29,7 +21,7 @@ namespace GV
 	template<uint64_t V_BC, uint64_t P_BC, uint64_t MAX_DEPTH>
 	class StokesOperator;
 
-	template<uint64_t V_BC, uint64_t P_BC, uint64_t MAX_DEPTH>
+	template<uint64_t V_BC, uint64_t P_BC, uint64_t MAX_DEPTH, int N_STEPS=3>
 	class StokesPreconditioner;
 }
 
@@ -37,9 +29,6 @@ namespace GV
 
 namespace Eigen{
 namespace internal {
-	template<uint64_t V_BC, uint64_t P_BC, uint64_t MAX_DEPTH>
-	struct traits<GV::StokesPreconditioner<V_BC,P_BC,MAX_DEPTH>> : public Eigen::internal::traits<Eigen::SparseMatrix<double>> {};
-
 	template<uint64_t V_BC, uint64_t P_BC, uint64_t MAX_DEPTH>
 	struct traits<GV::StokesOperator<V_BC,P_BC,MAX_DEPTH>> : public Eigen::internal::traits<Eigen::SparseMatrix<double>> {};
 }
@@ -71,9 +60,65 @@ namespace GV
 		}
 
 		//constructor
-		StokesOperator(const Stokes<V_BC,P_BC,MAX_DEPTH>& problem) : stokes(problem) {}
+		explicit StokesOperator(const Stokes<V_BC,P_BC,MAX_DEPTH>& problem) : stokes(problem) {}
 
 		const Stokes<V_BC,P_BC,MAX_DEPTH>& stokes; //link to problem
+	};
+
+
+	template<uint64_t V_BC, uint64_t P_BC, uint64_t MAX_DEPTH, int N_STEPS>
+	class StokesPreconditioner
+	{
+	public:
+		using Scalar 		= double;
+		using RealScalar 	= double;
+		using StorageIndex 	= int;
+
+		Stokes<V_BC,P_BC,MAX_DEPTH> const* stokes;
+
+		StokesPreconditioner() : stokes(nullptr) {}
+
+		//Eigen preconditioner interface
+		template<typename MatType>
+		StokesPreconditioner& analyzePattern(const MatType&) {return *this;}
+		template<typename MatType>
+		StokesPreconditioner& factorize(const MatType&) {return *this;}
+		template<typename MatType>
+		StokesPreconditioner& compute(const MatType&) {return *this;}
+		
+		StokesPreconditioner& compute(const StokesOperator<V_BC,P_BC,MAX_DEPTH>& op) {
+			stokes = &op.stokes;
+			return *this;}
+
+		Eigen::ComputationInfo info() const {return Eigen::Success;}
+
+		template<typename Rhs>
+		Eigen::VectorXd solve(const Rhs& b) const {
+			eigen_assert(stokes!=nullptr && "StokesPreconditioner - operator not set");
+
+			const size_t nv = stokes->n_vel_total();
+			const size_t np = stokes->n_pres();
+			eigen_assert(static_cast<size_t>(b.size()) == nv+np && "StokesPreconditioner - dimension mismatch");
+
+			Eigen::VectorXd result = Eigen::VectorXd::Zero(b.size());
+
+			std::span<double> u_out = as_span<Scalar>(result, 0, nv);
+			std::span<double> p_out = as_span<Scalar>(result, nv, np);
+			std::span<const double> b_upper = as_span<Scalar>(b, 0, nv);
+			std::span<const double> b_lower = as_span<Scalar>(b, nv, np);
+
+			//apply K_inverse to U as a symmetric operator
+			stokes->template K_inv_gs<true>(u_out, b_upper, N_STEPS);
+			stokes->template K_inv_gs<false>(u_out, b_upper, N_STEPS);
+
+			//apply M_inverse to P as a symmetric operator
+			stokes->template M_inv_gs<true>(p_out, b_lower, N_STEPS);
+			stokes->template M_inv_gs<false>(p_out, b_lower, N_STEPS);
+
+			//pin pressure dof
+			result[nv] = 0;
+			return result;
+		}
 	};
 }
 

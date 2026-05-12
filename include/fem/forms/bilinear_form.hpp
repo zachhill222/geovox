@@ -1,7 +1,7 @@
 #pragma once
 
 #include "fem/numerics/csr_storage.hpp"
-#include "fem/forms/form_actions.hpp"
+#include "fem/forms/form_options.hpp"
 #include "fem/forms/local_actions.hpp"
 
 #include "util/log_time.hpp"
@@ -60,20 +60,29 @@ namespace GV
 	//for better convenience when applying BC as a post processing step, the full local matrix is stored, even in the symmetric case.
 	template<typename 	TestHandler_type,
 			 typename 	TrialHandler_type,
-			 bool 		IS_SYMMETRIC_=false,
-			 typename 	Action_type = ScatterAction>
+			 BilinearFormOptions OPTIONS = BilinearFormOptions::assemble(false)>
 	struct BilinearForm {
 		using Mesh_t         = typename TestHandler_type::Mesh_t;
 		using TestHandler_t  = TestHandler_type;
 		using TrialHandler_t = TrialHandler_type;
 		using TestDOF_t      = typename TestHandler_type::DOF_t;
 		using TrialDOF_t     = typename TrialHandler_type::DOF_t;
+		
+		//convenient parameters for requires() clauses
+		static constexpr BilinearFormOptions OPT    = OPTIONS;
+		static constexpr bool IS_SYMMETRIC 			= OPTIONS.is_symmetric;
+		static constexpr bool ACTION_MATVEC   		= OPTIONS.action == BilinearFormOptions::Action::MatVec;
+		static constexpr bool ACTION_ASSEMBLE     	= OPTIONS.action == BilinearFormOptions::Action::Assemble;
+		static constexpr bool SCATTER_ACCUMULATE   	= OPTIONS.scatter_mode == BilinearFormOptions::ScatterMode::Accumulate;
+		static constexpr bool SCATTER_SET   		= OPTIONS.scatter_mode == BilinearFormOptions::ScatterMode::Set;
+		static_assert(ACTION_MATVEC ^ ACTION_ASSEMBLE);
+		static_assert(SCATTER_ACCUMULATE ^ SCATTER_SET);
+		static_assert(!ACTION_ASSEMBLE || SCATTER_ACCUMULATE); //when assembling, we must accumulate
 
 		static_assert(std::same_as<typename TestHandler_type::Mesh_t,typename TrialHandler_type::Mesh_t>,
 			"BilinearForm - Test and Trial handlers must have the same mesh type.");
 
-		static constexpr bool IS_SYMMETRIC = IS_SYMMETRIC_;
-		static_assert(!IS_SYMMETRIC_ || (std::same_as<TrialHandler_type, TestHandler_type>),
+		static_assert(!IS_SYMMETRIC || (std::same_as<TrialHandler_type, TestHandler_type>),
 			"BilinearForm - Test and Trial handers must be the same type for a symmetric form.");
 
 		using MatStorage_t = CSR_COO<TestDOF_t,TrialDOF_t>;
@@ -83,20 +92,26 @@ namespace GV
 		static_assert(std::same_as<typename TrialDOF_t::QuadElem_t::NonPeriodicVariant, typename TestDOF_t::QuadElem_t::NonPeriodicVariant>,
 			"BilinearForm - The test and trial dofs must have compatible quadrature elements.");
 
+		// void operate() {
+		// 	if constexpr (ScatterActionType<Action_type>) {
+		// 		assert(OP == FormOperation::Assemble);
+		// 		//no-op, just scatter()
+		// 	}
+		// 	else if constexpr (MatVecActionType<Action_type>) {
+		// 		if (OP == FormOperation::Jacobi) {jacobi();}
+		// 		else if (OP == FormOperation::GaussSeidelForward) {gauss_seidel<true>();}
+		// 		else if (OP == FormOperation::GaussSeidelBackward) {gauss_seidel<false>();}
+		// 		else {throw std::runtime_error("BilinearForm::operate - unknown operation");}
+		// 	}
+		// }
 		
 		//define various constructors based symmetry
 		//to avoid constructor bloat, call set_storage() to link to the global matrix storage if needed.
-		explicit BilinearForm(const TestHandler_t& handler)
-			requires (IS_SYMMETRIC)
-			: test_handler(handler), trial_handler(handler) {
-				assert(&test_handler.mesh == &trial_handler.mesh); //both handlers must be defined on the same mesh.
-			}
+		explicit BilinearForm(const TestHandler_t& handler) requires (IS_SYMMETRIC)
+			: test_handler(handler), trial_handler(handler) {}
 		
-		explicit BilinearForm(const TestHandler_t& test_handler, const TrialHandler_t& trial_handler) 
-			requires (!IS_SYMMETRIC)
-			:test_handler(test_handler), trial_handler(trial_handler) {
-				assert(&test_handler.mesh == &trial_handler.mesh); //both handlers must be defined on the same mesh.
-			}
+		explicit BilinearForm(const TestHandler_t& test_handler, const TrialHandler_t& trial_handler) requires (!IS_SYMMETRIC)
+			: test_handler(test_handler), trial_handler(trial_handler) {}
 		
 		const TestHandler_t&		test_handler;	//link to handler for the test dofs
 		const TrialHandler_t&		trial_handler;	//link to handler for the trial dofs
@@ -108,7 +123,7 @@ namespace GV
 		//use a non-owning pointer so that different bilinear forms can be created per-thread
 		//synchronization of the global scatter should be handled by element coloring
 		MatStorage_t* global_mat = nullptr;
-		inline void set_storage(MatStorage_t& coo) requires ScatterActionType<Action_type> {global_mat = &coo;}
+		inline void set_storage(MatStorage_t& coo) requires (ACTION_ASSEMBLE) {global_mat = &coo;}
 
 		//compute the action of the global matrix on x as y (y=Mx)
 		//Alternatively, apply an iterative method to approximate y=M_inv * x
@@ -123,21 +138,19 @@ namespace GV
 		//conversion of vectors to a span is handled in util/compatibility.hpp
 		//add as_span functions if we need a library other than Eigen.
 		template<typename ContainerA_t, typename ContainerB_t>
-		inline void set_vecs(ContainerA_t& y, const ContainerB_t& x) requires MatVecActionType<Action_type> {
+		inline void set_vecs(ContainerA_t& y, const ContainerB_t& x) requires (ACTION_MATVEC) {
 			set_vecs(as_span(y), as_span(x));
 		}
 
-		inline void set_vecs(std::span<double> y, std::span<const double> x) requires MatVecActionType<Action_type> {
+		inline void set_vecs(std::span<double> y, std::span<const double> x) requires (ACTION_MATVEC) {
 			vec_x = x;
 			vec_y = y;
-			if (loc_x.size()>0) {init_loc_x();} //if current basis on an element is set
 		}
 
 		uint64_t n_test=0, m_trial=0;
 
 		template<typename ContainerA_t, typename ContainerB_t>
-			requires (!IS_SYMMETRIC) &&
-					 std::same_as<typename ContainerA_t::value_type, TestDOF_t> &&
+			requires std::same_as<typename ContainerA_t::value_type, TestDOF_t> &&
 					 std::same_as<typename ContainerB_t::value_type, TrialDOF_t>
 		void set_basis(const ContainerA_t& test_dofs_, const ContainerB_t& trial_dofs_) {
 			trial_dofs = as_span(trial_dofs_);
@@ -149,37 +162,19 @@ namespace GV
 			//compute local to global dof index maps
 			loc2global_test.resize(n_test);
 			for (uint64_t n=0; n<n_test; ++n)  {loc2global_test[n]  = test_handler.compressed_index(test_dofs[n]);}
-			loc2global_trial.resize(m_trial);
-			for (uint64_t m=0; m<m_trial; ++m) {loc2global_trial[m] = trial_handler.compressed_index(trial_dofs[m]);}
+			if constexpr (IS_SYMMETRIC) {
+				loc2global_trial = loc2global_test;
+			} else {
+				loc2global_trial.resize(m_trial);
+				for (uint64_t m=0; m<m_trial; ++m) {loc2global_trial[m] = trial_handler.compressed_index(trial_dofs[m]);}
+			}
 
-			if constexpr (MatVecActionType<Action_type>) {
+			if constexpr (ACTION_MATVEC) {
 				loc_x.resize(m_trial);
-				loc_y.assign(n_test, 0.0);
-				if (loc_x.size()>0 && vec_x.size()>0) {init_loc_x();}
+				loc_y.resize(n_test);
 			}
 		}
 
-		template<typename ContainerA_t>
-			requires (IS_SYMMETRIC) &&
-					 std::same_as<typename ContainerA_t::value_type, TestDOF_t>
-		void set_basis(const ContainerA_t& test_dofs_, const ContainerA_t& trial_dofs_) {
-			trial_dofs = as_span(test_dofs_);
-			test_dofs  = as_span(test_dofs_);
-			m_trial    = trial_dofs.size();
-			n_test     = m_trial;
-			loc_m_v.assign(n_test*m_trial, 0.0);
-
-			//compute local to global dof index maps
-			loc2global_test.resize(n_test);
-			for (uint64_t n=0; n<n_test; ++n)  {loc2global_test[n]  = test_handler.compressed_index(test_dofs[n]);}
-			loc2global_trial = loc2global_test;
-
-			if constexpr (MatVecActionType<Action_type>) {
-				loc_x.resize(m_trial);
-				loc_y.assign(n_test, 0.0);
-				if (loc_x.size()>0 && vec_x.size()>0) {init_loc_x();}
-			}
-		}
 
 		inline double& local_mat(uint64_t i, uint64_t j) {
 			assert(i<n_test);
@@ -193,7 +188,7 @@ namespace GV
 			return loc_m_v[j + i*m_trial]; //row-major is better for BC setting
 		}
 
-		void scatter() requires ScatterActionType<Action_type> {
+		void scatter() requires (ACTION_ASSEMBLE) {
 			if (global_mat==nullptr) {throw std::runtime_error("BilinearForm::scatter - called with no global matrix (nullptr)");}
 			//add the results of the local matrix to the global matrix
 			//preserves sorted and accumulated
@@ -207,34 +202,50 @@ namespace GV
 			}
 		}
 
-		void scatter() requires MatVecActionType<Action_type> {
+		void scatter() requires (ACTION_MATVEC) {
 			for (uint64_t i=0; i<n_test; ++i) {
-				vec_y[loc2global_test[i]] += loc_y[i];
+				if constexpr (SCATTER_ACCUMULATE) {
+					vec_y[loc2global_test[i]] += loc_y[i];
+				} else {
+					vec_y[loc2global_test[i]] = loc_y[i];
+				}
 			}
 		}
 
-		void init_loc_x() requires MatVecActionType<Action_type> {
+		void init_loc_x() requires (ACTION_MATVEC) {
 			for (uint64_t j=0; j<m_trial; ++j) {
 				loc_x[j] = vec_x[loc2global_trial[j]];
 			}
 		}
 
-		inline void multiply() requires MatVecActionType<Action_type> {
+		void init_loc_y() requires (ACTION_MATVEC) {
+			for (uint64_t i=0; i<n_test; ++i) {
+				loc_y[i] = vec_y[loc2global_test[i]];
+			}
+		}
+
+		inline void multiply() requires (ACTION_MATVEC) {
 			//note this accumulates into loc_y
 			//for this method, the vec_y (which is used to initialize loc_y)
 			//should probably be set to 0.
+			init_loc_x();
+			loc_y.assign(n_test,0.0);
 			local_multiply(as_span(loc_y),as_span(loc_x),as_span(loc_m_v));
 		}
 
 
-		inline void jacobi() requires MatVecActionType<Action_type> {
+		inline void jacobi() requires (ACTION_MATVEC) {
 			assert(n_test == m_trial);
+			init_loc_x();
+			init_loc_y();
 			local_jacobi(as_span(loc_y),as_span(loc_x),as_span(loc_m_v));
 		}
 
 		template<bool FORWARD=true>
-		inline void gauss_seidel() requires MatVecActionType<Action_type> {
+		inline void gauss_seidel() requires (ACTION_MATVEC) {
 			assert(n_test == m_trial);
+			init_loc_x();
+			init_loc_y();
 			if constexpr (FORWARD) {
 				local_gauss_seidel(as_span(loc_y),as_span(loc_x),as_span(loc_m_v));
 			}
@@ -245,7 +256,7 @@ namespace GV
 
 		//TODO: because the global storage was moved out of this class, this might be unnecessary
 		inline auto to_eigen_csr(const std::vector<TestDOF_t>& test_dofs_, const std::vector<TrialDOF_t>& trial_dofs_) const 
-			requires ScatterActionType<Action_type> {
+			requires (ACTION_ASSEMBLE) {
 			if (global_mat==nullptr) {throw std::runtime_error("BilinearForm::to_eigen_csr - called with no global matrix (nullptr)");}
 			global_mat->accumulate();
 			return global_mat->to_eigen_csr(test_dofs_, trial_dofs_);

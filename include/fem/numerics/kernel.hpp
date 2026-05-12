@@ -202,7 +202,15 @@ namespace GV
 				}
 			}
 
+		~Kernel() {
+			//free threads
+		}
 
+		//the kernel owns threads and cannot be moved/copied
+		Kernel(const Kernel&) = delete;
+		Kernel(Kernel&&) = delete;
+		Kernel& operator=(const Kernel&) = delete;
+		Kernel& operator=(Kernel&&) = delete;
 		
 
 		template<uint64_t I>
@@ -346,14 +354,8 @@ namespace GV
 		const uint64_t m_trial=B_form<I>().m_trial;
 		const uint64_t n_test=B_form<I>().n_test;
 
-		#ifdef _OPENMP
-		#pragma omp parallel if(n_test*m_trial > KERNEL_OMP__BASIS_THRESHOLD)
-		#endif
 		{
 			std::array<double,NQ> vals;
-			#ifdef _OPENMP
-			#pragma omp for
-			#endif
 			for (uint64_t j=0; j<m_trial; ++j) {
 				const auto phi_j = B_form<I>().trial_dofs[j];
 				const uint64_t depth_j = phi_j.depth();

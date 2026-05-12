@@ -75,6 +75,14 @@ namespace GV
 		mutable std::vector<std::vector<VoxelElement>> request_active;
 		mutable std::vector<std::vector<VoxelElement>> request_deactive;
 
+		//store the active elements in a sorted vector
+		//this is not incrementally updated an should be re-build after
+		//any mesh changes (or preferably after a substantial number of changes)
+		//the list is sorted by linear index (i.e., depth 0 active elements all sorted, then all depth 1 active elements all sorted, ...)
+		//TODO: remove mutable?
+		mutable std::vector<VoxelElement> active_list;
+		mutable std::array<size_t, MAX_DEPTH+2> active_list_depth_start; //depth i uses indices [depth_start[i], depth_start[i+1]) in the active_list
+		mutable bool is_active_list_stale = true; //track if changes have been made since the last time the list was updated
 	public:
 		using GeoPoint_t = Point<3,double>; //points in space
 		
@@ -100,7 +108,9 @@ namespace GV
 
 		//simple querries and operations
 		inline void reset() {active_elem->reset();}
-		inline size_t n_elements() const {return active_elem->count();}
+		inline size_t n_elements() const {return active_elem->count();} //TODO: replace with active_elements.size()
+		inline size_t count_elements() const {return active_elem->count();}
+
 
 		inline void activate(const VoxelElement el) {assert(el.is_valid()); active_elem->set(el.linear_index());}
 		inline void activate(const VoxelElement el) const {
@@ -121,8 +131,6 @@ namespace GV
 				request_deactive[0].push_back(el);
 			#endif
 		}
-
-		
 
 		//test if a feature is active.
 		//active elements are recorded int the active_elem bitset
@@ -170,6 +178,8 @@ namespace GV
 
 		//process requested activations
 		void process_request_active() {
+			is_active_list_stale = true;
+
 			#ifndef _OPENMP
 			for (auto& request : request_active) {
 				for (VoxelElement el : request) {
@@ -218,6 +228,8 @@ namespace GV
 
 		//process requested deactivations
 		void process_request_deactive() {
+			is_active_list_stale = true;
+
 			for (auto& request : request_deactive) {
 				for (VoxelElement el : request) {
 					if (el.exists()) {
@@ -231,6 +243,8 @@ namespace GV
 		//layer operations
 		template<typename Predicate = std::nullptr_t>
 		void set_depth(const uint64_t depth, Predicate&& pred = nullptr) {
+			is_active_list_stale = true;
+
 			//set to true by default. use the predicate if it is passed
 			auto action = [&pred, this](VoxelElement el) {
 				if constexpr (!NULLPTR_T<Predicate>) {
@@ -246,6 +260,28 @@ namespace GV
 			//as the predicate to skip an element in the for_each loop
 			for_each_depth<VoxelElement>(depth, action);
 		}
+
+		//assemble the list of active elements
+		//TODO: remove const if lists are no longer mutable
+		void assemble_active_list() const {
+			if (!is_active_list_stale) {return;}
+
+			active_list.clear();
+			active_list.reserve(count_elements());
+
+			auto action = [&,this](VoxelElement el) {
+				if (is_active(el)) {active_list.push_back(el);}
+			};
+
+			for (uint64_t d=0; d<MAX_DEPTH+1; ++d) {
+				active_list_depth_start[d] = active_list.size();
+				for_each_depth<VoxelElement>(d,action);
+			}
+			active_list_depth_start[MAX_DEPTH+1] = active_list.size();
+			assert(active_list.size()==count_elements());
+			is_active_list_stale = false;
+		}
+
 
 		
 		//dispatch to the *_impl iteration methods for consistency
@@ -279,10 +315,37 @@ namespace GV
 			for_each_depth_omp_impl<Key_t>(depth, std::forward<Action>(action), std::forward<Predicate>(pred));
 		}
 
-		
+
+		//TODO: make various dispatch methods as the case for looping over all elements
+		template<typename Action, typename Predicate = std::nullptr_t>
+		void for_each_active_element_depth(const uint64_t depth, Action&& action, Predicate&& pred = nullptr) const {
+			assemble_active_list(); //no-op if already up to date
+			for (size_t idx = active_list_depth_start[depth]; idx<active_list_depth_start[depth+1]; ++idx) {
+				const VoxelElement el = active_list[idx];
+				if constexpr (!NULLPTR_T<Predicate>) {
+					if (!pred(el)) {continue;}
+				}
+				action(el);
+			}
+		}
+
+		template<typename Action, typename Predicate = std::nullptr_t>
+		void for_each_active_element(Action&& action, Predicate&& pred = nullptr) const {
+			assemble_active_list(); //no-op if already up to date
+			for (size_t idx = 0; idx<active_list.size(); ++idx) {
+				const VoxelElement el = active_list[idx];
+				if constexpr (!NULLPTR_T<Predicate>) {
+					if (!pred(el)) {continue;}
+				}
+				action(el);
+			}
+		}
+
 		//hierarchy
 		template<typename Predicate = std::nullptr_t>
 		void refine(const VoxelElement el, Predicate&& pred = nullptr) {
+			is_active_list_stale = true;
+
 			deactivate(el);
 			for (const auto child : el.children()) {
 				if constexpr (!NULLPTR_T<Predicate>) {
@@ -296,6 +359,8 @@ namespace GV
 
 		template<typename Predicate = std::nullptr_t>
 		void coarsen(const VoxelElement el, Predicate&& pred = nullptr) {
+			is_active_list_stale = true;
+
 			if constexpr (!NULLPTR_T<Predicate>) {
 				set(el, pred(el));
 			}
