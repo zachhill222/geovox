@@ -87,7 +87,8 @@ namespace GV
 
 		public:
 		//simple queries
-		inline constexpr uint64_t n_dofs() const {return active_dofs->count();}
+		inline constexpr uint64_t n_dofs() const {return active_dof_list_curr.size();}
+		inline constexpr uint64_t count_dofs() const {return active_dofs->count();}
 
 		inline constexpr bool is_active(const DOF_t dof) const {assert(dof.is_valid()); return active_dofs->test(dof.key.linear_index());}
 		inline constexpr void set_active(const DOF_t dof, const bool b) {assert(dof.is_valid()); active_dofs->set(dof.key.linear_index(), b);}
@@ -158,7 +159,7 @@ namespace GV
 
 		//transfer computations between mesh refinements
 		void compress_dof_numbers() {
-			const uint64_t ndofs = n_dofs();
+			const uint64_t ndofs = count_dofs();
 			active_dof_list_prev = std::move(active_dof_list_curr);
 			active_dof_list_curr.clear();
 			active_dof_list_curr.reserve(ndofs);

@@ -85,7 +85,7 @@ namespace GV
 			mesh.set_depth(dd);
 			dofhandler.set_depth(dd);
 			dofhandler.compress_dof_numbers();
-			assert(dofhandler.curr_compressed_dofs().size() == dofhandler.n_dofs() );
+			assert(dofhandler.curr_compressed_dofs().size() == dofhandler.count_dofs() );
 		}
 
 		//refine the mesh and prolong/interpolate the current solution
@@ -106,7 +106,7 @@ namespace GV
 
 			//transfer solution to the fine grid
 			const Vec_t solution_copy = solution;
-			solution = Vec_t::Zero(dofhandler.curr_compressed_dofs().size());
+			solution = Vec_t::Zero(dofhandler.n_dofs());
 			dofhandler.update_coefs(solution,solution_copy);
 		}
 

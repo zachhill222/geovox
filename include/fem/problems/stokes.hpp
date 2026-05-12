@@ -1,5 +1,7 @@
 #pragma once
 
+#include "fem/problems/stokes_wrapper_eigen.hpp" //use the methods in this class for matrix-free iterative solvers in Eigen
+
 #include "fem/forms/bilinear_H1.hpp"
 #include "fem/forms/bilinear_L2.hpp"
 #include "fem/forms/bilinear_Hdiv.hpp"
@@ -105,13 +107,16 @@ namespace GV
 		V_Handler_t 	velocity_handler; //all velocity dofs are the same
 		P_Handler_t		pressure_handler; 
 
-		std::vector<double> U, P;
+		std::vector<double> X; //U and P combined
 		BCHandler_t		u_bc, v_bc, w_bc, p_bc;
 		double 			mu     = 1.0; //viscosity
 
-		Stokes() : 
-			mesh{{0,0,0},{1,1,1}}, 
+		Stokes(double L, double W, double H) :
+			mesh{{0,0,0},{L,W,H}}, 
 			velocity_handler{mesh}, pressure_handler{mesh} {}
+
+		Stokes() : Stokes(1.0,1.0,1.0) {}
+			
 
 		void set_body_force(const double x, const double y, const double z) {
 			fu = x;
@@ -119,37 +124,121 @@ namespace GV
 			fw = z;
 		}
 
+		size_t n_vel_total() const {return 3*velocity_handler.n_dofs();}
+		size_t n_vel_individual() const {return velocity_handler.n_dofs();}
+		size_t n_pres() const {return pressure_handler.n_dofs();}
+
+		//access individual components of the solution
+		std::span<double> u() {
+			const auto N1 = velocity_handler.n_dofs();
+			#ifndef NDEBUG
+			const auto N2 = pressure_handler.n_dofs();
+			assert(3*N1+N2 == X.size());
+			#endif
+			return as_span(X,0,N1);
+		}
+
+		std::span<const double> u() const {
+			const auto N1 = velocity_handler.n_dofs();
+			#ifndef NDEBUG
+			const auto N2 = pressure_handler.n_dofs();
+			assert(3*N1+N2 == X.size());
+			#endif
+			return as_span(X,0,N1);
+		}
+
+		std::span<double> v() {
+			const auto N1 = velocity_handler.n_dofs();
+			#ifndef NDEBUG
+			const auto N2 = pressure_handler.n_dofs();
+			assert(3*N1+N2 == X.size());
+			#endif
+			return as_span(X,N1,N1);
+		}
+
+		std::span<const double> v() const {
+			const auto N1 = velocity_handler.n_dofs();
+			#ifndef NDEBUG
+			const auto N2 = pressure_handler.n_dofs();
+			assert(3*N1+N2 == X.size());
+			#endif
+			return as_span(X,N1,N1);
+		}
+
+		std::span<double> w() {
+			const auto N1 = velocity_handler.n_dofs();
+			#ifndef NDEBUG
+			const auto N2 = pressure_handler.n_dofs();
+			assert(3*N1+N2 == X.size());
+			#endif
+			return as_span(X,2*N1,N1);
+		}
+
+		std::span<const double> w() const {
+			const auto N1 = velocity_handler.n_dofs();
+			#ifndef NDEBUG
+			const auto N2 = pressure_handler.n_dofs();
+			assert(3*N1+N2 == X.size());
+			#endif
+			return as_span(X,2*N1,N1);
+		}
+
+		std::span<double> U() {
+			const auto N1 = velocity_handler.n_dofs();
+			#ifndef NDEBUG
+			const auto N2 = pressure_handler.n_dofs();
+			assert(3*N1+N2 == X.size());
+			#endif
+			return as_span(X,0,3*N1);
+		}
+
+		inline auto P() {return P();}
+
+		std::span<double> p() {
+			const auto N1 = velocity_handler.n_dofs();
+			const auto N2 = pressure_handler.n_dofs();
+			assert(3*N1+N2 == X.size());
+			return as_span(X,3*N1,N2);
+		}
+
+		std::span<const double> p() const {
+			const auto N1 = velocity_handler.n_dofs();
+			const auto N2 = pressure_handler.n_dofs();
+			assert(3*N1+N2 == X.size());
+			return as_span(X,3*N1,N2);
+		}
+
 		void set_depth(const uint64_t depth) {
 			mesh.set_depth(depth);
 			pressure_handler.set_depth(depth);
+			pressure_handler.compress_dof_numbers();
 
 			mesh.set_depth(depth+1);
 			velocity_handler.set_depth(depth+1);
+			velocity_handler.compress_dof_numbers();
 
 			const auto np = pressure_handler.n_dofs();
 			const auto nv = velocity_handler.n_dofs();
-
-			P.assign(np,0.0);
-			U.assign(3*nv,0.0);
+			X.assign(3*nv+np,0.0);
 		}
 
 		//TODO: add dof and mesh predicates (i.e., refine low accuracy dofs and only activate relevant elements)
 		void refine() {
+			LogTime timer{"Stokes::refine"};
+
+			const auto nv_old = velocity_handler.n_dofs();
+			const auto np_old = pressure_handler.n_dofs();
+
 			//refine all pressure dofs and update the coefficients
 			pressure_handler.refine(pressure_handler.curr_compressed_dofs());
 			mesh.process_request_active(); //somewhat unnecessary
-
 			pressure_handler.compress_dof_numbers();
-			std::vector<double> temp_vals(P.begin(), P.end());
-			P.assign(pressure_handler.n_dofs(), 0.0);
-			pressure_handler.update_coefs(P, temp_vals);
 
 			//for each active pressure dof, activate each child as a velocity dof
 			//for each active support element in the pressure, activate all 8 children
 			//the element activation is done by request when activating the velocity dofs
 			//note that the pressure and velocity handlers are compatible in the sense that keys
 			//for pressure dofs are also keys for velocity dofs
-			const auto N_old = velocity_handler.n_dofs();
 			velocity_handler.set_all_inactive();
 
 			for (const P_DOF_t p : pressure_handler.curr_compressed_dofs()) {
@@ -163,13 +252,18 @@ namespace GV
 			mesh.process_request_active();
 			velocity_handler.compress_dof_numbers();
 
-			temp_vals.assign(U.begin(), U.end());
-			const auto N_new = velocity_handler.n_dofs();
-			U.assign(3*N_new, 0.0);
 
-			velocity_handler.update_coefs(as_span(U,0,N_new),       as_span(temp_vals,0,N_old));
-			velocity_handler.update_coefs(as_span(U,N_new,N_new),   as_span(temp_vals,N_old,N_old));
-			velocity_handler.update_coefs(as_span(U,2*N_new,N_new), as_span(temp_vals,2*N_old,N_old));
+			//interpolate solution
+			std::vector<double> X_old(std::move(X));
+			const auto n_v = velocity_handler.n_dofs();
+			const auto n_p = pressure_handler.n_dofs();
+			X.assign(3*n_v+n_p, 0.0);
+
+			assert(3*nv_old+np_old == X_old.size());
+			velocity_handler.update_coefs(u(), as_span(X_old,0,nv_old));
+			velocity_handler.update_coefs(v(), as_span(X_old,nv_old,nv_old));
+			velocity_handler.update_coefs(w(), as_span(X_old,2*nv_old,nv_old));
+			pressure_handler.update_coefs(p(), as_span(X_old,3*nv_old, np_old));
 		}
 
 		//apply dirichlet BC for velocity
@@ -199,10 +293,10 @@ namespace GV
 		inline void compute_F(Container_t& F) const {compute_F(as_span(F));}
 
 		void compute_F(std::span<double> F) const {
-			assert(F.size()==U.size());
-			assert(F.size()==3*velocity_handler.n_dofs());
+			const auto N = n_vel_individual();
+			assert(F.size()==n_vel_total());
+			assert(F.size()==3*N);
 
-			const auto N = U.size()/3;
 			Fu_Form F_u{velocity_handler}; F_u.set_constant(fu);
 			Fv_Form F_v{velocity_handler}; F_v.set_constant(fv);
 			Fw_Form F_w{velocity_handler}; F_w.set_constant(fw);
@@ -553,6 +647,53 @@ namespace GV
 			}
 		}
 
+
+		//solve a few iterations with Eigen
+		//pass the rhs explicitly so this can be used with either AMR (rhs is from problem)
+		//or multigrid (rhs is residual)
+		void smooth(int n_iter, std::span<const double> rhs, double tol=1e-100, bool print_summary=false) {
+			LogTime timer{"Stokes::smooth"};
+
+			using Operator = StokesOperator<V_BC,P_BC,MAX_DEPTH>;
+			
+			Operator op(*this);
+			Eigen::GMRES<Operator, Eigen::IdentityPreconditioner> solver;
+			solver.setMaxIterations(n_iter);
+			solver.setTolerance(tol); //always do the requested number of iterations
+			solver.compute(op);
+
+			//wrap data into Eigen::VectorXd
+			assert(rhs.size()==X.size());
+			assert(3*velocity_handler.n_dofs()+pressure_handler.n_dofs()==X.size());
+
+			Eigen::Map<Eigen::VectorXd> X_map(X.data(), X.size());
+			const Eigen::Map<const Eigen::VectorXd> R_map(rhs.data(), rhs.size());
+
+			X_map = solver.solveWithGuess(R_map, X_map).eval();
+
+			if (print_summary) {
+				std::cout << "iterations: " << solver.iterations() << "\n";
+				std::cout << "residual_relative: " << solver.error() << "\n";
+				switch (solver.info()) {
+					case Eigen::Success: std::cout << "info: Success\n"; break;
+					case Eigen::NumericalIssue: std::cout << "info: NumericalIssue\n"; break;
+					case Eigen::NoConvergence: std::cout << "info: NoConvergence\n"; break;
+					case Eigen::InvalidInput: std::cout << "info: InvalidInput\n"; break;
+					default : std::cout << "info: Unknown\n"; break;
+				}
+			}
+
+		}
+
+		void check_stokes_op() {
+			using Operator = StokesOperator<V_BC,P_BC,MAX_DEPTH>;
+			Operator op(*this);
+
+			Eigen::VectorXd ones = Eigen::VectorXd::Ones(X.size());
+			std::cout << "1*OP*1 = " << ones.dot(op*ones) << std::endl;
+		}
+
+
 		//save solution
 		void save_as(const std::string filename) const {
 			LogTime timer{"Stokes::save_as"};
@@ -566,12 +707,10 @@ namespace GV
 			const auto n_verts = mesh.write_unstructured_vtk(file);
 
 			//interpolate the solution to the vertex values
-			auto p_vals = pressure_handler.interpolate_to_vertices(P, n_verts);
-
-			const auto N = U.size()/3;
-			auto u_vals = velocity_handler.interpolate_to_vertices(as_span(U, 0,  N), n_verts);
-			auto v_vals = velocity_handler.interpolate_to_vertices(as_span(U, N,  N), n_verts);
-			auto w_vals = velocity_handler.interpolate_to_vertices(as_span(U, 2*N,N), n_verts);
+			auto u_vals = velocity_handler.interpolate_to_vertices(u(), n_verts);
+			auto v_vals = velocity_handler.interpolate_to_vertices(v(), n_verts);
+			auto w_vals = velocity_handler.interpolate_to_vertices(w(), n_verts);
+			auto p_vals = pressure_handler.interpolate_to_vertices(p(), n_verts);
 
 			//append solution header
 			file << "POINT_DATA " << n_verts << "\n"
