@@ -228,10 +228,6 @@ namespace GV
 		template<uint64_t I>
 		using L_TestDOF_t = typename L_Form<I>::TestDOF_t;
 
-		
-
-		
-
 		//access individual bilinear forms
 		template<int I>
 		auto& B_form() {return std::get<I>(B_forms);}

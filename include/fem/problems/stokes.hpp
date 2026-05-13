@@ -356,15 +356,15 @@ namespace GV
 				
 				//set each component, multiply, scatter
 				A_form.set_vecs(KU.subspan(0,N), U.subspan(0,N));
-				A_form.multiply();
+				A_form.operate();
 				A_form.scatter();
 
 				A_form.set_vecs(KU.subspan(N,N), U.subspan(N,N));
-				A_form.multiply();
+				A_form.operate();
 				A_form.scatter();
 
 				A_form.set_vecs(KU.subspan(2*N,N), U.subspan(2*N,N));
-				A_form.multiply();
+				A_form.operate();
 				A_form.scatter();
 			};
 
@@ -401,7 +401,8 @@ namespace GV
 			const auto N = U.size() / 3;
 
 			//only need one bilinear form
-			constexpr BilinearFormOptions OPTS = FORWARD ? BilinearFormOptions::gauss_seidel_fwd(true) : BilinearFormOptions::gauss_seidel_bwd(true);
+			// constexpr BilinearFormOptions OPTS = FORWARD ? BilinearFormOptions::gauss_seidel_fwd(true) : BilinearFormOptions::gauss_seidel_bwd(true);
+			constexpr BilinearFormOptions OPTS = BilinearFormOptions::jacobi(true);
 			using Form_type   = BilinH1_t<OPTS>;
 			using Kernel_type = Kernel<4, TypeList<Form_type>>;
 			Form_type   A_form(velocity_handler);
@@ -417,15 +418,15 @@ namespace GV
 				
 				//set each component, multiply, scatter
 				A_form.set_vecs(U.subspan(0,N), F.subspan(0,N));
-				A_form.template gauss_seidel<FORWARD>();
+				A_form.operate();
 				A_form.scatter();
 
 				A_form.set_vecs(U.subspan(N,N), F.subspan(N,N));
-				A_form.template gauss_seidel<FORWARD>();
+				A_form.operate();
 				A_form.scatter();
 
 				A_form.set_vecs(U.subspan(2*N,N), F.subspan(2*N,N));
-				A_form.template gauss_seidel<FORWARD>();
+				A_form.operate();
 				A_form.scatter();
 			};
 
@@ -487,9 +488,9 @@ namespace GV
 				kernel.compute_all();
 				
 				//set each component, multiply, scatter
-				Bx_form.multiply();
-				By_form.multiply();
-				Bz_form.multiply();
+				Bx_form.operate();
+				By_form.operate();
+				Bz_form.operate();
 				
 				kernel.scatter_all();
 			};
@@ -542,9 +543,9 @@ namespace GV
 				kernel.compute_all();
 				
 				//set each component, multiply, scatter
-				Bx_t_form.multiply();
-				By_t_form.multiply();
-				Bz_t_form.multiply();
+				Bx_t_form.operate();
+				By_t_form.operate();
+				Bz_t_form.operate();
 
 				kernel.scatter_all();
 			};
@@ -578,7 +579,7 @@ namespace GV
 				
 				//set each component, multiply, scatter
 				M_form.set_vecs(MP,P);
-				M_form.multiply();
+				M_form.operate();
 				M_form.scatter();
 			};
 
@@ -600,7 +601,8 @@ namespace GV
 			assert(P.size() == pressure_handler.n_dofs());
 
 			//get indices for subspans for u, v, w components
-			constexpr BilinearFormOptions OPTS = FORWARD ? BilinearFormOptions::gauss_seidel_fwd(true) : BilinearFormOptions::gauss_seidel_bwd(true);
+			// constexpr BilinearFormOptions OPTS = FORWARD ? BilinearFormOptions::gauss_seidel_fwd(true) : BilinearFormOptions::gauss_seidel_bwd(true);
+			constexpr BilinearFormOptions OPTS = BilinearFormOptions::jacobi(true);
 			using Form_type   = BilinL2_t<OPTS>;
 			using Kernel_type = Kernel<4, TypeList<Form_type>>;
 			Form_type   M_form(pressure_handler);
@@ -616,7 +618,7 @@ namespace GV
 				
 				//set each component, multiply, scatter
 				M_form.set_vecs(P, H);
-				M_form.template gauss_seidel<FORWARD>();
+				M_form.operate();
 				M_form.scatter();
 			};
 

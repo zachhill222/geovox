@@ -57,7 +57,7 @@ namespace GV
 
 		//compute M*y
 		std::vector<T> M_y(n,0.0);
-		local_multiply(M_y,y,loc_mat_row_major);
+		local_multiply(std::span<T>(M_y),y,loc_mat_row_major);
 
 		#pragma omp simd
 		for (uint64_t i=0; i<n; ++i) {

@@ -12,7 +12,7 @@ namespace GV
 		enum class Action {Assemble, MatVec};
 
 		//specific opertion should be called by the kernel (somewhat redundant)
-		enum class Operation {Assemble, Multiply, Jacobi, GaussSeidel_F, GaussSeidel_B};
+		enum class Operation {Matrix, Diagonal, Multiply, Jacobi, GaussSeidel_F, GaussSeidel_B};
 
 		//do we accumulate into the global vector or set the global vector
 		enum class ScatterMode {Accumulate, Set};
@@ -28,6 +28,12 @@ namespace GV
 			return {is_sym, Action::Assemble, Operation::Assemble, ScatterMode::Accumulate};
 		}
 
+		//factory for assembling just the main diagonal of the matrix
+		//necessary for iterative solvers
+		static constexpr BilinearFormOptions diagonal(const bool is_sym) {
+			return {is_sym, Action::Assemble, Operation::Diagonal, ScatterMode::Accumulate};
+		}
+
 		//factory for computing a matrix-vector product
 		//note that accumulating is better for iterative solvers
 		static constexpr BilinearFormOptions multiply(const bool is_sym) {
@@ -41,6 +47,10 @@ namespace GV
 
 		static constexpr BilinearFormOptions gauss_seidel_bwd(const bool is_sym) {
 			return {is_sym, Action::MatVec, Operation::GaussSeidel_B, ScatterMode::Set};
+		}
+
+		static constexpr BilinearFormOptions jacobi(const bool is_sym) {
+			return {is_sym, Action::MatVec, Operation::Jacobi};
 		}
 	};
 

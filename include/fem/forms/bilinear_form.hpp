@@ -92,18 +92,6 @@ namespace GV
 		static_assert(std::same_as<typename TrialDOF_t::QuadElem_t::NonPeriodicVariant, typename TestDOF_t::QuadElem_t::NonPeriodicVariant>,
 			"BilinearForm - The test and trial dofs must have compatible quadrature elements.");
 
-		// void operate() {
-		// 	if constexpr (ScatterActionType<Action_type>) {
-		// 		assert(OP == FormOperation::Assemble);
-		// 		//no-op, just scatter()
-		// 	}
-		// 	else if constexpr (MatVecActionType<Action_type>) {
-		// 		if (OP == FormOperation::Jacobi) {jacobi();}
-		// 		else if (OP == FormOperation::GaussSeidelForward) {gauss_seidel<true>();}
-		// 		else if (OP == FormOperation::GaussSeidelBackward) {gauss_seidel<false>();}
-		// 		else {throw std::runtime_error("BilinearForm::operate - unknown operation");}
-		// 	}
-		// }
 		
 		//define various constructors based symmetry
 		//to avoid constructor bloat, call set_storage() to link to the global matrix storage if needed.
@@ -202,7 +190,13 @@ namespace GV
 			}
 		}
 
-		void scatter() requires (ACTION_MATVEC) {
+		void scatter() requires (ACTION_MATVEC && OPTIONS.operation==BilinearFormOptions::Operation::Diagonal) {
+			for (uint64_t i=0; i<std::min(n_test,m_trial); ++i) {
+				vec_y[loc2global_test[i]] += local_mat(i,i);
+			}
+		}
+
+		void scatter() requires (ACTION_MATVEC && OPTIONS.operation!=BilinearFormOptions::Operation::Diagonal) {
 			for (uint64_t i=0; i<n_test; ++i) {
 				if constexpr (SCATTER_ACCUMULATE) {
 					vec_y[loc2global_test[i]] += loc_y[i];
@@ -221,6 +215,23 @@ namespace GV
 		void init_loc_y() requires (ACTION_MATVEC) {
 			for (uint64_t i=0; i<n_test; ++i) {
 				loc_y[i] = vec_y[loc2global_test[i]];
+			}
+		}
+
+		inline void operate() {
+			if constexpr (ACTION_MATVEC) {
+				if constexpr (OPTIONS.operation == BilinearFormOptions::Operation::Multiply) {
+					multiply();
+				}
+				else if constexpr (OPTIONS.operation == BilinearFormOptions::Operation::Jacobi) {
+					jacobi();
+				}
+				else if constexpr (OPTIONS.operation == BilinearFormOptions::Operation::GaussSeidel_F) {
+					gauss_seidel<true>();
+				}
+				else if constexpr (OPTIONS.operation == BilinearFormOptions::Operation::GaussSeidel_B) {
+					gauss_seidel<false>();
+				}
 			}
 		}
 
