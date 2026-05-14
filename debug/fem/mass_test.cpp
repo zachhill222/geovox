@@ -1,10 +1,10 @@
 #include "fem/handlers/dofhandler_charms.hpp"
 #include "fem/dofs/voxel_dof_Q1.hpp"
 #include "fem/numerics/kernel.hpp"
+#include "fem/numerics/csr_storage.hpp"
 #include "mesh/voxel_mesh.hpp"
-#include "fem/forms/bilinear_L2.hpp"
-#include "fem/forms/bilinear_H1.hpp"
-#include "fem/forms/form_options.hpp"
+#include "fem/forms/bilinear_form_assembler.hpp"
+#include "fem/forms/bilinear_evaluations.hpp"
 #include "util/log_time.hpp"
 
 
@@ -13,31 +13,13 @@ using Elem_t    = Mesh_t::VoxelElement;
 using Vert_t    = Mesh_t::VoxelVertex;
 using DofKey_t  = GV::VoxelVertexKey<10,0>;
 using DOF_t     = GV::VoxelQ1<DofKey_t>;
-using Handler_t = GV::DofHandlerBase<Mesh_t,DOF_t>;
 
-using BiMass_t  = GV::SymmetricL2<Handler_t>;
-using BiStiff_t = GV::SymmetricH1<Handler_t>;
+using Handler_t = GV::DofHandlerCharms<Mesh_t,DOF_t>;
 
-struct MassKernel : public GV::SymmetricL2<Handler_t, GV::BilinearFormOptions::assemble(true), MassKernel>
-{
-	using BASE = GV::SymmetricL2<Handler_t, GV::BilinearFormOptions::assemble(true), MassKernel>;
-	using BASE::BASE;
-
-	template<uint64_t N>
-	constexpr void eval_w(
-			std::array<double,N>& w_val,
-			const std::array<double,N>& x,
-			const std::array<double,N>& y,
-			const std::array<double,N>& z) const {
-		#pragma omp simd
-		for (uint64_t i=0; i<N; ++i) {
-			//evaluate weight
-			w_val[i] = 1.0;
-		}
-	}
-};
-
-using Kernel_t  = GV::Kernel<5,GV::TypeList<MassKernel,BiStiff_t>, GV::TypeList<>>;
+using H1Eval_t  = GV::BilinearH1<DOF_t,DOF_t>;
+using L2Eval_t  = GV::BilinearL2<DOF_t,DOF_t>;
+using BiMass_t  = GV::BilinearFormAssembler<Handler_t,Handler_t,L2Eval_t>;
+using BiStiff_t = GV::BilinearFormAssembler<Handler_t,Handler_t,H1Eval_t>;
 
 int main(int argc, char* argv[]) {
 	GV::LogTime t0{"Program"};
@@ -55,30 +37,24 @@ int main(int argc, char* argv[]) {
 	dofhandler.compress_dof_numbers();
 
 	//bilinear forms
-	MassKernel mass_bl(dofhandler);
-	typename MassKernel::MatStorage_t mass_global_coo;
-	mass_bl.set_storage(mass_global_coo);
+	BiMass_t  mass_bl(dofhandler, dofhandler);
+	BiStiff_t stif_bl(dofhandler, dofhandler);
 
-	BiStiff_t stiff_bl(dofhandler);
-	typename BiStiff_t::MatStorage_t stiff_global_coo;
-	stiff_bl.set_storage(stiff_global_coo);
+	GV::CSR_COO<DOF_t,DOF_t> mass_global_coo, stiff_global_coo;
+	mass_bl.set_global(mass_global_coo);
+	stif_bl.set_global(stiff_global_coo);
 
 	//kernel
-	Kernel_t kernel(mass_bl, stiff_bl);
+	GV::Kernel<4,BiMass_t,BiStiff_t> kernel(mass_bl, stif_bl);
 
 	//integrate bilinear forms
-	auto integrate = [&kernel, &dofhandler](Elem_t el) {
-		const auto basis0 = DOF_t::dofs_on_elem(el);
-		std::vector<DOF_t> el_basis;
-		for (DOF_t b : basis0) {
-			if (b.exists() and dofhandler.is_active(b)) {el_basis.push_back(b);}
-		}
-
+	auto integrate = [&](Elem_t el) {
+		const auto el_basis = dofhandler.basis_active(el);
+		
 		kernel.set_element(el);
-		kernel.B_form<0>().set_basis(el_basis,el_basis);
-		kernel.B_form<1>().set_basis(el_basis,el_basis);
-		kernel.compute_all();
-		kernel.scatter_all();
+		mass_bl.set_basis(el_basis,el_basis);
+		stif_bl.set_basis(el_basis,el_basis);
+		kernel.dispatch_all();
 	};
 
 	{
@@ -99,14 +75,14 @@ int main(int argc, char* argv[]) {
 		#pragma omp task
 		#endif
 		{
-			mass_mat = mass_bl.to_eigen_csr(dofhandler.curr_compressed_dofs(),dofhandler.curr_compressed_dofs());
+			mass_mat = mass_global_coo.to_eigen_csr(dofhandler.curr_compressed_dofs(),dofhandler.curr_compressed_dofs());
 		}
 
 		#ifdef _OPENMP
 		#pragma omp task
 		#endif
 		{
-			stiff_mat = stiff_bl.to_eigen_csr(dofhandler.curr_compressed_dofs(),dofhandler.curr_compressed_dofs());
+			stiff_mat = stiff_global_coo.to_eigen_csr(dofhandler.curr_compressed_dofs(),dofhandler.curr_compressed_dofs());
 		}
 	}
 

@@ -27,7 +27,7 @@ namespace GV
 		using RefPoint_t = Point<3,double>;
 		using GeoPoint_t = Point<3,double>;
 		using Key_t      = Key_type;
-		using QuadElem_t = VoxelElementKey<Key_t::MAX_DEPTH, Key_t::BC_FLAG>;
+		using QuadElem_t = VoxelElementKey<Key_t::MAX_DEPTH, Key_t::BC_FLAG>; //TODO: rename to SupportElem_t
 		using Hash       = Key_t::Hash;
 		//store the logical key where this element lives
 		//note that this key does not need to correspond to an active feature of the mesh

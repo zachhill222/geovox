@@ -10,16 +10,16 @@
 namespace GV
 {
 	//a class to compute Y=A*X without forming the stiffness matrix A
-	template<typename TestHandler_type, typename TrialHandler_type, bool IS_SYMMETRIC, typename EvalPolicy, bool ACCUMULATE=false>
-	struct BilinearFormMultiply : public BilinearForm<TestHandler_type,TrialHandler_type,IS_SYMMETRIC,EvalPolicy>
+	template<typename TestHandler_type, typename TrialHandler_type, typename EvalPolicy>
+	struct BilinearFormMultiply : public BilinearForm<TestHandler_type,TrialHandler_type,EvalPolicy>
 	{
-		using BASE       = BilinearForm<TestHandler_type,TrialHandler_type,IS_SYMMETRIC,EvalPolicy>;
+		using BASE       = BilinearForm<TestHandler_type,TrialHandler_type,EvalPolicy>;
 		using TestDOF_t  = typename BASE::TestDOF_t;
 		using TrialDOF_t = typename BASE::TrialDOF_t;
 		using QuadElem_t = typename BASE::QuadElem_t;
 
-		using ComputePolicy_t = BilinearFormComputeLocalMat<TestDOF_t,TrialDOF_t,IS_SYMMETRIC,EvalPolicy>;
-		using ScatterPolicy_t = BilinearFormScatterLocalVec<TestDOF_t,ACCUMULATE>; //scatter to rows (test dofs)
+		using ComputePolicy_t = BilinearFormComputeLocalMat<TestDOF_t,TrialDOF_t,EvalPolicy>;
+		using ScatterPolicy_t = BilinearFormScatterLocalVec<TestDOF_t>; //scatter to rows (test dofs)
 		
 		//allow multiple x and y vectors to be computed on
 		struct Pair {std::span<double> y; std::span<const double> x;};
@@ -45,7 +45,7 @@ namespace GV
 		ScatterPolicy_t scatter_policy;
 
 		//constructor
-		using BASE::Base;
+		using BASE::BASE;
 
 		//link to global storage
 		inline void set_global(std::span<double> y, std::span<const double> x) {
@@ -63,9 +63,8 @@ namespace GV
 
 		template<uint64_t N_QUAD_POINTS>
 		inline void compute(
-				const QuadPointMap<QuadElem_t,N_QUAD_POINTS>& q_map,
-				const double Jxx, const double Jyy, const double Jzz) {
-			compute_policy.compute(this->test_dofs, this->trial_dofs, q_map, Jxx, Jyy, Jzz);
+				const QuadPointMap<QuadElem_t,N_QUAD_POINTS>& q_map) {
+			compute_policy.compute(this->test_dofs, this->trial_dofs, q_map);
 		}
 
 		inline void finalize() {
@@ -76,7 +75,7 @@ namespace GV
 			}
 		}
 
-		inline void scatter() const {
+		inline void scatter() {
 			for (size_t k=0; k<global_pairs.size(); ++k) {
 				scatter_policy.set_global(global_pairs[k].y);
 				scatter_policy.set_local(loc_y(k));

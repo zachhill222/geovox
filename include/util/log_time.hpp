@@ -34,7 +34,7 @@ namespace GV
 
 			#ifdef _OPENMP
 			*os   << "[t=" << std::fixed << std::setprecision(4) << elapsed << "s | "
-					<< "omp_thread=" << omp_get_thread_num() << "] "
+					"thread=" << std::this_thread::get_id() << ", " << "omp_thread=" << omp_get_thread_num() << "] "
 					<< msg << "\n";
 			#else
 			*os   << "[t=" << std::fixed << std::setprecision(4) << elapsed << "s | "

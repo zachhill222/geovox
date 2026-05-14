@@ -54,7 +54,7 @@ namespace GV
 
 	//a class responsible for scattering a local vector result to a global vector
 	//generally the handler is for the test dofs.
-	template<typename DOF_t, bool ACCUMULATE>
+	template<typename DOF_t>
 	struct BilinearFormScatterLocalVec
 	{
 		//link to global storage
@@ -73,8 +73,7 @@ namespace GV
 			for (uint64_t i=0; i<n_dofs; ++i) {
 				const uint64_t I = loc2glob[i];
 				assert(I<global_vec.size());
-				if constexpr (ACCUMULATE) {global_vec[I] += local_vec[i];}
-				else {global_vec[I] = local_vec[i];}
+				global_vec[I] += local_vec[i];
 			}
 		}
 	};

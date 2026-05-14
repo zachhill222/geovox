@@ -23,8 +23,15 @@ namespace GV
 	//scatter() passes any final result back to the primary calling method. this should involve
 	// *scattering* local element contrubutions to the global.
 
-	template<typename TestHandler_type, typename TrialHandler_type, bool IS_SYMMETRIC, typename EvalPolicy>
+	template<typename TestHandler_type, typename TrialHandler_type, typename EvalPolicy>
 	struct BilinearForm {
+		//tag to tell that this is a bilinear form (vs linear) with various compile-time mechanisms
+		static constexpr bool IS_BILINEAR_FROM = true;
+		static constexpr bool IS_LINEAR_FORM   = false;
+
+		//store symmetry in the evaluation policy
+		static constexpr bool IS_SYMMETRIC = EvalPolicy::IS_SYMMETRIC;
+
 		//alias types
 		using Mesh_t         = typename TestHandler_type::Mesh_t;
 		using TestHandler_t  = TestHandler_type;
@@ -44,10 +51,8 @@ namespace GV
 			"BilinearForm - A symmetric bilinear form must have the same test and trial dof handlers");
 
 		//constructor to link dof handlers
-		BilinearForm(const TestHandler_t& TestH, const TrialHandler_t& TrialH) : test_handler(TestH), trial_handler(TrialH) {
-			if constexpr (IS_SYMMETRIC) {assert(&TestH==&TrialH);}
-		}
-
+		BilinearForm(const TestHandler_t& TestH, const TrialHandler_t& TrialH) 
+			: test_handler(TestH), trial_handler(TrialH), mesh(test_handler.mesh) {}
 
 		//store dofs on the current element
 		std::span<const TestDOF_t>  test_dofs;		//local test basis functions (row dofs) (note a span is non-owning)
@@ -60,6 +65,9 @@ namespace GV
 		std::vector<uint64_t> 		global_test; 	//track global dof numbers
 		typename std::conditional_t<IS_SYMMETRIC, std::span<const uint64_t>, std::vector<uint64_t>> global_trial; //test and trial dofs are the same for a symmetric form
 
+		//store an accessible link to the mesh
+		const Mesh_t& mesh;
+
 		//set dofs on the current element
 		template<typename ContainerA_t, typename ContainerB_t>
 		inline void set_basis(const ContainerA_t& test, const ContainerB_t& trial) {
@@ -67,8 +75,6 @@ namespace GV
 		}
 
 		void set_basis(std::span<const TestDOF_t> test, std::span<const TrialDOF_t> trial) {
-			if constexpr (IS_SYMMETRIC) {assert(&test == &trial);}
-
 			test_dofs   = test;
 			trial_dofs  = trial;
 			n_test      = test.size();
@@ -83,30 +89,6 @@ namespace GV
 				global_trial.resize(trial.size());
 				for (uint64_t i=0; i<trial.size(); ++i)  {global_trial[i]  = trial_handler.compressed_index(trial[i]);}
 			}
-		}
-
-		//for weighted forms, it is convenient to evaluate in the mesh coordinates
-		void ref2geo(
-			std::span<double> x,
-			std::span<double> y,
-			std::span<double> z,
-			const QuadElem_t spt) const 
-		{
-			const Mesh_t& mesh = test_handler.mesh;
-			const auto el   = static_cast<typename Mesh_t::VoxelElement>(spt);
-			const auto low  = mesh.ref2geo(el.vertex(0));
-			const auto high = mesh.ref2geo(el.vertex(7));
-			const auto mid  = 0.5*(low+high);
-			const auto del  = 0.5*(high-low);
-
-			#pragma omp simd
-			for (uint64_t i=0; i<x.size(); ++i) {x[i] = mid[0] + x[i]*del[0];}
-
-			#pragma omp simd
-			for (uint64_t i=0; i<y.size(); ++i) {y[i] = mid[1] + y[i]*del[1];}
-
-			#pragma omp simd
-			for (uint64_t i=0; i<z.size(); ++i) {z[i] = mid[2] + z[i]*del[2];}
 		}
 	};
 }

@@ -34,10 +34,10 @@ namespace GV
 	/// Adapt std::array to spans and subspans
 	//////////////////////////////////////
 	template<typename T, size_t N>
-	inline std::span<T> as_span(std::array<T,N>& v) {return {v.data(), N};}
+	inline std::span<T,N> as_span(std::array<T,N>& v) {return std::span<T,N>{v};}
 
 	template<typename T, size_t N>
-	inline std::span<const T> as_span(const std::array<T,N>& v) {return {v.data(), N};}
+	inline std::span<const T,N> as_span(const std::array<T,N>& v) {return std::span<T,N>{v};}
 
 	template<typename T, size_t N>
 	inline std::span<T> as_span(std::array<T,N>& v, const size_t start, const size_t length) {

@@ -427,7 +427,7 @@ namespace GV
 
 		//initialize the matrix
 		Eigen::SparseMatrix<double,Eigen::RowMajor,int> mat(n_rows,n_cols);
-
+		
 		//recall that CSR matrices have the storage format:
 		//
 		//		row offset array : RO = {a_0, a_1, a_2, ... , a_{n_rows}}

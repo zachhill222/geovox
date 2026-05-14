@@ -3,6 +3,7 @@
 #include "fem/dofs/voxel_dof_base.hpp"
 #include "mesh/keys/voxel_key.hpp"
 
+#include <span>
 #include <array>
 #include <cstdint>
 
@@ -66,11 +67,11 @@ namespace GV
 
 		//vectorized evaluation
 		template<uint64_t N, typename Elem_type> requires (N>0 && VoxelEquivFeature<Elem_type,QuadElem_t>)
-		void eval(	std::array<double,N>&		vl, //values 
-					Elem_type                   el, //support element
-					const std::array<double,N>& qx, //reference/quadrature points
-					const std::array<double,N>& qy, 
-					const std::array<double,N>& qz) const {
+		void eval(	std::span<double,N>		  vl, //values 
+					Elem_type                 el, //support element
+					std::span<const double,N> qx, //reference/quadrature points
+					std::span<const double,N> qy, 
+					std::span<const double,N> qz) const {
 			//check that the index logic is correct
 			assert(el.is_valid());
 			assert(key.depth() == el.depth());
@@ -98,13 +99,13 @@ namespace GV
 
 		//vectorized grad
 		template<uint64_t N, typename Elem_type> requires (N>0 && VoxelEquivFeature<Elem_type,QuadElem_t>)
-		void grad(	std::array<double,N>&		gx, //gradient result
-					std::array<double,N>& 		gy, 
-					std::array<double,N>& 		gz, 
+		void grad(	std::span<double,N>			gx, //gradient result
+					std::span<double,N> 		gy, 
+					std::span<double,N> 		gz, 
 					Elem_type  	 				el, //support element
-					const std::array<double,N>& qx, //reference/quadratrue points
-					const std::array<double,N>& qy, 
-					const std::array<double,N>& qz) const {
+					std::span<const double,N>   qx, //reference/quadratrue points
+					std::span<const double,N>   qy, 
+					std::span<const double,N>   qz) const {
 
 			//check that the index logic is correct
 			assert(el.is_valid());

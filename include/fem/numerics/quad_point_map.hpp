@@ -2,9 +2,11 @@
 
 #include "mesh/keys/voxel_key.hpp"
 #include "util/quadrature_rules.hpp"
+#include "util/point.hpp"
 
 #include <span>
 #include <cassert>
+#include <cmath>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -90,11 +92,12 @@ namespace GV
 		//the support elements and quadrature points at depths elem.depth() and above (coarser, smaller depth)
 		//will be set and can be used after this.
 		QuadElem_t last_elem;
-		constexpr constexpr void set_quad_element(const QuadElem_t elem) {
+		constexpr void set_quad_element(const QuadElem_t elem) {
 			assert(elem.is_valid());
 			last_elem = elem;
 			project_to_support(elem);
 			collect_quad_points(elem.depth());
+			set_jacobian();
 		}
 
 		constexpr QuadElem_t get_support_element(const uint64_t depth) const {
@@ -102,23 +105,61 @@ namespace GV
 			return s_el[depth];
 		}
 
-		constexpr std::span<const double> get_quad_points_x(const uint64_t depth) const {
+		constexpr std::span<const double, NQ> get_quad_points_x(const uint64_t depth) const {
 			assert(depth<=last_elem.depth());
 			return {p_qxa[depth]};
 		}
 
-		constexpr std::span<const double> get_quad_points_y(const uint64_t depth) const {
+		constexpr std::span<const double, NQ> get_quad_points_y(const uint64_t depth) const {
 			assert(depth<=last_elem.depth());
 			return {p_qya[depth]};
 		}
 
-		constexpr std::span<const double> get_quad_points_z(const uint64_t depth) const {
+		constexpr std::span<const double, NQ> get_quad_points_z(const uint64_t depth) const {
 			assert(depth<=last_elem.depth());
 			return {p_qza[depth]};
 		}
 
-		static constexpr std::span<const double> get_quad_weights() const {
+		static constexpr std::span<const double, NQ> get_quad_weights() {
 			return {p_qw};
+		}
+
+		//store mesh corners to allow convering from reference to geometric points if necessary
+		//similarly, comput the jacobian for the quadrature element
+		template<typename Coord_t>
+		void set_bounds(const Coord_t& low, const Coord_t& high) {
+			for (int i=0; i<3; ++i) {
+				mesh_low[i]  = low[i];
+				mesh_high[i] = high[i];
+				mesh_diag[i] = high[i] - low[i];
+			}
+		}
+
+		void set_jacobian() {
+			const double scale = std::ldexp(0.5, -static_cast<int>(last_elem.depth()));
+			Jac[0] = mesh_diag[0] * scale;
+			Jac[1] = mesh_diag[1] * scale;
+			Jac[2] = mesh_diag[2] * scale;
+		}
+
+		Point<3,double> mesh_low  {-1,-1,-1};
+		Point<3,double> mesh_high { 1, 1, 1};
+		Point<3,double> mesh_diag { 2, 2, 2};
+		Point<3,double> Jac       { 1, 1, 1};
+		
+		void ref2geo(std::span<double> x, std::span<double> y, std::span<double> z) const {
+			//vertex is in the normalized [0,1] interval
+			const Point<3,double> mid  = mesh_low + 0.5*mesh_diag*(last_elem.vertex(7)+last_elem.vertex(0));
+			const Point<3,double> del  = 0.5*mesh_diag*(last_elem.vertex(7)-last_elem.vertex(0));
+
+			#pragma omp simd
+			for (uint64_t i=0; i<x.size(); ++i) {x[i] = mid[0] + x[i]*del[0];}
+
+			#pragma omp simd
+			for (uint64_t i=0; i<y.size(); ++i) {y[i] = mid[1] + y[i]*del[1];}
+
+			#pragma omp simd
+			for (uint64_t i=0; i<z.size(); ++i) {z[i] = mid[2] + z[i]*del[2];}
 		}
 	};
 }
