@@ -22,9 +22,6 @@ int main(int argc, char* argv[])
 	mesh.set_depth(3);
 	basis.set_depth(3);
 
-	//collect dof numbers for the active basis
-	basis.compress_dof_numbers();
-
 	//initialize a test scalar field
 	std::vector<double> coefs(basis.n_dofs(), 0.0);
 	basis.init_coefs_by_dof(coefs, [&mesh](const DOF_t dof) {
@@ -42,7 +39,7 @@ int main(int argc, char* argv[])
 
 		basis.compress_dof_numbers();
 		std::vector<double> new_coefs(basis.n_dofs(), 0.0);
-		basis.update_coefs(old_coefs, new_coefs);
+		basis.update_coefs(new_coefs, old_coefs);
 		coefs = std::move(new_coefs);
 	}
 	std::cout << "Done refining" << std::endl;
