@@ -200,7 +200,8 @@ namespace GV
 		static_assert(N_FORMS>0, "Kernel - no form was provided");
 
 		//determine if it's worth using multiple threads
-		static constexpr bool MULTI_THREADED = (N_FORMS>1);
+		// static constexpr bool MULTI_THREADED = (N_FORMS>1);
+		static constexpr bool MULTI_THREADED = false;
 
 		//get the quadrature element type
 		using QuadElem_t = typename std::tuple_element_t<0, std::tuple<Form_ts...>>::QuadElem_t;
