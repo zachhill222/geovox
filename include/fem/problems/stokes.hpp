@@ -2,16 +2,14 @@
 
 #include "fem/problems/stokes_wrapper_eigen.hpp" //use the methods in this class for matrix-free iterative solvers in Eigen
 
-#include "fem/forms/bilinear_H1.hpp"
-#include "fem/forms/bilinear_L2.hpp"
-#include "fem/forms/bilinear_Hdiv.hpp"
-#include "fem/forms/linear_L2.hpp"
-// #include "fem/forms/form_actions.hpp" //TODO: delete
-#include "fem/forms/form_options.hpp"
+#include "fem/forms/bilinear/matrix_multiply.hpp"
+#include "fem/forms/bilinear/policy_evaluation.hpp"
+#include "fem/forms/linear/vector_assembler.hpp"
+#include "fem/forms/linear/policy_evaluation.hpp"
 
 #include "fem/numerics/kernel.hpp"
 
-#include "fem/handlers/dofhandler_charms.hpp" //TODO: replace with a multigrid specialization
+#include "fem/handlers/dofhandler_charms.hpp" //TODO: replace with a multigrid specialization?
 #include "fem/handlers/bc_handler.hpp"
 
 #include "fem/dofs/voxel_dof_Q1.hpp"
@@ -88,21 +86,27 @@ namespace GV
 		using P_Handler_t 	= DofHandlerCharms<Mesh_t,P_DOF_t>; //TODO: replace with multigrid handler?
 		using BCHandler_t	= BCHandler<V_DOF_t>;
 
-		template<BilinearFormOptions OPTIONS>
-		using BilinL2_t 	= SymmetricL2<P_Handler_t,OPTIONS>;
-		template<BilinearFormOptions OPTIONS>
-		using BilinH1_t 	= SymmetricH1<V_Handler_t,OPTIONS>;
-		template<int component, BilinearFormOptions OPTIONS>
-		using BilinHdiv_t   = BilinearHdiv<V_Handler_t,P_Handler_t,component,OPTIONS>; //for b(V,q) = -int(div(V)*q) with vector test functions V
-		template<int component, BilinearFormOptions OPTIONS>
-		using BilinHdivAdj_t= BilinearHdivAdjoint<P_Handler_t,V_Handler_t,component,OPTIONS>; //for b(U,q) = -int(div(U)*q) with scalar test function
+		using EvalL2        = BilinearL2<P_DOF_t,P_DOF_t>;
+		using BilinL2_t 	= BilinearFormMultiply<P_Handler_t,P_Handler_t,EvalL2>;
 
+		using EvalH1        = BilinearH1<V_DOF_t, V_DOF_t>;
+		using BilinH1_t 	= BilinearFormMultiply<V_Handler_t,V_Handler_t,EvalH1>;
+		
+		template<int k>
+		using EvalHdiv      = BilinearHdiv<V_DOF_t,P_DOF_t,k>;
+
+		template<int k>
+		using BilinHdiv_t   = BilinearFormMultiply<V_Handler_t,P_Handler_t,EvalHdiv<k>>; //for b(V,q) = -int(div(V)*q) with vector test functions V
+		
+		template<int k>
+		using EvalHdivAdj   = BilinearHdivAdjoint<P_DOF_t, V_DOF_t,k>;
+
+		template<int k>
+		using BilinHdivAdj_t= BilinearFormMultiply<P_Handler_t,V_Handler_t,EvalHdivAdj<k>>; //for b(U,q) = -int(div(U)*q) with scalar test function
 
 		//body force terms
+		using LinL2         = LinearFormAssembler<V_Handler_t, LinearL2<V_DOF_t>>;
 		double fu{0}, fv{0}, fw{0};
-		using Fu_Form    = LinearL2<V_Handler_t,LinearFormOptions::dot()>;
-		using Fv_Form    = LinearL2<V_Handler_t,LinearFormOptions::dot()>;
-		using Fw_Form    = LinearL2<V_Handler_t,LinearFormOptions::dot()>;
 
 		Mesh_t 			mesh;
 		V_Handler_t 	velocity_handler; //all velocity dofs are the same
@@ -298,15 +302,15 @@ namespace GV
 			assert(F.size()==n_vel_total());
 			assert(F.size()==3*N);
 
-			Fu_Form F_u{velocity_handler}; F_u.set_constant(fu);
-			Fv_Form F_v{velocity_handler}; F_v.set_constant(fv);
-			Fw_Form F_w{velocity_handler}; F_w.set_constant(fw);
+			LinL2 F_u{velocity_handler, fu};
+			LinL2 F_v{velocity_handler, fv};
+			LinL2 F_w{velocity_handler, fw};
 
-			F_u.set_vec(F.subspan(0,N));
-			F_v.set_vec(F.subspan(N,N));
-			F_w.set_vec(F.subspan(2*N,N));
+			F_u.set_global(F.subspan(0,N));
+			F_v.set_global(F.subspan(N,N));
+			F_w.set_global(F.subspan(2*N,N));
 
-			using Kernel_type = Kernel<4,TypeList<>,TypeList<Fu_Form,Fv_Form,Fw_Form>>;
+			using Kernel_type = Kernel<4,LinL2,LinL2,LinL2>;
 			Kernel_type kernel(F_u,F_v,F_w);
 
 			auto action = [&,this](Elem_t el) {
@@ -315,16 +319,11 @@ namespace GV
 				F_u.set_basis(v_dofs);
 				F_v.set_basis(v_dofs);
 				F_w.set_basis(v_dofs);
-				kernel.compute_all();
-				kernel.scatter_all();
+				kernel.dispatch_all();
 			};
-
-			//set up predicate to only integrate over active elements (natural BC)
-			auto predicate = [this](Elem_t el) {return mesh.is_active(el);};
 
 			//perform the loop
 			//TODO: parallel by element color?
-			// mesh.template for_each<Elem_t>(action, false, predicate);
 			mesh.for_each_active_element(action);
 		}
 
@@ -341,45 +340,39 @@ namespace GV
 			const auto N = U.size() / 3;
 
 			//only need one bilinear form
-			using Form_type   = BilinH1_t<BilinearFormOptions::multiply(true)>;
-			using Kernel_type = Kernel<4, TypeList<Form_type>>;
-			Form_type A_form(velocity_handler);
+			using Form_t = BilinH1_t;
+			Form_t A_form(velocity_handler,velocity_handler);
+			A_form.set_global(KU.subspan(0,N),   U.subspan(0,N));
+			A_form.set_global(KU.subspan(N,N),   U.subspan(N,N));
+			A_form.set_global(KU.subspan(2*N,N), U.subspan(2*N,N));
+			// Form_t A_form_u(velocity_handler,velocity_handler);
+			// Form_t A_form_v(velocity_handler,velocity_handler);
+			// Form_t A_form_w(velocity_handler,velocity_handler);
+			
+			// A_form_u.set_global(KU.subspan(0,N),   U.subspan(0,N));
+			// A_form_v.set_global(KU.subspan(N,N),   U.subspan(N,N));
+			// A_form_w.set_global(KU.subspan(2*N,N), U.subspan(2*N,N));
+
+			using Kernel_type = Kernel<4, Form_t>;
 			Kernel_type kernel(A_form);
+			// using Kernel_type = Kernel<4, Form_t, Form_t, Form_t>;
+			// Kernel_type kernel(A_form_u,A_form_v,A_form_w);
 
 			//set up integrating action over each element
-			//TODO: is having three kernels in parallel better?
+			//TODO: is having three forms in parallel better?
 			auto action = [&,this](Elem_t el) {
 				kernel.set_element(el);
 				const auto v_dofs = velocity_handler.basis_active(el);
 				A_form.set_basis(v_dofs, v_dofs);
-				kernel.compute_all();	//compute local stiffness matrix
-				
-				//set each component, multiply, scatter
-				A_form.set_vecs(KU.subspan(0,N), U.subspan(0,N));
-				A_form.operate();
-				A_form.scatter();
-
-				A_form.set_vecs(KU.subspan(N,N), U.subspan(N,N));
-				A_form.operate();
-				A_form.scatter();
-
-				A_form.set_vecs(KU.subspan(2*N,N), U.subspan(2*N,N));
-				A_form.operate();
-				A_form.scatter();
+				// A_form_u.set_basis(v_dofs, v_dofs);
+				// A_form_v.set_basis(v_dofs, v_dofs);
+				// A_form_w.set_basis(v_dofs, v_dofs);
+				kernel.dispatch_all();
 			};
-
-			//set up predicate to only integrate over active elements (natural BC)
-			auto predicate = [this](Elem_t el) {return mesh.is_active(el);};
 
 			//perform the loop
 			//TODO: parallel by element color?
-			// mesh.template for_each<Elem_t>(action, false, predicate);
 			mesh.for_each_active_element(action);
-
-			//scale result by the viscosity
-			for (size_t i=0; i<KU.size(); ++i) {
-				KU[i] *= mu;
-			}
 
 			//apply the boundary conditions to treat each corresponding row as an identity row
 			u_bc.apply_matvec(KU.subspan(0,N),   U.subspan(0,N));
@@ -402,10 +395,13 @@ namespace GV
 
 			//only need one bilinear form
 			// constexpr BilinearFormOptions OPTS = FORWARD ? BilinearFormOptions::gauss_seidel_fwd(true) : BilinearFormOptions::gauss_seidel_bwd(true);
-			constexpr BilinearFormOptions OPTS = BilinearFormOptions::jacobi(true);
-			using Form_type   = BilinH1_t<OPTS>;
-			using Kernel_type = Kernel<4, TypeList<Form_type>>;
-			Form_type   A_form(velocity_handler);
+			using Form_t = BilinH1_t; //TODO: replace with a jacobi or similar preconditioner
+			Form_t   A_form(velocity_handler,velocity_handler);
+			A_form.set_global(U.subspan(0,N), F.subspan(0,N));
+			A_form.set_global(U.subspan(N,N), F.subspan(N,N));
+			A_form.set_global(U.subspan(2*N,N), F.subspan(2*N,N));
+
+			using Kernel_type = Kernel<4, Form_t>;
 			Kernel_type kernel(A_form);
 
 			//set up integrating action over each element
@@ -414,36 +410,13 @@ namespace GV
 				kernel.set_element(el);
 				const auto v_dofs = velocity_handler.basis_active(el);
 				A_form.set_basis(v_dofs, v_dofs);
-				kernel.compute_all();	//compute local stiffness matrix
-				
-				//set each component, multiply, scatter
-				A_form.set_vecs(U.subspan(0,N), F.subspan(0,N));
-				A_form.operate();
-				A_form.scatter();
-
-				A_form.set_vecs(U.subspan(N,N), F.subspan(N,N));
-				A_form.operate();
-				A_form.scatter();
-
-				A_form.set_vecs(U.subspan(2*N,N), F.subspan(2*N,N));
-				A_form.operate();
-				A_form.scatter();
+				kernel.dispatch_all();
 			};
-
-			//set up predicate to only integrate over active elements (natural BC)
-			auto predicate = [this](Elem_t el) {return mesh.is_active(el);};
 
 			//perform the loop
 			//TODO: parallel by element color?
 			for (int n=0; n<n_steps; ++n) {
-				// mesh.template for_each<Elem_t>(action, false, predicate);
 				mesh.for_each_active_element(action);
-			}
-
-			//scale result by the viscosity
-			const double mu_inv = 1.0/mu;
-			for (size_t i=0; i<U.size(); ++i) {
-				U[i] *= mu_inv;
 			}
 
 			//apply the boundary conditions
@@ -461,19 +434,19 @@ namespace GV
 			const auto N = GP.size() / 3;
 
 			//set up the bilinear form for each velocity (test dof) component
-			using Form0_type = BilinHdiv_t<0,BilinearFormOptions::multiply(false)>;
-			using Form1_type = BilinHdiv_t<1,BilinearFormOptions::multiply(false)>;
-			using Form2_type = BilinHdiv_t<2,BilinearFormOptions::multiply(false)>;
-			using Kernel_type = Kernel<4, TypeList<Form0_type, Form1_type, Form2_type>>;
+			using Form0_type = BilinHdiv_t<0>;
+			using Form1_type = BilinHdiv_t<1>;
+			using Form2_type = BilinHdiv_t<2>;
+			using Kernel_type = Kernel<4, Form0_type, Form1_type, Form2_type>;
 			Form0_type  Bx_form(velocity_handler, pressure_handler);
 			Form1_type  By_form(velocity_handler, pressure_handler);
 			Form2_type  Bz_form(velocity_handler, pressure_handler);
 			Kernel_type kernel(Bx_form, By_form, Bz_form);
 
 			//assign subspans to each form
-			Bx_form.set_vecs(GP.subspan(0,N),   P);
-			By_form.set_vecs(GP.subspan(N,N),   P);
-			Bz_form.set_vecs(GP.subspan(2*N,N), P);
+			Bx_form.set_global(GP.subspan(0,N),   P);
+			By_form.set_global(GP.subspan(N,N),   P);
+			Bz_form.set_global(GP.subspan(2*N,N), P);
 
 			//define integration action
 			auto action = [&,this](Elem_t el) {
@@ -485,22 +458,11 @@ namespace GV
 				By_form.set_basis(v_dofs, p_dofs);
 				Bz_form.set_basis(v_dofs, p_dofs);
 				
-				kernel.compute_all();
-				
-				//set each component, multiply, scatter
-				Bx_form.operate();
-				By_form.operate();
-				Bz_form.operate();
-				
-				kernel.scatter_all();
+				kernel.dispatch_all();
 			};
-
-			//set up predicate to only integrate over active elements (natural BC)
-			auto predicate = [this](Elem_t el) {return mesh.is_active(el);};
 
 			//perform the loop
 			//TODO: parallel by element color?
-			// mesh.template for_each<Elem_t>(action, false, predicate);
 			mesh.for_each_active_element(action);
 		}
 
@@ -516,19 +478,19 @@ namespace GV
 			const auto N = U.size() / 3;
 
 			//set up the bilinear form for each velocity (trial dof) component
-			using Form0_type = BilinHdivAdj_t<0,BilinearFormOptions::multiply(false)>;
-			using Form1_type = BilinHdivAdj_t<1,BilinearFormOptions::multiply(false)>;
-			using Form2_type = BilinHdivAdj_t<2,BilinearFormOptions::multiply(false)>;
-			using Kernel_type = Kernel<4, TypeList<Form0_type, Form1_type, Form2_type>>;
+			using Form0_type = BilinHdivAdj_t<0>;
+			using Form1_type = BilinHdivAdj_t<1>;
+			using Form2_type = BilinHdivAdj_t<2>;
+			using Kernel_type = Kernel<4, Form0_type, Form1_type, Form2_type>;
 			Form0_type  Bx_t_form(pressure_handler, velocity_handler);
 			Form1_type  By_t_form(pressure_handler, velocity_handler);
 			Form2_type  Bz_t_form(pressure_handler, velocity_handler);
 			Kernel_type kernel(Bx_t_form, By_t_form, Bz_t_form);
 
 			//assign subspans to each form
-			Bx_t_form.set_vecs(GTU, U.subspan(0,N));
-			By_t_form.set_vecs(GTU, U.subspan(N,N));
-			Bz_t_form.set_vecs(GTU, U.subspan(2*N,N));
+			Bx_t_form.set_global(GTU, U.subspan(0,N));
+			By_t_form.set_global(GTU, U.subspan(N,N));
+			Bz_t_form.set_global(GTU, U.subspan(2*N,N));
 
 			//define integration action
 			auto action = [&,this](Elem_t el) {
@@ -540,22 +502,11 @@ namespace GV
 				By_t_form.set_basis(p_dofs, v_dofs);
 				Bz_t_form.set_basis(p_dofs, v_dofs);
 				
-				kernel.compute_all();
-				
-				//set each component, multiply, scatter
-				Bx_t_form.operate();
-				By_t_form.operate();
-				Bz_t_form.operate();
-
-				kernel.scatter_all();
+				kernel.dispatch_all();
 			};
-
-			//set up predicate to only integrate over active elements (natural BC)
-			auto predicate = [this](Elem_t el) {return mesh.is_active(el);};
 
 			//perform the loop
 			//TODO: parallel by element color?
-			// mesh.template for_each<Elem_t>(action, false, predicate);
 			mesh.for_each_active_element(action);
 		}
 
@@ -565,9 +516,10 @@ namespace GV
 			assert(MP.size() == P.size());
 			assert(MP.size() == pressure_handler.n_dofs());
 
-			using Form_type   = BilinL2_t<BilinearFormOptions::multiply(true)>;
-			using Kernel_type = Kernel<4, TypeList<Form_type>>;
-			Form_type   M_form(pressure_handler);
+			using Form_t   = BilinL2_t;
+			using Kernel_type = Kernel<4, Form_t>;
+			Form_t   M_form(pressure_handler,pressure_handler);
+			M_form.set_global(MP,P);
 			Kernel_type kernel(M_form);
 
 			//set up integrating action over each element
@@ -575,20 +527,11 @@ namespace GV
 				kernel.set_element(el);
 				const auto p_dofs = pressure_handler.basis_active(el);
 				M_form.set_basis(p_dofs, p_dofs);
-				kernel.compute_all();	//compute local stiffness matrix
-				
-				//set each component, multiply, scatter
-				M_form.set_vecs(MP,P);
-				M_form.operate();
-				M_form.scatter();
+				kernel.dispatch_all();
 			};
-
-			//set up predicate to only integrate over active elements (natural BC)
-			auto predicate = [this](Elem_t el) {return mesh.is_active(el);};
 
 			//perform the loop
 			//TODO: parallel by element color?
-			// mesh.template for_each<Elem_t>(action, false, predicate);
 			mesh.for_each_active_element(action);
 		}
 
@@ -601,34 +544,23 @@ namespace GV
 			assert(P.size() == pressure_handler.n_dofs());
 
 			//get indices for subspans for u, v, w components
-			// constexpr BilinearFormOptions OPTS = FORWARD ? BilinearFormOptions::gauss_seidel_fwd(true) : BilinearFormOptions::gauss_seidel_bwd(true);
-			constexpr BilinearFormOptions OPTS = BilinearFormOptions::jacobi(true);
-			using Form_type   = BilinL2_t<OPTS>;
-			using Kernel_type = Kernel<4, TypeList<Form_type>>;
-			Form_type   M_form(pressure_handler);
+			using Form_t   = BilinL2_t; //TODO: change to jacobi or similar
+			using Kernel_type = Kernel<4, Form_t>;
+			Form_t M_form(pressure_handler,pressure_handler);
+			M_form.set_global(P, H);
 			Kernel_type kernel(M_form);
 
 			//set up integrating action over each element
-			//TODO: is having three kernels in parallel better?
 			auto action = [&,this](Elem_t el) {
 				kernel.set_element(el);
 				const auto p_dofs = pressure_handler.basis_active(el);
 				M_form.set_basis(p_dofs, p_dofs);
-				kernel.compute_all();	//compute local stiffness matrix
-				
-				//set each component, multiply, scatter
-				M_form.set_vecs(P, H);
-				M_form.operate();
-				M_form.scatter();
+				kernel.dispatch_all();
 			};
-
-			//set up predicate to only integrate over active elements (natural BC)
-			auto predicate = [this](Elem_t el) {return mesh.is_active(el);};
 
 			//perform the loop
 			//TODO: parallel by element color?
 			for (int n=0; n<n_steps; ++n) {
-				// mesh.template for_each<Elem_t>(action, false, predicate);
 				mesh.for_each_active_element(action);
 			}
 		}
@@ -677,8 +609,8 @@ namespace GV
 			LogTime timer{"Stokes::smooth"};
 
 			using Operator = StokesOperator<V_BC,P_BC,MAX_DEPTH>;
-			using Preconditioner = StokesPreconditioner<V_BC,P_BC,MAX_DEPTH,2>;
-			// using Preconditioner = Eigen::IdentityPreconditioner;
+			// using Preconditioner = StokesPreconditioner<V_BC,P_BC,MAX_DEPTH,2>;
+			using Preconditioner = Eigen::IdentityPreconditioner;
 
 			Operator op(*this);
 

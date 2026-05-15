@@ -56,6 +56,8 @@ namespace GV
 	//For an octree voxel mesh, this depends only on the depth of the quadrature element and the dimensions of the domain.
 
 
+
+
 	//A container to hold a form and thread so that each thread can be dispatched concurrently
 	template<typename Form_t, typename QuadRule_t>
 	struct FormThread {
@@ -143,6 +145,45 @@ namespace GV
 	};
 
 
+	//A container to hold a form and thread so that each thread to keep a consistent interface in single threaded
+	template<typename Form_t, typename QuadRule_t>
+	struct FormThreadSingle {
+		
+
+		//link to the form and kernel data needed to pass to the form
+		bool linked_to_kernel = false;
+		Form_t& form;
+		QuadRule_t const* q_map{nullptr};
+
+		//link to a kernel
+		void link_kernel(std::barrier<>&, const QuadRule_t& k_q_map) {
+			if (linked_to_kernel) {throw std::runtime_error("FormThread - Already linked to a kernel");}
+			q_map		     = &k_q_map;
+			linked_to_kernel = true;
+		}
+
+		//constructor to link to main thread and form resources
+		FormThreadSingle(Form_t& form_) : form(form_) {}
+
+		//we can't move or copy this class to help keep the library consistent with single/multithreaded
+		FormThreadSingle(const FormThreadSingle&) 			 = delete;
+		FormThreadSingle(FormThreadSingle&&) 				 = delete;
+		FormThreadSingle& operator=(const FormThreadSingle&) = delete;
+		FormThreadSingle& operator=(FormThreadSingle&&) 	 = delete;
+
+		//call to allow the dispatch_loop to continue
+		inline void dispatch() {
+			form.prepare();
+			form.compute(*q_map);
+			form.finalize();
+			form.scatter();
+		}
+
+		//call to stop the dispatch_loop
+		inline void stop() {}
+	};
+
+
 
 	//Kernel class allows multiple interactions (bilinear forms) to be integrated simultaneously
 	//The bilinear forms in the kernel are allowed to have different dof types
@@ -157,6 +198,9 @@ namespace GV
 		//organize forms and collect types
 		static constexpr uint64_t N_FORMS   = sizeof...(Form_ts);
 		static_assert(N_FORMS>0, "Kernel - no form was provided");
+
+		//determine if it's worth using multiple threads
+		static constexpr bool MULTI_THREADED = (N_FORMS>1);
 
 		//get the quadrature element type
 		using QuadElem_t = typename std::tuple_element_t<0, std::tuple<Form_ts...>>::QuadElem_t;
@@ -173,7 +217,7 @@ namespace GV
 
 		Kernel(	Form_ts&... Forms) : Threads(Forms...) {
 			//let the quadrature class collect the mesh extents to compute jacobians
-			q_map.set_bounds(form<0>().trial_handler.mesh.low, form<0>().trial_handler.mesh.high);
+			q_map.set_bounds(form<0>().test_handler.mesh.low, form<0>().test_handler.mesh.high);
 			
 			//link kernel to all the threads
 			std::apply([this](auto&... threads){ (threads.link_kernel(sync, q_map), ...);}, Threads);
@@ -196,7 +240,7 @@ namespace GV
 		//main dispatch loop
 		void dispatch_all() {
 			std::apply([](auto&... threads){ (threads.dispatch(), ...);}, Threads);
-			sync.arrive_and_wait();
+			if constexpr (MULTI_THREADED) {sync.arrive_and_wait();}
 		}
 
 
@@ -205,60 +249,11 @@ namespace GV
 		QuadRule_t q_map;
 		
 		//pair a new thread to each form
-		std::tuple<FormThread<Form_ts, QuadRule_t>...> Threads;
+		template<typename F, typename Q>
+		using FormThread_t = std::conditional_t< MULTI_THREADED, FormThread<F,Q>, FormThreadSingle<F,Q>>;
+		std::tuple<FormThread_t<Form_ts, QuadRule_t>...> Threads;
 
 		//synchronization data
 		std::barrier<> sync{N_FORMS+1};
 	};
-	
-
-	// template<uint64_t N_QUAD_POINTS, typename... BiLinearForms_ts, typename... LinearForms_ts>
-	// template<uint64_t I>
-	// void Kernel<N_QUAD_POINTS, TypeList<BiLinearForms_ts...>, TypeList<LinearForms_ts...>>::L_compute()
-	// {
-	// 	static_assert(requires {
-	// 		std::declval<const L_Form<I>&>().eval(
-	// 			std::declval<std::array<double,NQ>&>(),
-	// 			std::declval<double>(),
-	// 			std::declval<double>(),
-	// 			std::declval<double>(),
-	// 			std::declval<const typename L_Form<I>::TestDOF_t>(),
-	// 			std::declval<const QuadElem_t>(),
-	// 			std::declval<const std::array<double,NQ>&>(),
-	// 			std::declval<const std::array<double,NQ>&>(),
-	// 			std::declval<const std::array<double,NQ>&>()
-	// 			);
-	// 		}, "Kernel - LinearForm does not have an eval() method with the required signature.");
-
-	// 	const uint64_t n_test=L_form<I>().n_test;
-
-	// 	#ifdef _OPENMP
-	// 	#pragma omp parallel if(n_test > KERNEL_OMP__BASIS_THRESHOLD)
-	// 	#endif
-	// 	{
-	// 		std::array<double,NQ> vals;
-	// 		#ifdef _OPENMP
-	// 		#pragma omp for
-	// 		#endif
-	// 		for (uint64_t i=0; i<n_test; ++i) {
-	// 			const auto psi = L_form<I>().test_dofs[i];
-	// 			const uint64_t depth = psi.depth();
-	// 			const QuadElem_t spt = q_map.s_el[depth];
-	// 			const auto& X = q_map.p_qxa[depth];
-	// 			const auto& Y = q_map.p_qya[depth];
-	// 			const auto& Z = q_map.p_qza[depth];
-
-	// 			L_form<I>().eval(vals, Jac[0], Jac[1], Jac[2],
-	// 					psi, spt, X, Y, Z);
-
-	// 			double val = 0.0;
-	// 			#pragma omp simd reduction(+:val)
-	// 			for (uint64_t l=0; l<NQ; ++l) {
-	// 				val += vals[l] * q_map.p_qw[l];
-	// 			}
-
-	// 			L_form<I>().loc_val(i) = val;
-	// 		}
-	// 	}
-	// }
 }

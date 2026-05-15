@@ -13,7 +13,7 @@ namespace GV
 	//a class responsible for scattering a local matrix result to a global matrix
 	//TODO: can we make this more efficient with a prepare(..) method?
 	template<typename TestDOF_t, typename TrialDOF_t, typename LocalMatOwner>
-	struct BilinearFormScatterLocalMat
+	struct BilinearFormScatterToGlobalMatrix
 	{
 		//link to global storage
 		using MatStorage_t = CSR_COO<TestDOF_t,TrialDOF_t>;

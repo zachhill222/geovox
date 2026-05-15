@@ -147,10 +147,10 @@ namespace GV
 		Point<3,double> mesh_diag { 2, 2, 2};
 		Point<3,double> Jac       { 1, 1, 1};
 		
-		void ref2geo(std::span<double> x, std::span<double> y, std::span<double> z) const {
+		constexpr void ref2geo(std::span<double> x, std::span<double> y, std::span<double> z, QuadElem_t el) const {
 			//vertex is in the normalized [0,1] interval
-			const Point<3,double> mid  = mesh_low + 0.5*mesh_diag*(last_elem.vertex(7)+last_elem.vertex(0));
-			const Point<3,double> del  = 0.5*mesh_diag*(last_elem.vertex(7)-last_elem.vertex(0));
+			const Point<3,double> mid  = mesh_low + 0.5*mesh_diag*(el.vertex(7).normalized_coordinate()+el.vertex(0).normalized_coordinate());
+			const Point<3,double> del  = 0.5*mesh_diag*(el.vertex(7).normalized_coordinate()-el.vertex(0).normalized_coordinate());
 
 			#pragma omp simd
 			for (uint64_t i=0; i<x.size(); ++i) {x[i] = mid[0] + x[i]*del[0];}

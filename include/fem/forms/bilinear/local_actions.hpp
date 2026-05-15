@@ -47,6 +47,68 @@ namespace GV
 	}
 
 	template<typename T>
+	void local_multiply_lower(std::span<T> y, 
+						std::span<std::type_identity_t<const T>> x, 
+						std::span<std::type_identity_t<const T>> loc_mat_row_major)
+	{
+		//Compute y = L*x where L is the (strict) lower part of the matrix
+		//the matrix must be square
+		const uint64_t n = y.size();
+		assert(n==x.size());
+
+		for (uint64_t i=0; i<n; ++i) {
+			const uint64_t offset = i*n;
+			#pragma omp simd
+			for (uint64_t j=0; j<i; ++j) {
+				y[j] += loc_mat_row_major[j+offset]*x[i];
+			}
+		}
+	}
+
+	template<typename T>
+	void local_multiply_upper(std::span<T> y, 
+						std::span<std::type_identity_t<const T>> x, 
+						std::span<std::type_identity_t<const T>> loc_mat_row_major)
+	{
+		//Compute y = U*x where U is the (strict) upper part of the matrix
+		//the matrix must be square
+		const uint64_t n = y.size();
+		assert(n==x.size());
+
+		for (uint64_t i=0; i<n; ++i) {
+			const uint64_t offset = i*n;
+			#pragma omp simd
+			for (uint64_t j=i+1; j<n; ++j) {
+				y[j] += loc_mat_row_major[j+offset]*x[i];
+			}
+		}
+	}
+
+	template<typename T>
+	void local_multiply_upper_lower(std::span<T> y, 
+						std::span<std::type_identity_t<const T>> x, 
+						std::span<std::type_identity_t<const T>> loc_mat_row_major)
+	{
+		//Compute y = (L+U)*x where U is the (strict) upper part of the matrix and L is the lower part.
+		//the matrix must be square
+		const uint64_t n = y.size();
+		assert(n==x.size());
+
+		for (uint64_t i=0; i<n; ++i) {
+			const uint64_t offset = i*n;
+			#pragma omp simd
+			for (uint64_t j=0; j<i; ++j) {
+				y[j] += loc_mat_row_major[j+offset]*x[i];
+			}
+			
+			#pragma omp simd
+			for (uint64_t j=i+1; j<n; ++j) {
+				y[j] += loc_mat_row_major[j+offset]*x[i];
+			}
+		}
+	}
+
+	template<typename T>
 	void local_jacobi(	std::span<T> y, 
 						std::span<std::type_identity_t<const T>> x, 
 						std::span<std::type_identity_t<const T>> loc_mat_row_major)

@@ -1,11 +1,11 @@
 #pragma once
 
-#include "fem/forms/bilinear_form.hpp"
-#include "fem/forms/bilinear_form_compute.hpp"
-#include "fem/forms/bilinear_form_scatter.hpp"
-#include "fem/forms/local_actions.hpp"
+#include "fem/forms/bilinear/base.hpp"
+#include "fem/forms/bilinear/policy_compute.hpp"
+#include "fem/forms/bilinear/policy_scatter.hpp"
+#include "fem/forms/bilinear/local_actions.hpp"
+
 #include "fem/numerics/quad_point_map.hpp"
-#include "util/compatibility.hpp"
 
 namespace GV
 {

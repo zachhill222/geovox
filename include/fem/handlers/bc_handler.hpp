@@ -87,6 +87,11 @@ namespace GV
 			essential_bcs.emplace_back(std::forward<Pred>(pred), std::forward<Fun>(fun));
 		}
 
+		template<typename Pred>
+		inline void add_essential(Pred&& pred) {
+			essential_bcs.emplace_back(std::forward<Pred>(pred), [](DOF_t dof){return 0.0;});
+		}
+
 		//apply all dirichlet BCs to the given matrix and vector.
 		//the active BCs in the correct order must also be supplied
 		inline void apply(SpMat_t& mat, Vec_t& rhs, const std::vector<DOF_t>& dofs) const {

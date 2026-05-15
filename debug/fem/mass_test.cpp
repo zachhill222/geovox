@@ -3,8 +3,10 @@
 #include "fem/numerics/kernel.hpp"
 #include "fem/numerics/csr_storage.hpp"
 #include "mesh/voxel_mesh.hpp"
-#include "fem/forms/bilinear_form_assembler.hpp"
-#include "fem/forms/bilinear_evaluations.hpp"
+#include "fem/forms/bilinear/matrix_assembler.hpp"
+#include "fem/forms/bilinear/policy_evaluation.hpp"
+#include "fem/forms/linear/vector_assembler.hpp"
+#include "fem/forms/linear/policy_evaluation.hpp"
 #include "util/log_time.hpp"
 
 

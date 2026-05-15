@@ -1,8 +1,9 @@
 #pragma once
 
-#include "fem/forms/bilinear_form.hpp"
-#include "fem/forms/bilinear_form_compute.hpp"
-#include "fem/forms/bilinear_form_scatter.hpp"
+#include "fem/forms/bilinear/base.hpp"
+#include "fem/forms/bilinear/policy_compute.hpp"
+#include "fem/forms/bilinear/policy_scatter.hpp"
+
 #include "fem/numerics/quad_point_map.hpp"
 
 namespace GV
@@ -17,7 +18,9 @@ namespace GV
 		using QuadElem_t = typename BASE::QuadElem_t;
 
 		using ComputePolicy_t = BilinearFormComputeLocalMat<TestDOF_t,TrialDOF_t,EvalPolicy>;
-		using ScatterPolicy_t = BilinearFormScatterLocalMat<TestDOF_t,TrialDOF_t,ComputePolicy_t>;
+		using ScatterPolicy_t = BilinearFormScatterToGlobalMatrix<TestDOF_t,TrialDOF_t,ComputePolicy_t>;
+
+		using MatStorage_t    = typename ScatterPolicy_t::MatStorage_t;
 
 		ComputePolicy_t compute_policy;
 		ScatterPolicy_t scatter_policy;
@@ -27,8 +30,7 @@ namespace GV
 			BASE(TestH, TrialH), scatter_policy{compute_policy} {}
 
 		//link to global storage
-		template<typename COO>
-		inline void set_global(COO& coo) {scatter_policy.set_global(coo);}
+		inline void set_global(MatStorage_t& coo) {scatter_policy.set_global(coo);}
 
 		//consistent api
 		inline void prepare() {}

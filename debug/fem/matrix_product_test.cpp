@@ -2,8 +2,8 @@
 #include "fem/dofs/voxel_dof_Q1.hpp"
 #include "fem/numerics/kernel.hpp"
 #include "mesh/voxel_mesh.hpp"
-#include "fem/forms/bilinear_evaluations.hpp"
-#include "fem/forms/bilinear_form_multiply.hpp"
+#include "fem/forms/bilinear/policy_evaluation.hpp"
+#include "fem/forms/bilinear/matrix_multiply.hpp"
 
 #include "util/log_time.hpp"
 #include "util/compatibility.hpp"

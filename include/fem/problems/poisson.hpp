@@ -4,8 +4,10 @@
 #include "mesh/voxel_mesh.hpp"
 #include "fem/handlers/dofhandler_charms.hpp"
 #include "fem/handlers/bc_handler.hpp"
-#include "fem/forms/bilinear_H1.hpp"
-#include "fem/forms/linear_L2.hpp"
+#include "fem/forms/bilinear/matrix_assembler.hpp"
+#include "fem/forms/bilinear/policy_evaluation.hpp"
+#include "fem/forms/linear/vector_assembler.hpp"
+#include "fem/forms/linear/policy_evaluation.hpp"
 #include "fem/numerics/kernel.hpp"
 #include "fem/dofs/voxel_dof_Q1.hpp"
 
@@ -40,18 +42,20 @@ namespace GV
 		using Handler_t   = DofHandlerCharms<Mesh_t,DOF_t>;
 		using BCHandler_t = BCHandler<DOF_t>; 
 
-		using StiffForm   = SymmetricH1<Handler_t>;
+		using H1Eval      = BilinearH1<DOF_t,DOF_t>;
+		using StiffForm   = BilinearFormAssembler<Handler_t,Handler_t,H1Eval>;
 
 		#pragma omp declare simd
 		static double rhs_fun(double x, double y, double z) {
-			return -100.0*(x*x+y*y+z*z-0.25);}
+			return -10.0*(x*x+y*y+z*z-0.25);}
 
 		#pragma omp declare simd
 		static bool rhs_spt(double x, double y, double z) {return (x*x + y*y + z*z < 0.25);}
 
-		using RHSForm = LinearL2<Handler_t,LinearFormOptions::assemble(),decltype(&rhs_fun),decltype(&rhs_spt)>;
+		using RHSEval  = LinearL2<DOF_t,decltype(rhs_fun),decltype(rhs_spt)>;
+		using RHSForm  = LinearFormAssembler<Handler_t,RHSEval>;
 
-		using Kernel_t = Kernel<4,TypeList<StiffForm>, TypeList<RHSForm>>;
+		using Kernel_t = Kernel<4, StiffForm, RHSForm>;
 
 		using SpMat_t = Eigen::SparseMatrix<double,Eigen::RowMajor>;
 		using Vec_t   = Eigen::VectorXd;
@@ -59,24 +63,14 @@ namespace GV
 		Mesh_t			mesh;
 		Handler_t   	dofhandler;
 		BCHandler_t     bchandler;
-		StiffForm   	stiff_form;
-		RHSForm     	rhs_form;
 		
 		typename StiffForm::MatStorage_t stiff_mat_coo;
-		typename RHSForm::VecStorage_t rhs_storage;
-
 		SpMat_t A;
 		Vec_t	solution, rhs;
 
 		Poisson(const Point_t low, const Point_t high) :
 			mesh{low, high},
-			dofhandler{mesh},
-			bchandler{},
-			stiff_form{dofhandler},
-			rhs_form{dofhandler,&rhs_fun, &rhs_spt} {
-				stiff_form.set_storage(stiff_mat_coo);
-				rhs_form.set_storage(rhs_storage);
-			}
+			dofhandler{mesh} {}
 
 		//initialize/reset problem to the specified depth of the mesh
 		//the mesh will be in a conformal state after this
@@ -86,6 +80,7 @@ namespace GV
 			dofhandler.set_depth(dd);
 			dofhandler.compress_dof_numbers();
 			assert(dofhandler.curr_compressed_dofs().size() == dofhandler.count_dofs() );
+			cache_bc();
 		}
 
 		//refine the mesh and prolong/interpolate the current solution
@@ -112,51 +107,34 @@ namespace GV
 
 		void integrate() {
 			LogTime timer{"PoissonQ1::integrate"};
-			const auto diag = mesh.high - mesh.low;
+			StiffForm stiff_form(dofhandler, dofhandler);
+			stiff_mat_coo.clear();
+			stiff_form.set_global(stiff_mat_coo);
+
+			RHSForm rhs_form(dofhandler, RHSEval{rhs_fun,rhs_spt});
+			rhs = Eigen::VectorXd::Zero(dofhandler.n_dofs());
+			rhs_form.set_global(rhs);
+
 			Kernel_t kernel(stiff_form, rhs_form);
-			auto action = [this, &kernel](Elem_t el) {
+			auto action = [&](Elem_t el) {
 				const auto el_basis = dofhandler.basis_active(el);
 				kernel.set_element(el);
-				kernel.template B_set_basis<0>(el_basis,el_basis);
-				kernel.template B_compute_scatter<0>();
-
-				kernel.template L_set_basis<0>(el_basis);
-				kernel.template L_compute_scatter<0>();
+				stiff_form.set_basis(el_basis,el_basis);
+				rhs_form.set_basis(el_basis);
+				kernel.dispatch_all();
 			};
 
-			auto predicate = [this](Elem_t el) {return mesh.is_active(el);};
-			mesh.template for_each<Elem_t>(action, false, predicate);
+			mesh.template for_each_active_element(action);
+
+			double val=0;
+			for (double v : rhs) {val+=v;}
+			std::cout << "sum rhs= " << val << "\n";
 		}
 
 		void build_matrices() {
 			LogTime timer{"PoissonQ1::build_matrices"};
 			const auto& dofs = dofhandler.curr_compressed_dofs();
-
-			#ifdef _OPENMP
-			omp_set_max_active_levels(2);
-			omp_set_nested(1);
-			#pragma omp parallel
-			#pragma omp single
-			#endif
-			{
-				#ifdef _OPENMP
-				#pragma omp task
-				#endif
-				{
-					A = stiff_form.to_eigen_csr(dofs,dofs);
-				}
-
-				#ifdef _OPENMP
-				#pragma omp task
-				#endif
-				{
-					rhs = rhs_form.to_eigen_Xd(dofs);
-				}
-			}
-			#ifdef _OPENMP
-			omp_set_max_active_levels(1);
-			omp_set_nested(0);
-			#endif
+			A = stiff_mat_coo.to_eigen_csr(dofs,dofs);
 		}
 
 		//cache the boundary dofs
