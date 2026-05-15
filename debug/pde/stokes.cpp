@@ -7,7 +7,7 @@ using Stokes = GV::Stokes<1,0,8>;
 int main(int argc, char* argv[])
 {
 	Stokes stokes(1,1,1);
-	stokes.set_depth(2);
+	stokes.set_depth(1);
 	stokes.set_body_force(1.0,0.0,0.0);
 
 	// stokes.check_stokes_op();
@@ -27,7 +27,7 @@ int main(int argc, char* argv[])
 
 		rhs.assign(stokes.X.size(), 0.0);
 		stokes.compute_F(GV::as_span(rhs,0,stokes.n_vel_total()));
-		stokes.smooth(10, rhs, 1e-5,true);
+		stokes.smooth<20>(1, rhs, 1e-5,true);
 		stokes.save_as("stokes_"+std::to_string(r)+".vtk");
 	}
 

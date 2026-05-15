@@ -96,27 +96,20 @@ namespace GV
 		Eigen::VectorXd solve(const Rhs& b) const {
 			eigen_assert(stokes!=nullptr && "StokesPreconditioner - operator not set");
 
-			const size_t nv = stokes->n_vel_total();
-			const size_t np = stokes->n_pres();
-			eigen_assert(static_cast<size_t>(b.size()) == nv+np && "StokesPreconditioner - dimension mismatch");
+			Eigen::VectorXd result(b.size()); //zeroed in jacobi_preconditioner
+			Eigen::VectorXd guess = Eigen::VectorXd::Zero(b.size());
+			stokes->jacobi_precondition(as_span(result), as_span(guess), as_span(b), N_STEPS);
 
-			Eigen::VectorXd result = Eigen::VectorXd::Zero(b.size());
+			return result;
+		}
 
-			std::span<double> u_out = as_span<Scalar>(result, 0, nv);
-			std::span<double> p_out = as_span<Scalar>(result, nv, np);
-			std::span<const double> b_upper = as_span<Scalar>(b, 0, nv);
-			std::span<const double> b_lower = as_span<Scalar>(b, nv, np);
+		template<typename Rhs, typename Guess>
+		Eigen::VectorXd solveWithGuess(const Rhs& b, Guess& x0) const {
+			eigen_assert(stokes!=nullptr && "StokesPreconditioner - operator not set");
 
-			//apply K_inverse to U as a symmetric operator
-			stokes->template K_inv_gs<true>(u_out, b_upper, N_STEPS);
-			stokes->template K_inv_gs<false>(u_out, b_upper, N_STEPS);
-
-			//apply M_inverse to P as a symmetric operator
-			stokes->template M_inv_gs<true>(p_out, b_lower, N_STEPS);
-			stokes->template M_inv_gs<false>(p_out, b_lower, N_STEPS);
-
-			//pin pressure dof
-			result[nv] = 0;
+			Eigen::VectorXd result(b.size()); //zeroed in jacobi_preconditioner
+			stokes->jacobi_precondition(as_span(result), as_span(x0), as_span(b), N_STEPS);
+			
 			return result;
 		}
 	};

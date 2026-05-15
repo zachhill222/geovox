@@ -3,6 +3,7 @@
 #include "fem/problems/stokes_wrapper_eigen.hpp" //use the methods in this class for matrix-free iterative solvers in Eigen
 
 #include "fem/forms/bilinear/matrix_multiply.hpp"
+#include "fem/forms/bilinear/matrix_jacobi.hpp"
 #include "fem/forms/bilinear/policy_evaluation.hpp"
 #include "fem/forms/linear/vector_assembler.hpp"
 #include "fem/forms/linear/policy_evaluation.hpp"
@@ -84,14 +85,17 @@ namespace GV
 		using P_DOF_t    	= VoxelQ1<P_DofKey_t>;
 		using V_Handler_t 	= DofHandlerCharms<Mesh_t,V_DOF_t>; //TODO: replace with multigrid handler?
 		using P_Handler_t 	= DofHandlerCharms<Mesh_t,P_DOF_t>; //TODO: replace with multigrid handler?
-		using BCHandler_t	= BCHandler<V_DOF_t>;
+		using V_BC_Handler_t= BCHandler<V_DOF_t>;
+		using P_BC_Handler_t= BCHandler<P_DOF_t>;
 
 		using EvalL2        = BilinearL2<P_DOF_t,P_DOF_t>;
 		using BilinL2_t 	= BilinearFormMultiply<P_Handler_t,P_Handler_t,EvalL2>;
+		using BilinL2Jacobi = BilinearFormJacobi<P_Handler_t,P_Handler_t,EvalL2>;
 
 		using EvalH1        = BilinearH1<V_DOF_t, V_DOF_t>;
 		using BilinH1_t 	= BilinearFormMultiply<V_Handler_t,V_Handler_t,EvalH1>;
-		
+		using BilinH1Jacobi = BilinearFormJacobi<V_Handler_t,V_Handler_t,EvalH1>;
+
 		template<int k>
 		using EvalHdiv      = BilinearHdiv<V_DOF_t,P_DOF_t,k>;
 
@@ -108,13 +112,20 @@ namespace GV
 		using LinL2         = LinearFormAssembler<V_Handler_t, LinearL2<V_DOF_t>>;
 		double fu{0}, fv{0}, fw{0};
 
+		//define primary problem components
 		Mesh_t 			mesh;
 		V_Handler_t 	velocity_handler; //all velocity dofs are the same
 		P_Handler_t		pressure_handler; 
 
+		//set solution storage
 		std::vector<double> X; //U and P combined
-		BCHandler_t		u_bc, v_bc, w_bc, p_bc;
-		double 			mu     = 1.0; //viscosity
+
+		//set boundary condition handlers
+		V_BC_Handler_t		u_bc, v_bc, w_bc;
+		P_BC_Handler_t		p_bc;
+
+		//define problem parameters. TODO: incoroporate viscosity into the H1 form
+		double 				mu = 1.0; //viscosity
 
 		Stokes(double L, double W, double H) :
 			mesh{{0,0,0},{L,W,H}}, 
@@ -345,18 +356,9 @@ namespace GV
 			A_form.set_global(KU.subspan(0,N),   U.subspan(0,N));
 			A_form.set_global(KU.subspan(N,N),   U.subspan(N,N));
 			A_form.set_global(KU.subspan(2*N,N), U.subspan(2*N,N));
-			// Form_t A_form_u(velocity_handler,velocity_handler);
-			// Form_t A_form_v(velocity_handler,velocity_handler);
-			// Form_t A_form_w(velocity_handler,velocity_handler);
-			
-			// A_form_u.set_global(KU.subspan(0,N),   U.subspan(0,N));
-			// A_form_v.set_global(KU.subspan(N,N),   U.subspan(N,N));
-			// A_form_w.set_global(KU.subspan(2*N,N), U.subspan(2*N,N));
 
 			using Kernel_type = Kernel<4, Form_t>;
 			Kernel_type kernel(A_form);
-			// using Kernel_type = Kernel<4, Form_t, Form_t, Form_t>;
-			// Kernel_type kernel(A_form_u,A_form_v,A_form_w);
 
 			//set up integrating action over each element
 			//TODO: is having three forms in parallel better?
@@ -364,9 +366,6 @@ namespace GV
 				kernel.set_element(el);
 				const auto v_dofs = velocity_handler.basis_active(el);
 				A_form.set_basis(v_dofs, v_dofs);
-				// A_form_u.set_basis(v_dofs, v_dofs);
-				// A_form_v.set_basis(v_dofs, v_dofs);
-				// A_form_w.set_basis(v_dofs, v_dofs);
 				kernel.dispatch_all();
 			};
 
@@ -379,48 +378,88 @@ namespace GV
 			v_bc.apply_matvec(KU.subspan(N,N),   U.subspan(N,N));
 			w_bc.apply_matvec(KU.subspan(2*N,N), U.subspan(2*N,N));
 		}
+		
+		//compute some number of iterations of the jacobi iteration on the block diagonal terms
+		void jacobi_precondition(std::span<double> x, std::span<double> x_old, std::span<const double> rhs, const int n_steps=1) const {
+			assert(x.data() != x_old.data()); //the jacobi method cannot be done in-place
+			assert(n_vel_total() == 3*n_vel_individual());
+			assert(x.size() == n_vel_total()+n_pres());
+			assert(x.size() == x_old.size());
+			assert(x.size() == rhs.size());
 
-		//compute some number of iterations of Gauss-Seidel (forwards or backwards) on K*U=F
-		//using the fact that K is block-diagonal with the same matrix for each block
-		template<bool FORWARD=true>
-		void K_inv_gs(std::span<double> U, std::span<const double> F, const int n_steps=1) const {
-			assert(U.size()>0);
-			assert(U.size() == F.size());
-			assert(U.size() == 3*velocity_handler.n_dofs());
+			//split x and x_old into u,v,w,p components
+			const auto N1 = n_vel_individual();
+			const auto N2 = n_pres();
 
+			std::span<double> u  = x.subspan(0, N1);
+			std::span<double> u0 = x_old.subspan(0, N1);
+			std::span<const double> fu = rhs.subspan(0, N1);
 
-			//get indices for subspans for u, v, w components
-			assert(U.size()%3 == 0);
-			const auto N = U.size() / 3;
+			std::span<double> v  = x.subspan(N1, N1);
+			std::span<double> v0 = x_old.subspan(N1, N1);
+			std::span<const double> fv = rhs.subspan(N1, N1);
 
-			//only need one bilinear form
-			// constexpr BilinearFormOptions OPTS = FORWARD ? BilinearFormOptions::gauss_seidel_fwd(true) : BilinearFormOptions::gauss_seidel_bwd(true);
-			using Form_t = BilinH1_t; //TODO: replace with a jacobi or similar preconditioner
-			Form_t   A_form(velocity_handler,velocity_handler);
-			A_form.set_global(U.subspan(0,N), F.subspan(0,N));
-			A_form.set_global(U.subspan(N,N), F.subspan(N,N));
-			A_form.set_global(U.subspan(2*N,N), F.subspan(2*N,N));
+			std::span<double> w  = x.subspan(2*N1, N1);
+			std::span<double> w0 = x_old.subspan(2*N1, N1);
+			std::span<const double> fw = rhs.subspan(2*N1, N1);
 
-			using Kernel_type = Kernel<4, Form_t>;
-			Kernel_type kernel(A_form);
+			std::span<double> p  = x.subspan(3*N1, N2);
+			std::span<double> p0 = x_old.subspan(3*N1, N2);
+			std::span<const double> h = rhs.subspan(3*N1, N2);
+
+			//allocate memory to store the diagonal part of the matrix
+			std::vector<double> D(N1+N2, 0.0);
+			std::span<double> d_v = as_span(D, 0, N1);
+			std::span<double> d_p = as_span(D, N1, N2);
+
+			//initialize forms and link to storage
+			using A_Form_t = BilinH1Jacobi;
+			using M_Form_t = BilinL2Jacobi;
+			A_Form_t A_form(velocity_handler, velocity_handler);
+			M_Form_t M_form(pressure_handler, pressure_handler);
+
+			A_form.set_global(u,u0,fu);
+			A_form.set_global(v,v0,fv);
+			A_form.set_global(w,w0,fw);
+			A_form.set_global(d_v);
+
+			M_form.set_global(p,p0,h);
+			M_form.set_global(d_p);
+
+			//create kernel for the integration and link to the forms
+			using Kernel_type = Kernel<4, A_Form_t, M_Form_t>;
+			Kernel_type kernel(A_form, M_form);
 
 			//set up integrating action over each element
-			//TODO: is having three kernels in parallel better?
-			auto action = [&,this](Elem_t el) {
+			auto action = [&](Elem_t el) {
 				kernel.set_element(el);
 				const auto v_dofs = velocity_handler.basis_active(el);
+				const auto p_dofs = pressure_handler.basis_active(el);
 				A_form.set_basis(v_dofs, v_dofs);
+				M_form.set_basis(p_dofs, p_dofs);
 				kernel.dispatch_all();
 			};
 
 			//perform the loop
 			//TODO: parallel by element color?
 			for (int n=0; n<n_steps; ++n) {
-				mesh.for_each_active_element(action);
-			}
+				//update guess
+				if (n>0) {std::swap(x,x_old);}
 
-			//apply the boundary conditions
-			apply_velocity_bc(U);
+				//ensure x is zeroed
+				std::fill(x.begin(), x.end(), 0.0);
+
+				//compute D and rhs-(L+U)*
+				mesh.for_each_active_element(action);
+
+				//finalize inverse
+				A_form.finalize_inverse();
+				M_form.finalize_inverse();
+
+				//apply bc
+				apply_velocity_bc(x.subspan(0,3*N1));
+				apply_pressure_bc(x.subspan(3*N1,N2));
+			}
 		}
 
 		//compute G*p (result is a vector with the size of U)
@@ -574,6 +613,10 @@ namespace GV
 			w_bc.apply(U.subspan(2*N,N), as_span(velocity_handler.curr_compressed_dofs()));
 		}
 
+		void apply_pressure_bc(std::span<double> P) const {
+			P[0] = 0;
+		}
+
 		//apply a standard Uzawa iterations using some number of inner Gauss-Seidel iterations
 		template<bool FORWARD=true>
 		void standard_uzawa(std::span<double> U, std::span<double> P, std::span<const double> F, std::span<const double> H, const double w, const int n) const {
@@ -605,12 +648,13 @@ namespace GV
 		//solve a few iterations with Eigen
 		//pass the rhs explicitly so this can be used with either AMR (rhs is from problem)
 		//or multigrid (rhs is residual)
+		template<int N_INNER=2>
 		void smooth(int n_iter, std::span<const double> rhs, double tol=1e-100, bool print_summary=false) {
 			LogTime timer{"Stokes::smooth"};
 
 			using Operator = StokesOperator<V_BC,P_BC,MAX_DEPTH>;
-			// using Preconditioner = StokesPreconditioner<V_BC,P_BC,MAX_DEPTH,2>;
-			using Preconditioner = Eigen::IdentityPreconditioner;
+			using Preconditioner = StokesPreconditioner<V_BC,P_BC,MAX_DEPTH,N_INNER>;
+			// using Preconditioner = Eigen::IdentityPreconditioner;
 
 			Operator op(*this);
 

@@ -34,6 +34,15 @@ namespace GV
 		}
 
 		inline std::span<const double> data() const {return {loc_mat};}
+		std::vector<double> diag() const {
+			assert(n_test==m_trial);
+			std::vector<double> result(n_test);
+			#pragma omp simd
+			for (uint64_t i=0; i<n_test; ++i) {
+				result[i] = value(i,i);
+			}
+			return result;
+		}
 
 		EvalPolicy eval{};
 		void set_eval_policy(EvalPolicy ep) {eval = ep;}

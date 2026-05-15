@@ -9,7 +9,8 @@
 
 namespace GV
 {
-	//a class to compute Y=A*X without forming the stiffness matrix A
+	//a class to compute Y+=A*X without forming the stiffness matrix A
+	//note to compute Y=A*X, Y must be zeroed first.
 	template<typename TestHandler_type, typename TrialHandler_type, typename EvalPolicy>
 	struct BilinearFormMultiply : public BilinearForm<TestHandler_type,TrialHandler_type,EvalPolicy>
 	{
@@ -35,6 +36,7 @@ namespace GV
 		}
 		void loc_x(std::span<double> result, const uint64_t k) const {
 			assert(k<global_pairs.size());
+			#pragma omp simd
 			for (uint64_t j=0; j<this->m_trial; ++j) {
 				const uint64_t J = this->global_trial[j];
 				result[j] = global_pairs[k].x[J];
@@ -62,8 +64,7 @@ namespace GV
 		}
 
 		template<uint64_t N_QUAD_POINTS>
-		inline void compute(
-				const QuadPointMap<QuadElem_t,N_QUAD_POINTS>& q_map) {
+		inline void compute(const QuadPointMap<QuadElem_t,N_QUAD_POINTS>& q_map) {
 			compute_policy.compute(this->test_dofs, this->trial_dofs, q_map);
 		}
 
