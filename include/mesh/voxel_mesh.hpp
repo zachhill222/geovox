@@ -46,7 +46,7 @@ namespace GV
 	//With the element/vertex/face keys, we must have a maximum depth of 15. If more is needed (unlikely) we can stitch together
 	//multiples of these meshes.
 
-	template<int MAX_DEPTH_=10> requires (MAX_DEPTH_>=0)
+	template<uint64_t MAX_DEPTH_=10>
 	class VoxelMesh
 	{
 	public:

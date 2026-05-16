@@ -8,6 +8,10 @@
 #include "mesh/keys/voxel_key_vertex.hpp"
 #include "mesh/keys/voxel_key_face.hpp"
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 namespace GV
 {
 	//concepts

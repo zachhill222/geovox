@@ -151,8 +151,9 @@ namespace internal {
 			//increment lower portion (P-P block is all zeros)
 			lhs.stokes.GT_U(dst_lower, U);
 
-			//pin one pressure component
-			dst[N1] = rhs[N1];
+			//apply boundary conditions
+			lhs.stokes.apply_velocity_bc(dst_upper);
+			lhs.stokes.apply_pressure_bc(dst_lower);
 		}
 	};
 }}

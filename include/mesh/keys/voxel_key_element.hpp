@@ -5,6 +5,10 @@
 #include <cassert>
 #include <array>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 namespace GV
 {
 	//define the element key and implement most methods.
@@ -27,7 +31,6 @@ namespace GV
 		using BASE::BASE;
 
 		//inherit the primary accessors
-		using BASE::color;
 		using BASE::depth;
 		using BASE::i;
 		using BASE::j;
@@ -37,6 +40,13 @@ namespace GV
 		using BASE::set_j;
 		using BASE::set_k;
 		using BASE::_data_;
+		using BASE::Hash;
+
+		//usually the fee bits mean a manual color is set
+		#pragma omp declare simd
+		inline constexpr uint64_t color() const {return BASE::free();}
+		#pragma omp declare simd
+		inline constexpr void set_color(const uint64_t clr) {BASE::set_free(clr);}
 
 		//define useful constants
 		using BASE::MAX_DEPTH;
@@ -63,35 +73,30 @@ namespace GV
 
 		//define element specific constructors
 		constexpr VoxelElementKey(const uint64_t dd, const uint64_t ii, const uint64_t jj, const uint64_t kk) :
-			BASE( 	(ii&1)|((jj&1)<<1)|((kk&1)<<2),
-					ii>>1, jj>>1, kk>>1,
+			BASE( 	ii, jj, kk,
 					0, dd, BC, 0) {
-				if (dd>MAX_DEPTH) {_data_ = DOES_NOT_EXIST; return;}
-				if constexpr (PX||PY||PZ) {
-					const uint64_t me = uint64_t{1} << dd; //2^d elements per axis
-					if constexpr (PX) {if (ii>=me) {set_i(0);}}
-					if constexpr (PY) {if (jj>=me) {set_j(0);}}
-					if constexpr (PZ) {if (kk>=me) {set_k(0);}}
-				}
+			if (dd>MAX_DEPTH) {_data_ = DOES_NOT_EXIST; return;}
+			if constexpr (PX||PY||PZ) {
+				const uint64_t me = uint64_t{1} << dd; //2^d elements per axis
+				if constexpr (PX) {if (ii>=me) {set_i(0);}}
+				if constexpr (PY) {if (jj>=me) {set_j(0);}}
+				if constexpr (PZ) {if (kk>=me) {set_k(0);}}
 			}
+		}
 
 		constexpr VoxelElementKey(const uint64_t dd, uint64_t li) {
+			// L = i + j*N + k*N^2
+
 			assert(dd<=MAX_DEPTH);
 			assert(li < (uint64_t{1} << (3*dd)));
 
-			if (dd==0) {*this = VoxelElementKey{0,0,0,0}; return;}
-
-			const uint64_t r_wd   = dd-1;						//width on non-color index bits
-			const uint64_t r_mask = (uint64_t{1}<<r_wd) - 1;	//mask for the non-color index bits
-
-			//split color, i, j, k fields
-			const uint64_t cc 	= li&7;
-			const uint64_t r_ii = (li>>3) 		 	& r_mask;
-			const uint64_t r_jj = (li>>(3+r_wd)) 	& r_mask;
-			const uint64_t r_kk = (li>>(3+2*r_wd)) 	& r_mask;
+			const uint64_t N = (uint64_t{1} << dd); //number of elements per side
+			const uint64_t ii = li % N; li>>=dd; 	//note li>>=dd is the same as li/=N
+			const uint64_t jj = li % N; li>>=dd;
+			const uint64_t kk = li;					//note the remainder li is less than N now
 
 			//assemble data
-			_data_ = BASE(cc,r_ii,r_jj,r_kk,0,dd,BC,0)._data_;
+			_data_ = BASE{ii,jj,kk,0,dd,BC,0}._data_;
 		}
 
 		
@@ -106,19 +111,11 @@ namespace GV
 		}
 
 		//get the linear index of the element at the current depth
+		// L = i + j*N + k*N^2
 		constexpr uint64_t depth_linear_index() const {
 			assert(is_valid());
-			//compress the index fields and color
-			const uint64_t dd   	= depth();
-			if (dd==0) {return 0;}
-
-			const uint64_t r_wd 	= dd-1;
-			const uint64_t cc 		= _data_&7;
-			const uint64_t r_ii		= (_data_&BASE::I_M) >> BASE::I_S;
-			const uint64_t r_jj		= (_data_&BASE::J_M) >> BASE::J_S;
-			const uint64_t r_kk 	= (_data_&BASE::K_M) >> BASE::K_S;
-
-			return cc | (r_ii<<3) | (r_jj<<(3+r_wd)) | (r_kk<<(3+2*r_wd));
+			const uint64_t N = (uint64_t{1} << depth()); //number of elements per side
+			return i() + N*(j() + N*k());
 		}
 
 		static constexpr uint64_t depth_linear_start(const uint64_t dd) {
@@ -176,34 +173,22 @@ namespace GV
 		//iterator logic
 		VoxelElementKey& operator++() {
 			assert(is_valid());
+			const uint64_t dd  = depth();
+			const uint64_t Nm1 = (uint64_t{1} << dd) -1; //max index for i,j,k
 
-			const uint64_t dd = depth();
-			if (dd==0) {_data_ = DOES_NOT_EXIST; return *this;}
+			const uint64_t ii = i();
+			if (ii<Nm1) {set_i(ii+1); return *this;}
+			else {set_i(0);}
 
-			const uint64_t cc = _data_&7;
+			//i must roll over to 0 and increment j
+			const uint64_t jj = j();
+			if (jj<Nm1) {set_j(jj+1); return *this;}
+			else {set_j(0);}
 
-			const uint64_t cc_n = (cc + 1)&7; //next color
-			_data_ = (_data_&~BASE::C_M) | cc_n;
-			if (cc_n!=0) {return *this;}
-			
-			//need to carry
-			const uint64_t r_wd 	= dd-1;
-			const uint64_t r_mask	= (uint64_t{1}<<r_wd) - 1; //also the maximum non-color index
-			
-			const uint64_t r_ii		= (_data_&BASE::I_M) >> BASE::I_S;
-			const uint64_t r_ii_n	= (r_ii+1) & r_mask;
-			_data_ = (_data_&~BASE::I_M) | (r_ii_n << BASE::I_S);
-			if (r_ii_n!=0) {return *this;}
-
-			const uint64_t r_jj		= (_data_&BASE::J_M) >> BASE::J_S;
-			const uint64_t r_jj_n	= (r_jj+1) & r_mask;
-			_data_ = (_data_&~BASE::J_M) | (r_jj_n << BASE::J_S);
-			if (r_jj_n!=0) {return *this;}
-			
-			const uint64_t r_kk		= (_data_&BASE::K_M) >> BASE::K_S;
-			const uint64_t r_kk_n	= (r_kk+1) & r_mask;
-			_data_ = (_data_&~BASE::K_M) | (r_kk_n << BASE::K_S);
-			if (r_kk_n!=0) {return *this;}
+			//j must roll over to 0 and incmement k
+			const uint64_t kk = k();
+			if (kk<Nm1) {set_k(kk+1); return *this;}
+			else {set_k(0);} //return here if we want wrap back to the end
 
 			_data_ = DOES_NOT_EXIST;
 			return *this;

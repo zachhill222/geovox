@@ -9,7 +9,7 @@
 using Mesh_t   = GV::VoxelMesh<10>;
 using Elem_t   = Mesh_t::VoxelElement;
 using Vert_t   = Mesh_t::VoxelVertex;
-using DofKey_t = GV::VoxelVertexKey<10,1>;
+using DofKey_t = GV::VoxelVertexKey<10,0>;
 using DOF_t    = GV::VoxelQ1<DofKey_t>;
 using Basis_t  = GV::DofHandlerCharms<Mesh_t,DOF_t>;
 
@@ -36,7 +36,7 @@ int main(int argc, char* argv[])
 		basis.refine(basis.curr_compressed_dofs());
 		mesh.process_request_active();
 		mesh.process_request_deactive();
-
+		
 		basis.compress_dof_numbers();
 		std::vector<double> new_coefs(basis.n_dofs(), 0.0);
 		basis.update_coefs(new_coefs, old_coefs);

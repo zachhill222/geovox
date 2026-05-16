@@ -336,6 +336,9 @@ namespace GV
 			//perform the loop
 			//TODO: parallel by element color?
 			mesh.for_each_active_element(action);
+
+			//set the BC
+			apply_velocity_bc(F);
 		}
 
 
@@ -648,6 +651,7 @@ namespace GV
 		//solve a few iterations with Eigen
 		//pass the rhs explicitly so this can be used with either AMR (rhs is from problem)
 		//or multigrid (rhs is residual)
+		//the rhs should incorporate the dirichlet BC
 		template<int N_INNER=2>
 		void smooth(int n_iter, std::span<const double> rhs, double tol=1e-100, bool print_summary=false) {
 			LogTime timer{"Stokes::smooth"};
@@ -683,7 +687,6 @@ namespace GV
 					default : std::cout << "info: Unknown\n"; break;
 				}
 			}
-
 		}
 
 		void check_stokes_op() {

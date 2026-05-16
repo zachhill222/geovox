@@ -1,6 +1,6 @@
 #pragma once
 
-
+#include "util/point.hpp"
 #include <span>
 #include <vector>
 #include <cassert>
@@ -37,7 +37,7 @@ namespace GV
 	inline std::span<T,N> as_span(std::array<T,N>& v) {return std::span<T,N>{v};}
 
 	template<typename T, size_t N>
-	inline std::span<const T,N> as_span(const std::array<T,N>& v) {return std::span<T,N>{v};}
+	inline std::span<const T,N> as_span(const std::array<T,N>& v) {return std::span<const T,N>{v};}
 
 	template<typename T, size_t N>
 	inline std::span<T> as_span(std::array<T,N>& v, const size_t start, const size_t length) {
@@ -61,6 +61,13 @@ namespace GV
 	template<typename T>
 	inline std::span<const T> as_span(const std::span<T>& v) {return v;}
 
+	template<typename T, size_t N> //fallback to convert a compile time size to a runtime size
+	inline std::span<T> as_span(std::span<T,N>& v) {return {v.data(), N};}
+
+	template<typename T, size_t N> //fallback to convert a compile time size to a runtime size
+	inline std::span<const T> as_span(const std::span<T,N>& v) {return {v.data(), N};}
+
+
 	//////////////////////////////////////
 	/// Adapt Eigen::VectorXd to spans and subspans
 	//////////////////////////////////////
@@ -78,5 +85,27 @@ namespace GV
 	inline std::span<const T> as_span(const Eigen::VectorXd& v, const size_t start, const size_t length) {
 		assert(start+length <= static_cast<size_t>(v.size()));
 		return {v.data()+start, length};
+	}
+
+
+	//////////////////////////////////////
+	/// Adapt GV::Point to spans and subspans
+	//////////////////////////////////////
+	template<typename T, int N>
+	inline std::span<T,N> as_span(Point<N,T>& v) {return std::span<T,N>{v._data, size_t(N)};}
+
+	template<typename T, int N>
+	inline std::span<const T,N> as_span(const Point<N,T>& v) {return std::span<const T,N>{v._data, size_t(N)};}
+
+	template<typename T, int N>
+	inline std::span<T> as_span(Point<N,T>& v, const size_t start, const size_t length) {
+		assert(start+length <= size_t(N));
+		return {v._data+start, length};
+	}
+
+	template<typename T, int N>
+	inline std::span<const T> as_span(const Point<N,T>& v, const size_t start, const size_t length) {
+		assert(start+length <= size_t(N));
+		return {v._data+start, length};
 	}
 }

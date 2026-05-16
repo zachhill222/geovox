@@ -9,7 +9,7 @@ using Vec_t = typename Poisson_t::Vec_t;
 
 int main(int argc, char* argv[]) {
 	Poisson_t problem{GV::Point<3,double>{-1,-1,-1}, GV::Point<3,double>{1,1,1}};
-	problem.bchandler.add_essential([](DOF_t dof){return (dof.key.y()==0) && (dof.key.z()==0);}, [](DOF_t dof){return 0.0;});
+	problem.bchandler.add_essential([](DOF_t dof){return (dof.key.y()==0) || (dof.key.y()==1) || (dof.key.z()==0) || (dof.key.z()==1);}, [](DOF_t dof){return 0.0;});
 
 	problem.set_depth(5);
 	problem.integrate();

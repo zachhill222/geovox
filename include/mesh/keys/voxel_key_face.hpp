@@ -4,6 +4,9 @@
 #include <cstdint>
 #include <cassert>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 namespace GV
 {
@@ -26,7 +29,6 @@ namespace GV
 
 		//inherit the primary accessors
 		using BASE::depth;
-		using BASE::color;
 		using BASE::i;
 		using BASE::j;
 		using BASE::k;
@@ -35,6 +37,12 @@ namespace GV
 		using BASE::set_j;
 		using BASE::set_k;
 		using BASE::_data_;
+
+		//usually the fee bits mean a manual color is set
+		#pragma omp declare simd
+		inline constexpr uint64_t color() const {return BASE::free();}
+		#pragma omp declare simd
+		inline constexpr void set_color(const uint64_t clr) {BASE::set_free(clr);}
 
 		//re-name other_c() to axis() for readability
 		//get the normal axis to the face
@@ -68,11 +76,9 @@ namespace GV
 			return PeriodicVariant<OTHER_BC>{axis(), depth(), i(), j(), k()};
 		}
 
-
 		//define face specific constructors
 		VoxelFaceKey(const uint64_t aa, const uint64_t dd, const uint64_t ii, const uint64_t jj, const uint64_t kk) :
-			BASE( (ii&1)|((jj&1)<<1)|((kk&1)<<2),
-					ii>>1, jj>>1, kk>>1,
+			BASE( 	ii, jj, kk,
 					aa, dd, BC, 0
 				) {
 				if (dd>MAX_DEPTH) {_data_ = DOES_NOT_EXIST; return;}
@@ -81,9 +87,9 @@ namespace GV
 					//for wrapping occurs at the smaller index regardless of the axis direction
 					const uint64_t mi = (uint64_t{1} << dd);
 
-					if constexpr (PX) {if (ii>= mi ) {set_i(0);}}
-					if constexpr (PY) {if (jj>= mi ) {set_j(0);}}
-					if constexpr (PZ) {if (kk>= mi ) {set_k(0);}}
+					if constexpr (PX) {if (ii>= mi) {set_i(0);}}
+					if constexpr (PY) {if (jj>= mi) {set_j(0);}}
+					if constexpr (PZ) {if (kk>= mi) {set_k(0);}}
 				}
 			}
 
@@ -143,42 +149,40 @@ namespace GV
 
 		//check if a face is valid
 		constexpr bool is_valid() const {
-			const uint64_t mfiax  = uint64_t{1} << depth(); //max face index in the normal axis direction
-			const uint64_t mfinax = mfiax-1;
+			const uint64_t m_ax  = uint64_t{1} << depth();  //max face index in the normal axis direction
+			const uint64_t m_nax = m_ax-1;					//max face index in a non normal axis direction
 			const uint64_t aa     = axis();
 			if (depth() > MAX_DEPTH) {return false;}
-			if (i() > ((aa==0) ? mfiax : mfinax)) {return false;}
-			if (j() > ((aa==1) ? mfiax : mfinax)) {return false;}
-			if (k() > ((aa==2) ? mfiax : mfinax)) {return false;}
+			if (i() > ((aa==0) ? m_ax : m_nax)) {return false;}
+			if (j() > ((aa==1) ? m_ax : m_nax)) {return false;}
+			if (k() > ((aa==2) ? m_ax : m_nax)) {return false;}
 			return true;
 		}
 
 		//partition the indices into: axis0 normal | axis1 normal | axis2 normal
 		//the numbering within and across each partition is continuous as there are N = 2^d * 2^d * 2^(d+1) = 2^(3d+1) faces with a given normal axis
 		//thus axis0 uses indices [0,N), axis1 uses [N,2N), and axis2 uses [2N,3N).
-
 		constexpr uint64_t depth_linear_index() const {
 			assert(is_valid());
 
 			const uint64_t dd = depth();
 			const uint64_t aa = axis();
-			const uint64_t ps = depth_axis_start(dd,aa); //start of this partition
+			const uint64_t ii = i();
+			const uint64_t jj = j();
+			const uint64_t kk = k();
 
-			const uint64_t cc 	= _data_&7;
-			const uint64_t r_ii	= (_data_ & BASE::I_M) >> BASE::I_S;
-			const uint64_t r_jj	= (_data_ & BASE::J_M) >> BASE::J_S;
-			const uint64_t r_kk	= (_data_ & BASE::K_M) >> BASE::K_S;
+			const uint64_t Nn  = uint64_t{1} << dd;	//number of faces in the non normal axis directions
+			const uint64_t Na  = Nn+1;				//number of faces in the normal axis direction
 
-			//assemble index cc | r_i | r_j | r_k
-			//r_* has width dd-1 for non-axis and width dd for axis indices (one bit was moved to the color)
+			//get the start index of the axis block
+			const uint64_t bs = depth_axis_start(dd,aa);
+
+			//increment by the face index within the block
 			switch (aa) {
-			case 0:
-				return ps + ( cc | (r_ii<<3) | (r_jj<<(3+dd)) | (r_kk<<(2+2*dd)) );
-			case 1:
-				return ps + ( cc | (r_ii<<3) | (r_jj<<(2+dd)) | (r_kk<<(2+2*dd)) );
-			case 2:
-				return ps + ( cc | (r_ii<<3) | (r_jj<<(2+dd)) | (r_kk<<(1+2*dd)) );
-			default: return DOES_NOT_EXIST;
+				case 0: return aa + ii + Na*(jj + Nn*kk);
+				case 1: return aa + ii + Nn*(jj + Na*kk);
+				case 2: return aa + ii + Nn*(jj + Nn*kk);
+				default: return DOES_NOT_EXIST;
 			}
 		}
 

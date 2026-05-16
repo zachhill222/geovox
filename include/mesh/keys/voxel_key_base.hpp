@@ -10,6 +10,10 @@
 #include <iomanip>
 #include <functional>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 namespace GV
 {
 	//these classes store the logic of a (limited to 64-bit storage) an infinite hierarchical voxel mesh
@@ -28,9 +32,6 @@ namespace GV
 	//ON_W: other width - used by inherited classes, not touched by this or outside classes. NOT USED for comparison.
 	//OC_W: other width - used by inherited classes, not touched by this or outside classes. IS USED for comparisoin.
 	//I_W : index width - used by this and inherited classes, not touched by outside classes
-	//
-	//The indices for I,J,K are split into a single color bit and a remainder block (rem | clr)
-	//the three color bits are used as the lsb of _data_ for morton coloring at a single depth
 	template<int ON_W_, int OC_W_, int I_W_> requires (ON_W_ + OC_W_ + 3*I_W_ < 64)
 	struct VoxelKey
 	{
@@ -48,13 +49,12 @@ namespace GV
 		static constexpr uint64_t F_W = 64 - (ON_W + OC_W + D_W + 3*I_W_);
 		
 		//width of remainder (non-color) index fields
-		static constexpr uint64_t I_W = I_W_-1;
-		static constexpr uint64_t J_W = I_W_-1; //index j width
-		static constexpr uint64_t K_W = I_W_-1; //index k width
+		static constexpr uint64_t I_W = I_W_;
+		static constexpr uint64_t J_W = I_W_; //index j width
+		static constexpr uint64_t K_W = I_W_; //index k width
 
 		//define offsets (data start)
-		static constexpr uint64_t C_S  = 0;				//color start
-		static constexpr uint64_t I_S  = 3;				//index i start
+		static constexpr uint64_t I_S  = 0;				//index i start
 		static constexpr uint64_t J_S  = I_S  + I_W;	//index j start
 		static constexpr uint64_t K_S  = J_S  + J_W;	//index k start
 		static constexpr uint64_t OC_S = K_S  + K_W; 	//other (compare) start (e.g. axis normal)
@@ -64,8 +64,6 @@ namespace GV
 		static_assert(F_S+F_W == 64, "VoxelKey: incorrect field starts");
 
 		//define masks
-		
-		static constexpr uint64_t C_M  = 7;									  //color mask
 		static constexpr uint64_t I_M  = ((uint64_t{1} << I_W)  - 1) << I_S;  //index i mask (non-color bits)
 		static constexpr uint64_t J_M  = ((uint64_t{1} << J_W)  - 1) << J_S;  //index j mask (non-color bits)
 		static constexpr uint64_t K_M  = ((uint64_t{1} << K_W)  - 1) << K_S;  //index k mask (non-color bits)
@@ -75,15 +73,15 @@ namespace GV
 		static constexpr uint64_t F_M  = ((uint64_t{1} << F_W)  - 1) << F_S;  //free mask
 
 		//catch off-by-one shifting/width errors. each mask must be disjoint cover all 64 bits
-		static_assert( (C_M | F_M | ON_M | OC_M | D_M | I_M | J_M | K_M) == (uint64_t) -1, "VoxelKey: incorrect field masks");
-		static_assert( (C_M ^ F_M ^ ON_M ^ OC_M ^ D_M ^ I_M ^ J_M ^ K_M) == (uint64_t) -1, "VoxelKey: incorrect field masks");
+		static_assert( (F_M | ON_M | OC_M | D_M | I_M | J_M | K_M) == (uint64_t) -1, "VoxelKey: incorrect field masks");
+		static_assert( (F_M ^ ON_M ^ OC_M ^ D_M ^ I_M ^ J_M ^ K_M) == (uint64_t) -1, "VoxelKey: incorrect field masks");
 
 		//convenient key to return
 		static constexpr uint64_t DOES_NOT_EXIST = uint64_t(-1);
 
 		//other useful masks
-		static constexpr uint64_t COMPARE_MASK = OC_M | D_M | I_M | J_M | K_M | C_M;
-		static constexpr uint64_t INDEX_MASK = I_M | J_M | K_M | C_M;
+		static constexpr uint64_t COMPARE_MASK = OC_M | D_M | I_M | J_M | K_M;
+		static constexpr uint64_t INDEX_MASK = I_M | J_M | K_M;
 		static constexpr uint64_t DEPTH_INDEX_MASK = D_M | INDEX_MASK;
 
 		//store the bits
@@ -92,10 +90,9 @@ namespace GV
 		//define constructors
 		explicit constexpr VoxelKey() : _data_{DOES_NOT_EXIST} {}
 		explicit constexpr VoxelKey(const uint64_t data) : _data_{data} {}
-		constexpr VoxelKey( const uint64_t cc,
-							const uint64_t ii, //note these are the non-color bits only
-							const uint64_t jj, //note these are the non-color bits only
-							const uint64_t kk, //note these are the non-color bits only
+		constexpr VoxelKey( const uint64_t ii,
+							const uint64_t jj,
+							const uint64_t kk,
 							const uint64_t oc, 
 							const uint64_t dd, 
 							const uint64_t on,
@@ -108,83 +105,81 @@ namespace GV
 				((dd<<D_S)  & D_M)  |
 				((ii<<I_S)  & I_M)  |
 				((jj<<J_S)  & J_M)  |
-				((kk<<K_S)  & K_M)	|
-				((cc<<C_S) 	& C_M)
+				((kk<<K_S)  & K_M)
 			}
 		{}
 
 		//access each field
-		inline constexpr uint64_t color()   const {return (_data_&C_M);};
+		#pragma omp declare simd
 		inline constexpr uint64_t free()    const {return (_data_&F_M) >>F_S;}
+		#pragma omp declare simd
 		inline constexpr uint64_t other_n() const {return (_data_&ON_M)>>ON_S;}
+		#pragma omp declare simd
 		inline constexpr uint64_t other_c() const {return (_data_&OC_M)>>OC_S;}
+		#pragma omp declare simd
 		inline constexpr uint64_t depth()   const {return (_data_&D_M) >>D_S;}
-		
-		inline constexpr uint64_t i() 	    const {
-			return ((_data_&I_M) >> (I_S-1)) | (_data_&1);
-		}
-		inline constexpr uint64_t j() 	    const {
-			return ((_data_&J_M) >> (J_S-1)) | ((_data_&2)>>1);
-		}
-		inline constexpr uint64_t k() 	    const {
-			return ((_data_&K_M) >> (K_S-1)) | ((_data_&4)>>2);
-		}
+		#pragma omp declare simd
+		inline constexpr uint64_t i() 	    const {return (_data_&I_M) >> I_S;}
+		#pragma omp declare simd
+		inline constexpr uint64_t j() 	    const {return (_data_&J_M) >> J_S;}
+		#pragma omp declare simd
+		inline constexpr uint64_t k() 	    const {return (_data_&K_M) >> K_S;}
 
 		//access the un-shifted essential/free bits (good for comparison below)
-		constexpr uint64_t essential_bits() const {return _data_&~F_M;}
-		constexpr uint64_t free_bits() const {return _data_&F_M;}
-		constexpr uint64_t compare_bits() const {return _data_&COMPARE_MASK;}
+		#pragma omp declare simd
+		inline constexpr uint64_t essential_bits() const {return _data_&~F_M;}
+		#pragma omp declare simd
+		inline constexpr uint64_t free_bits() const {return _data_&F_M;}
+		#pragma omp declare simd
+		inline constexpr uint64_t compare_bits() const {return _data_&COMPARE_MASK;}
 
 		//access i,j,k as axis 0, 1, 2 with a mod fail safe (axis -1 is axis 2, but more work)
 		inline constexpr uint64_t index(const int a) const {return a==0 ? i() : a==1 ? j() : a==2 ? k() : index(a%3);}
 
 		//set bit fields
-		constexpr void set_free(const uint64_t bt) {
+		#pragma omp declare simd
+		inline constexpr void set_free(const uint64_t bt) {
 			_data_ &= ~F_M;
 			_data_ |= ((bt<<F_S)&F_M);
 		}
-		constexpr void set_on(const uint64_t bt) {
+		#pragma omp declare simd
+		inline constexpr void set_on(const uint64_t bt) {
 			_data_ &= ~ON_M;
 			_data_ |= ((bt<<ON_S)&ON_M);
 		}
-		constexpr void set_oc(const uint64_t bt) {
+		#pragma omp declare simd
+		inline constexpr void set_oc(const uint64_t bt) {
 			_data_ &= ~OC_M;
 			_data_ |= ((bt<<OC_S)&OC_M);
 		}
-		constexpr void set_depth(const uint64_t bt) {
+		#pragma omp declare simd
+		inline constexpr void set_depth(const uint64_t bt) {
 			_data_ &= ~D_M;
 			_data_ |= ((bt<<D_S)&D_M);
 		}
-		constexpr void set_i(uint64_t bt) {
-			//get the color and non-color bits
-			const uint64_t i0 = bt&1;
-			bt>>=1;
-			_data_ &= ~(I_M|1); //clear i bits (all)
+		#pragma omp declare simd
+		inline constexpr void set_i(uint64_t bt) {
+			_data_ &= ~I_M; //clear i bits (all)
 			_data_ |= ((bt<<I_S)&I_M);
-			_data_ |= i0;
 		}
-		constexpr void set_j(uint64_t bt) {
-			//get the color and non-color bits
-			const uint64_t j0 = bt&1;
-			bt>>=1;
-			_data_ &= ~(J_M|2); //clear j bits (all)
+		#pragma omp declare simd
+		inline constexpr void set_j(uint64_t bt) {
+			_data_ &= ~J_M; //clear j bits (all)
 			_data_ |= ((bt<<J_S)&J_M);
-			_data_ |= (j0<<1);
 		}
-		constexpr void set_k(uint64_t bt) {
-			//get the color and non-color bits
-			const uint64_t k0 = bt&1;
-			bt>>=1;
-			_data_ &= ~(K_M|4); //clear k bits (all)
+		#pragma omp declare simd
+		inline constexpr void set_k(uint64_t bt) {
+			_data_ &= ~K_M; //clear k bits (all)
 			_data_ |= ((bt<<K_S)&K_M);
-			_data_ |= (k0<<2);
 		}
 
 
 		//check if the key was set to DOES_NOT_EXIST
+		#pragma omp declare simd
 		inline constexpr bool exists() const {return _data_!=DOES_NOT_EXIST;}
 
 		//in-place bit operations
+		#pragma omp declare simd
 		VoxelKey& operator<<=(const uint64_t other) {
 			assert(other<F_W);
 			const uint64_t fb = (_data_&F_M) << other;
@@ -193,6 +188,7 @@ namespace GV
 			return *this;
 		}
 
+		#pragma omp declare simd
 		VoxelKey& operator>>=(const uint64_t other) {
 			assert(other<F_W);
 			const uint64_t fb = (_data_&F_M) >> other;
@@ -201,24 +197,27 @@ namespace GV
 			return *this;
 		}
 
+		#pragma omp declare simd
 		VoxelKey& operator^=(const uint64_t other) {
 			_data_ ^= ((other<<F_S)&F_M); //include the shift in case the fields are re-arranged
 			return *this;
 		}
 
+		#pragma omp declare simd
 		VoxelKey& operator&=(const uint64_t other) {
 			const uint64_t o = (other<<F_S)&F_M;
 			_data_ &=  (o|~F_M); //include the shift in case the fields are re-arranged
 			return *this;
 		}
 
+		#pragma omp declare simd
 		VoxelKey& operator|=(const uint64_t other) {
 			_data_ |= ((other<<F_S)&F_M); //include the shift in case the fields are re-arranged
 			return *this;
 		}
 
-
 		//non-in-place bit operations (call the in-place version for consistency)
+		#pragma omp declare simd
 		VoxelKey operator<<(const uint64_t other) const {
 			assert(other<F_W);
 			VoxelKey result{_data_};
@@ -226,6 +225,7 @@ namespace GV
 			return result;
 		}
 
+		#pragma omp declare simd
 		VoxelKey operator>>(const uint64_t other) const {
 			assert(other<F_W);
 			VoxelKey result{_data_};
@@ -233,18 +233,21 @@ namespace GV
 			return result;
 		}
 
+		#pragma omp declare simd
 		VoxelKey operator^(const uint64_t other) const {
 			VoxelKey result{_data_};
 			result ^= other;
 			return result;
 		}
 
+		#pragma omp declare simd
 		VoxelKey operator&(const uint64_t other) const {
 			VoxelKey result{_data_};
 			result &= other;
 			return result;
 		}
 
+		#pragma omp declare simd
 		VoxelKey operator|(const uint64_t other) const {
 			VoxelKey result{_data_};
 			result |= other;
@@ -252,12 +255,14 @@ namespace GV
 		}
 
 		//access bits
+		#pragma omp declare simd
 		constexpr bool operator[](const uint64_t idx) const {
 			assert(idx<F_W);
 			const uint64_t mask = uint64_t{1} << (idx+F_S);
 			return static_cast<bool>(_data_ & mask & F_M);
 		}
 
+		#pragma omp declare simd
 		constexpr uint64_t operator()(const uint64_t start, const uint64_t end) const {
 			assert(start<=end);
 			assert(end<=F_W);
@@ -294,8 +299,7 @@ namespace GV
 	    if constexpr (K::OC_W > 0) os << std::setw(K::OC_W) << "OC" << " ";
 	    os << std::setw(K::K_W) << "K" << " "
 	       << std::setw(K::J_W) << "J" << " "
-	       << std::setw(K::I_W) << "I" << " "
-	       << std::setw(K::C_W) << "C" << "\n";
+	       << std::setw(K::I_W) << "I" << "\n";
 
 	    // print bits MSB->LSB with separators at non-degenerate field boundaries
 	    for (int b=63; b>=0; --b) {
@@ -305,8 +309,7 @@ namespace GV
 	                || bs == static_cast<int>(K::D_S)
 	                || bs == static_cast<int>(K::K_S)
 	                || bs == static_cast<int>(K::J_S)
-	                || bs == static_cast<int>(K::I_S)
-	                || bs == static_cast<int>(K::C_S + K::C_W);
+	                || bs == static_cast<int>(K::I_S);
 	        if constexpr (K::ON_W > 0) sep = sep || bs == static_cast<int>(K::ON_S);
 	        if constexpr (K::OC_W > 0) sep = sep || bs == static_cast<int>(K::OC_S);
 	        if (sep) os << " ";
@@ -319,8 +322,7 @@ namespace GV
 	       << "\ndepth:   " << k.depth()
 	       << "\ni:       " << k.i()
 	       << "\nj:       " << k.j()
-	       << "\nk:       " << k.k()
-	       << "\ncolor:   " << k.color();
+	       << "\nk:       " << k.k();
 	    if constexpr (K::ON_W > 0) os << "\nother_n: " << k.other_n();
 	    if constexpr (K::OC_W > 0) os << "\nother_c: " << k.other_c();
 	    os << "\n";
@@ -328,4 +330,14 @@ namespace GV
 	    return os;
 	}
 
+}
+
+//inject a hash into the std namespace for any types that derive from this
+namespace std
+{
+	template<typename T> requires std::derived_from<T, GV::VoxelKey<T::ON_W, T::OC_W, T::I_W>>
+	struct hash<T>
+	{
+		inline size_t operator()(const T key) const {return std::hash<uint64_t>{}(key.compare_bits());}
+	};
 }

@@ -7,6 +7,10 @@
 #include <cassert>
 #include <cmath>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 namespace GV
 {
 	//define the vertex key and implement most methods.
@@ -36,8 +40,13 @@ namespace GV
 		using BASE::set_j;
 		using BASE::set_k;
 		using BASE::_data_;
+		using Hash = typename BASE::Hash;
 
-		using BASE::Hash;
+		//usually the fee bits mean a manual color is set
+		#pragma omp declare simd
+		inline constexpr uint64_t color() const {return BASE::free();}
+		#pragma omp declare simd
+		inline constexpr void set_color(const uint64_t clr) {BASE::set_free(clr);}
 
 		//define useful constants
 		static constexpr uint64_t MAX_VERTEX_INDEX = BASE::MAX_INDEX;
@@ -65,8 +74,7 @@ namespace GV
 
 		//define vertex specific constructors
 		constexpr VoxelVertexKey(const uint64_t dd, const uint64_t ii, const uint64_t jj, const uint64_t kk) :
-			BASE(	(ii&1)|((jj&1)<<1)|((kk&1)<<2),
-					ii>>1, jj>>1, kk>>1,
+			BASE(	ii, jj, kk,
 					0, dd, BC, 0) {
 				if (dd>MAX_DEPTH) {_data_ = DOES_NOT_EXIST; return;}
 				if constexpr (PX||PY||PZ) {
@@ -87,7 +95,7 @@ namespace GV
 			const uint64_t jj   = li % nv; li /= nv;
 			const uint64_t kk   = li;
 
-			*this = VoxelVertexKey{dd,ii,jj,kk};
+			_data_ = BASE{ii,jj,kk,0,dd,BC,0}._data_;
 		}
 
 		//check if a voxel is valid
@@ -241,3 +249,4 @@ namespace GV
 		return os;
 	}
 }
+

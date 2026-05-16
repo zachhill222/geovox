@@ -11,7 +11,7 @@
 namespace GV
 {
 	template<int DIM, typename T> requires (DIM>0)
-	class Point;
+	struct Point;
 
 
 
@@ -98,9 +98,8 @@ namespace GV
 	/// floating point rounding is important and unacceptable.
 	//////////////////////////////////////////////////////////
 	template<int DIM, typename T=double> requires (DIM>0)
-	class Point
+	struct Point
 	{
-	public:
 		//track type information
 		static constexpr int dim = DIM;
 		using scalar_type = T;
@@ -149,6 +148,9 @@ namespace GV
 		//element access
 		inline constexpr T operator[](const int idx) const noexcept {assert(0<=idx and idx<DIM); return _data[idx];}
 		inline constexpr T& operator[](const int idx) noexcept {assert(0<=idx and idx<DIM); return _data[idx];}
+
+		//standard container access
+		static constexpr size_t size() {return static_cast<size_t>(DIM);}
 
 		//type conversion
 		template<int OTHER_DIM, typename OTHER_T> requires std::is_nothrow_convertible<T,OTHER_T>::value
@@ -435,7 +437,6 @@ namespace GV
 			return cross(*this, other);
 		}
 
-	protected:
 		T _data[DIM];
 	};
 
