@@ -18,5 +18,5 @@ int main(int argc, char* argv[]) {
 	Vec_t ones = Vec_t::Ones(problem.rhs.size());
 	problem.apply_dirichlet();
 	problem.solve();
-	problem.save_as("poisson.vtk");
+	// problem.save_as("poisson.vtk");
 }

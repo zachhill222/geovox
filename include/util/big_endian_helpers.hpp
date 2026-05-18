@@ -49,5 +49,4 @@ namespace GV
 	void WRITE_BIG_ENDIAN(OS& buffer, const Point<N,F_in>& val) {
 		WRITE_BIG_ENDIAN<F_out>(buffer, as_span(val));
 	}
-
 }

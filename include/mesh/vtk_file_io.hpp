@@ -116,7 +116,7 @@ namespace GV
 	void append_cell_data_field_vtk(const std::string& filename, const Mesh_t& mesh, const std::string field_name, const Lookups&... lookups) {
 		//sanity check
 		static_assert(sizeof...(lookups)>0, "no data lookup provided");
-		static_assert( (std::same_as<typename Mesh_t::VoxelElement, typename Lookups::MeshFeature_t> && ... ), "all lookups must be for mesh elements");
+		static_assert( ((std::same_as<typename Mesh_t::VoxelElement, typename Lookups::MeshFeature_t> || std::same_as<void, typename Lookups::MeshFeature_t>)&& ... ), "all lookups must be for mesh elements");
 
 		//open file
 		const auto mode = ASCII ? std::ios::app : (std::ios::app | std::ios::binary);
@@ -135,8 +135,12 @@ namespace GV
 		auto write_var = [&]<typename Lookup_t>(const Lookup_t& lookup) {
 			file << lookup.header(f_count);
 
-			for (auto it = mesh.element_begin(); it != mesh.element_end(); ++it) {
-				const auto val = lookup(*it);
+			uint64_t idx = 0;
+			for (auto it = mesh.element_begin(); it != mesh.element_end(); ++it, ++idx) {
+				const auto val = [&]() {
+					if constexpr (std::same_as<typename Lookup_t::MeshFeature_t, void>) {return lookup(idx);}
+					else {return lookup(*it);}
+				}();
 				if constexpr (ASCII) {
 					if constexpr (Lookup_t::IS_SCALAR) {file << val << "\n";}
 					else {
@@ -159,7 +163,7 @@ namespace GV
 	void append_point_data_field_vtk(const std::string& filename, const Mesh_t& mesh, const std::string field_name, const Lookups&... lookups) {
 		//sanity check
 		static_assert(sizeof...(lookups)>0, "no data lookup provided");
-		static_assert( (std::same_as<typename Mesh_t::VoxelVertex, typename Lookups::MeshFeature_t> && ... ), "all lookups must be for mesh vertices");
+		static_assert( ((std::same_as<typename Mesh_t::VoxelVertex, typename Lookups::MeshFeature_t> || std::same_as<void, typename Lookups::MeshFeature_t>)&& ... ), "all lookups must be for mesh vertices");
 
 		//open file
 		const auto mode = ASCII ? std::ios::app : (std::ios::app | std::ios::binary);
@@ -178,8 +182,12 @@ namespace GV
 		auto write_var = [&]<typename Lookup_t>(const Lookup_t& lookup) {
 			file << lookup.header(f_count);
 
-			for (auto it = mesh.vertex_begin(); it != mesh.vertex_end(); ++it) {
-				const auto val = lookup(*it);
+			uint64_t idx = 0;
+			for (auto it = mesh.vertex_begin(); it != mesh.vertex_end(); ++it, ++idx) {
+				const auto val = [&]() {
+					if constexpr (std::same_as<typename Lookup_t::MeshFeature_t, void>) {return lookup(idx);}
+					else {return lookup(*it);}
+				}();
 				if constexpr (ASCII) {
 					if constexpr (Lookup_t::IS_SCALAR) {file << val << "\n";}
 					else {
@@ -250,7 +258,50 @@ namespace GV
 
 	//factory to help make lookups a bit easier
 	template<typename Feature_t, typename Lambda_t>
-	auto make_lookup(Lambda_t&& lambda, std::string varname="var") {
+	auto make_feature_lookup(Lambda_t&& lambda, std::string varname="var") {
 		return FeatureDataLookup<Feature_t, std::decay_t<Lambda_t>>{std::forward<Lambda_t>(lambda), varname};
+	}
+
+
+	//struct to lookup data by the feature index
+	template<typename Return_t_in, typename Lambda_t>
+	struct IndexDataLookup {
+		Lambda_t lookup;
+		std::string varname;
+		using MeshFeature_t = void;
+		using Return_t = Return_t_in;
+		static constexpr bool IS_SCALAR = std::is_arithmetic_v<Return_t>;
+		
+		static constexpr int N = []{
+			if constexpr (IS_SCALAR) {return 1;}
+			else {return std::tuple_size_v<Return_t>;}
+		}();
+
+		using Scalar_t = decltype([] {
+			if constexpr (IS_SCALAR) {return Return_t{};}
+			else return typename Return_t::value_type{};
+		}());
+
+		using OutScalar_t = std::conditional_t<std::is_floating_point_v<Scalar_t>, float,
+								std::conditional_t<std::is_integral_v<Scalar_t>, int32_t, void>>;
+		static_assert(!std::is_same_v<OutScalar_t,void>, "unknown return type");
+
+		IndexDataLookup(Lambda_t&& lookup_, std::string varname_ = "var") 
+			: lookup(std::forward<Lambda_t>(lookup_)), varname(varname_) {}
+
+		std::string header(const uint64_t n_data) const {
+			std::string hdr = varname + " " + std::to_string(N) + " " + std::to_string(n_data);
+			if constexpr (std::same_as<OutScalar_t, float>) {return hdr + " float\n";}
+			else if constexpr (std::same_as<OutScalar_t, int32_t>) {return hdr + " integer\n";}
+			else {assert(false && "unknown scalar");}
+		}
+
+		Return_t operator()(uint64_t idx) const {return lookup(idx);}
+	};
+
+	//factory to help make lookups a bit easier
+	template<typename Return_t_in, typename Lambda_t>
+	auto make_index_lookup(Lambda_t&& lambda, std::string varname="var") {
+		return IndexDataLookup<Return_t_in, std::decay_t<Lambda_t>>{std::forward<Lambda_t>(lambda), varname};
 	}
 }

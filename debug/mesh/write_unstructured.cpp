@@ -38,26 +38,37 @@ int main(int argc, char* argv[])
 
 	//convert to an unstructured mesh
 	GV::UnstructuredVoxelMesh<Mesh_t::MAX_DEPTH> u_mesh(mesh);
-	u_mesh.collect_vertices();
+
+	u_mesh.set_depth(5);
+	u_mesh.remove_elements(pred);
+	u_mesh.process_requests();
+
 	u_mesh.color();
+	// u_mesh.sort_by_color();
+	u_mesh.sort_by_index();
+
+	u_mesh.collect_vertices();
 	u_mesh.save_as_ascii("unstructured.vtk");
 	u_mesh.save_as_binary("unstructured_binary.vtk");
 
-	auto clr_lookup = GV::make_lookup<Elem_t>([](Elem_t el){return el.color();}, "color");
-	auto idx_lookup = GV::make_lookup<Elem_t>([](Elem_t el){return el.linear_index();}, "linear_index");
-	auto ijk_lookup = GV::make_lookup<Elem_t>([](Elem_t el){return std::array<uint64_t,3>{el.i(), el.j(), el.k()};}, "ijk");
-	auto d_lookup = GV::make_lookup<Elem_t>([](Elem_t el){return el.depth();}, "depth");
+	auto clr_lookup = GV::make_feature_lookup<Elem_t>([](Elem_t el){return el.color();}, "color");
+	auto idx_lookup = GV::make_feature_lookup<Elem_t>([](Elem_t el){return el.linear_index();}, "linear_index");
+	auto ijk_lookup = GV::make_feature_lookup<Elem_t>([](Elem_t el){return std::array<uint64_t,3>{el.i(), el.j(), el.k()};}, "ijk");
+	auto d_lookup = GV::make_feature_lookup<Elem_t>([](Elem_t el){return el.depth();}, "depth");
+	auto flat_lookup = GV::make_feature_lookup<Elem_t>([&u_mesh](Elem_t el){return u_mesh.find_element(el);}, "flat_index");
+	auto flat_lookup2 = GV::make_index_lookup<uint64_t>([](uint64_t idx){return idx;}, "flat_index2");
 
-	GV::append_cell_data_field_vtk<decltype(u_mesh),true>("unstructured.vtk", u_mesh, "cell_test", clr_lookup, idx_lookup, ijk_lookup, d_lookup);
-	GV::append_cell_data_field_vtk<decltype(u_mesh),false>("unstructured_binary.vtk", u_mesh, "cell_test", clr_lookup, idx_lookup, ijk_lookup, d_lookup);
+	u_mesh.append_cell_data_field_ascii("unstructured.vtk", "cell_test", clr_lookup, idx_lookup, ijk_lookup, d_lookup, flat_lookup,flat_lookup2);
+	u_mesh.append_cell_data_field_binary("unstructured_binary.vtk", "cell_test", clr_lookup, idx_lookup, ijk_lookup, d_lookup, flat_lookup,flat_lookup2);
 
-	auto xyz_lookup = GV::make_lookup<Vert_t>([](Vert_t vtx){return std::array<double,3>{vtx.x(), vtx.y(), vtx.z()};}, "xyz");
-	auto fun_val    = GV::make_lookup<Vert_t>([&u_mesh](Vert_t vtx){
+
+	auto xyz_lookup = GV::make_feature_lookup<Vert_t>([](Vert_t vtx){return std::array<double,3>{vtx.x(), vtx.y(), vtx.z()};}, "xyz");
+	auto fun_val    = GV::make_feature_lookup<Vert_t>([&u_mesh](Vert_t vtx){
 		auto coord = u_mesh.geo_coord(vtx);
 		return coord[0]*coord[1]*coord[2];}, "function");
 
-	GV::append_point_data_field_vtk<decltype(u_mesh),true>("unstructured.vtk", u_mesh, "point_test", xyz_lookup, fun_val);
-	GV::append_point_data_field_vtk<decltype(u_mesh),false>("unstructured_binary.vtk", u_mesh, "point_test", xyz_lookup, fun_val);
+	u_mesh.append_point_data_field_ascii("unstructured.vtk", "point_test", xyz_lookup, fun_val);
+	u_mesh.append_point_data_field_binary("unstructured_binary.vtk", "point_test", xyz_lookup, fun_val);
 
 	return 0;
 }

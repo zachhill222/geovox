@@ -232,7 +232,9 @@ namespace GV
 
 		//append solution to a vtk file
 		template<typename CoefContainer_t>
-		std::vector<double> interpolate_to_vertices(const CoefContainer_t& coefs, uint64_t n_vertices) const {
+		std::vector<double> interpolate_to_vertices(const CoefContainer_t& coefs, std::span<const Vert_t> vertices) const {
+			const uint64_t n_vertices = vertices.size();
+
 			//increment the position value for every active dof
 			const auto& curr_dofs = this->curr_compressed_dofs();
 			std::vector<double> result(n_vertices, 0.0);
@@ -250,12 +252,9 @@ namespace GV
 			};
 
 
-			Vert_t vtx(0,0);
-			for (uint64_t i=0; i<n_vertices; ++i, ++vtx) {
-				assert(vtx.linear_index() == i);
-
+			for (uint64_t i=0; i<n_vertices; ++i) {
 				//find the deepest active elements containing this vertex
-				Vert_t dv{vtx};
+				Vert_t dv = vertices[i];
 				while (dv.depth()<BASE::MAX_DEPTH) {dv = dv.child();}
 				std::vector<Triple> track_dof_eval;
 

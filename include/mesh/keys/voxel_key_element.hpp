@@ -66,12 +66,14 @@ namespace GV
 		template<uint64_t OTHER_BC>
 		using PeriodicVariant = VoxelElementKey<MAX_DEPTH_,OTHER_BC>;
 		
+		
 		template<uint64_t OTHER_BC> requires (OTHER_BC<8)
 		inline explicit operator PeriodicVariant<OTHER_BC>() const {
 			return PeriodicVariant<OTHER_BC>{depth(), i(), j(), k()};
 		}
 
 		//define element specific constructors
+		#pragma omp declare simd
 		constexpr VoxelElementKey(const uint64_t dd, const uint64_t ii, const uint64_t jj, const uint64_t kk) :
 			BASE( 	ii, jj, kk,
 					0, dd, BC, 0) {
@@ -84,6 +86,7 @@ namespace GV
 			}
 		}
 
+		#pragma omp declare simd
 		constexpr VoxelElementKey(const uint64_t dd, uint64_t li) {
 			// L = i + j*N + k*N^2
 
@@ -101,6 +104,7 @@ namespace GV
 
 		
 		//check if a voxel is valid
+		#pragma omp declare simd
 		constexpr bool is_valid() const {
 			const uint64_t mei = (uint64_t{1} << depth()) - 1; //max element index
 			if (depth() > MAX_DEPTH) {return false;}
@@ -112,17 +116,20 @@ namespace GV
 
 		//get the linear index of the element at the current depth
 		// L = i + j*N + k*N^2
+		#pragma omp declare simd
 		constexpr uint64_t depth_linear_index() const {
 			assert(is_valid());
 			const uint64_t N = (uint64_t{1} << depth()); //number of elements per side
 			return i() + N*(j() + N*k());
 		}
 
+		#pragma omp declare simd
 		static constexpr uint64_t depth_linear_start(const uint64_t dd) {
 			//sum from d=0 to dd-1 of 8^d
 			return ((uint64_t{1} << (3*dd)) - 1)/7;
 		}
 
+		#pragma omp declare simd
 		constexpr uint64_t linear_index() const {
 			return depth_linear_start(depth()) + depth_linear_index();
 		}
@@ -166,11 +173,11 @@ namespace GV
 		//adjacency logic
 		inline constexpr auto vertex(int i) const {return vertices()[i];}
 		inline constexpr std::array<VoxelVertexKey<MAX_DEPTH_,BC>,8> vertices() const;
-		
 		inline constexpr auto face(int i) const {return faces()[i];}
 		inline constexpr std::array<VoxelFaceKey<MAX_DEPTH_,BC>,6> faces() const;
 
 		//iterator logic
+		#pragma omp declare simd
 		VoxelElementKey& operator++() {
 			assert(is_valid());
 			const uint64_t dd  = depth();

@@ -8,6 +8,8 @@
 #include "mesh/keys/voxel_key_vertex.hpp"
 #include "mesh/keys/voxel_key_face.hpp"
 
+#include "util/concepts.hpp"
+
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -56,6 +58,43 @@ namespace GV
 		( 	(VoxelElementKeyType<A> && VoxelElementKeyType<B>) ||
 			(VoxelVertexKeyType<A> && VoxelVertexKeyType<B>) ||
 			(VoxelFaceKeyType<A> && VoxelFaceKeyType<B>) );
+
+	//check if a function is a predicate on a given mesh feature
+	//note that std::nullptr_t and void can be used as flags for "always true" in funcions
+	template<typename Predicate, typename Feature>
+	concept VoxelElementPredicate = VoxelElementKeyType<Feature> && 
+		(NULLPTR_T<Predicate> || VOID_T<Predicate> || std::is_invocable_r_v<bool, Predicate, Feature>);
+
+	template<typename Predicate, typename Feature>
+	concept VoxelVertexPredicate = VoxelVertexKeyType<Feature> && 
+		(NULLPTR_T<Predicate> || VOID_T<Predicate> || std::is_invocable_r_v<bool, Predicate, Feature>);
+
+	template<typename Predicate, typename Feature>
+	concept VoxelFacePredicate = VoxelFaceKeyType<Feature> && 
+		(NULLPTR_T<Predicate> || VOID_T<Predicate> || std::is_invocable_r_v<bool, Predicate, Feature>);
+
+
+	//check if a function is an action on a given mesh feature
+	//must be callable on a feature passed by value or reference and return a void
+	template<typename Action, typename Feature>
+	concept VoxelElementAction = VoxelElementKeyType<Feature> && (std::same_as<std::invoke_result_t<Action,Feature>,void> || std::same_as<std::invoke_result_t<Action,Feature&>,void>);
+
+	template<typename Action, typename Feature>
+	concept VoxelVertexAction = VoxelVertexKeyType<Feature> && (std::same_as<std::invoke_result_t<Action,Feature>,void> || std::same_as<std::invoke_result_t<Action,Feature&>,void>);
+
+	template<typename Action, typename Feature>
+	concept VoxelFaceAction = VoxelFaceKeyType<Feature> && (std::same_as<std::invoke_result_t<Action,Feature>,void> || std::same_as<std::invoke_result_t<Action,Feature&>,void>);
+
+	//check if a function is a lookup on a given mesh feature
+	//must be callable on a feature passed by value and return some data
+	template<typename Lookup, typename Feature>
+	concept VoxelElementLookup = VoxelElementKeyType<Feature> && !std::same_as<std::invoke_result_t<Lookup,Feature>,void>;
+
+	template<typename Lookup, typename Feature>
+	concept VoxelVertexLookup = VoxelVertexKeyType<Feature> && !std::same_as<std::invoke_result_t<Lookup,Feature>,void>;
+
+	template<typename Lookup, typename Feature>
+	concept VoxelFaceLookup = VoxelFaceKeyType<Feature> && !std::same_as<std::invoke_result_t<Lookup,Feature>,void>;
 
 
 	//useful standalone functions

@@ -15,7 +15,9 @@
 
 #include "fem/dofs/voxel_dof_Q1.hpp"
 
-#include "mesh/voxel_mesh.hpp"
+// #include "mesh/voxel_mesh.hpp"
+#include "mesh/voxel_mesh_unstructured.hpp"
+#include "mesh/vtk_file_io.hpp" //for a helper method to more easily format the data lookups
 
 #include "util/concepts.hpp"
 #include "util/point.hpp"
@@ -76,7 +78,7 @@ namespace GV
 	class Stokes
 	{
 		public:
-		using Mesh_t  		= VoxelMesh<MAX_DEPTH>; //TODO: use Morton order and mesh coloring
+		using Mesh_t  		= UnstructuredVoxelMesh<MAX_DEPTH>; //TODO: use Morton order and mesh coloring
 		using Elem_t        = typename Mesh_t::VoxelElement;
 		using Vert_t  		= typename Mesh_t::VoxelVertex;
 		using V_DofKey_t 	= typename Mesh_t::VoxelVertex::PeriodicVariant<V_BC>;
@@ -247,7 +249,7 @@ namespace GV
 
 			//refine all pressure dofs and update the coefficients
 			pressure_handler.refine(pressure_handler.curr_compressed_dofs());
-			mesh.process_request_active(); //somewhat unnecessary
+			mesh.process_requests(); //somewhat unnecessary
 			pressure_handler.compress_dof_numbers();
 
 			//for each active pressure dof, activate each child as a velocity dof
@@ -265,7 +267,7 @@ namespace GV
 					}
 				}
 			}
-			mesh.process_request_active();
+			mesh.process_requests();
 			velocity_handler.compress_dof_numbers();
 
 
@@ -701,41 +703,20 @@ namespace GV
 		//save solution
 		void save_as(const std::string filename) const {
 			LogTime timer{"Stokes::save_as"};
-
-			std::ofstream file(filename);
-			if (!file.is_open()) {
-				throw std::runtime_error("Stokes::save_as - could not open file: " + filename);
-			}
-
 			//write the mesh and get the number of vertices
-			const auto n_verts = mesh.write_unstructured_vtk(file);
+			mesh.collect_vertices();
+			mesh.save_as_ascii(filename);
 
 			//interpolate the solution to the vertex values
-			auto u_vals = velocity_handler.interpolate_to_vertices(u(), n_verts);
-			auto v_vals = velocity_handler.interpolate_to_vertices(v(), n_verts);
-			auto w_vals = velocity_handler.interpolate_to_vertices(w(), n_verts);
-			auto p_vals = pressure_handler.interpolate_to_vertices(p(), n_verts);
+			auto u_vals = velocity_handler.interpolate_to_vertices(u(), mesh.get_vertices());
+			auto v_vals = velocity_handler.interpolate_to_vertices(v(), mesh.get_vertices());
+			auto w_vals = velocity_handler.interpolate_to_vertices(w(), mesh.get_vertices());
+			auto p_vals = pressure_handler.interpolate_to_vertices(p(), mesh.get_vertices());
 
-			//append solution header
-			file << "POINT_DATA " << n_verts << "\n"
-				 << "FIELD solution 2\n";
+			auto v_lookup = make_index_lookup<uint64_t>([&](uint64_t idx){return std::array<double,3>{u_vals[idx], v_vals[idx], w_vals[idx]};}, "velocity");
+			auto p_lookup = make_index_lookup<uint64_t>([&](uint64_t idx){return p_vals[idx];}, "pressure");
 
-			mesh.append_unstructured_point_data_vtk(
-				file,
-				"pressure 1 " + std::to_string(n_verts) + " float",
-				n_verts,
-				[&](Vert_t vtx) {return p_vals[vtx.linear_index()];});
-
-			mesh.append_unstructured_point_data_vtk(
-				file,
-				"velocity 3 " + std::to_string(n_verts) + " float",
-				n_verts,
-				[&](Vert_t vtx) {return Point<3,float>{
-							u_vals[vtx.linear_index()], 
-							v_vals[vtx.linear_index()], 
-							w_vals[vtx.linear_index()]};
-						}
-			);
+			mesh.append_point_data_field_ascii(filename,"solution",v_lookup,p_lookup);
 		}
 	};
 

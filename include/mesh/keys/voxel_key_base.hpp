@@ -88,8 +88,11 @@ namespace GV
 		uint64_t _data_;
 
 		//define constructors
+		#pragma omp declare simd
 		explicit constexpr VoxelKey() : _data_{DOES_NOT_EXIST} {}
+		#pragma omp declare simd
 		explicit constexpr VoxelKey(const uint64_t data) : _data_{data} {}
+		#pragma omp declare simd
 		constexpr VoxelKey( const uint64_t ii,
 							const uint64_t jj,
 							const uint64_t kk,

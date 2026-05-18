@@ -43,6 +43,14 @@ namespace GV
 		using Iterator = IteratorBase<MAX_DEPTH,VoxelElement,false>;
 		using CIterator = IteratorBase<MAX_DEPTH,VoxelElement,true>;
 	private:
+		//check if OPENMP is enabled
+		#ifdef _OPENMP
+		static constexpr bool OPENMP = true;
+		#else
+		static constexpr bool OPENMP = false;
+		#endif
+
+
 		//allocate storage:
 		// one vector of active elements per possible depth
 		// each vector is maintained so that the elements are sorted
@@ -56,7 +64,8 @@ namespace GV
 		//for saving solutions, it is nice to have access to de-duplicated vertices
 		//to get the index of a vertex on an element, use element.vertex(k).reduced_key() to get the coarsest vertex at that location.
 		//this will be sorted by vertex linear index for easier lookup and consistency
-		std::vector<VoxelVertex> vertices;
+		//marked as mutable so that classes with a const reference to the mesh can still save data.
+		mutable std::vector<VoxelVertex> vertices;
 
 		//comparators to help sort elements
 		static inline bool compare_index(const VoxelElement left, const VoxelElement right) {return left<right;}
@@ -66,8 +75,8 @@ namespace GV
 			return false;
 		}
 
-		//varous flags for sanity checks
-		bool _vertices_found_ = false;
+		//various flags for sanity checks
+		mutable bool _vertices_found_ = false;
 		bool _sort_by_index_  = true;
 		bool _sort_by_color_  = false;
 		bool _colored_		  = false;
@@ -79,8 +88,15 @@ namespace GV
 		//store the extents of the mesh
 		Point<3,double> _low_;
 		Point<3,double> _high_;
+
+		//store a list of elements that classes with a const reference to the mesh can use to request
+		//element refinement or unrefinement
+		//TODO: we could make a vector per omp thread
+		mutable std::vector<VoxelElement> request_active;
+		mutable std::vector<VoxelElement> request_deactive;
 	public:
-		//constructors
+		//////////////////////////////////////////////////////////
+		/// Constructors
 		UnstructuredVoxelMesh() : _low_{0,0,0}, _high_{1,1,1} {}
 		UnstructuredVoxelMesh(const Point<3,double>& low, const Point<3,double>& high) : _low_(low), _high_(high) {}
 		explicit UnstructuredVoxelMesh(const VoxelMesh<MAX_DEPTH>& structured) : _low_(structured.low), _high_(structured.high) {
@@ -100,30 +116,49 @@ namespace GV
 			//each loop was in increasing linear index, so the elements are already sorted by index
 			_sort_by_index_ = true;
 		}
+		//////////////////////////////////////////////////////////
 
-		//methods to querry sizes
+		//////////////////////////////////////////////////////////
+		/// Methods primarily for simple queries
+
 		inline uint64_t n_colors() const {return _n_colors_;}
 		inline bool is_colored() const {return _colored_;}
 		inline bool is_color_sorted() const { if (_sort_by_color_) {assert(_colored_);} return _sort_by_color_;}
 		inline bool is_index_sorted() const {return _sort_by_index_;}
 		inline uint64_t n_vertices() const {assert(_vertices_found_); return vertices.size();}
-		uint64_t n_elements() const {
-			uint64_t n=0;
-			for (const auto& list : elements) {n+=list.size();}
-			return n;
+		
+		uint64_t n_elements_below(const uint64_t depth) const {
+			uint64_t count=0;
+			for (uint64_t dd=0; dd<std::min(depth,MAX_DEPTH+1); ++dd) {count+=elements[dd].size();}
+			return count;
 		}
+		inline uint64_t n_elements() const {return n_elements_below(MAX_DEPTH+1);}
 		inline Point<3,double> geo_coord(const VoxelVertex vtx) const {return _low_ + (_high_-_low_)*vtx.normalized_coordinate();}
+		//////////////////////////////////////////////////////////
 
+		//////////////////////////////////////////////////////////
+		/// Methods primarily for accessing data arbitrarily and some standard container interfaces
+		inline size_t size() const {return static_cast<size_t>(n_elements());}
+		void clear() {for (auto& list : elements) {list.clear();}}
+		void shrink_to_fit() {{for (auto& list : elements) {list.shrink_to_fit();}}}
 
 		//methods to find or access elements by their compressed index idx
 		uint64_t find_element(const VoxelElement el) const;
-		VoxelElement get_element(const uint64_t idx) const;
-		VoxelElement& get_element(const uint64_t idx);
+		inline VoxelElement get_element(const uint64_t idx) const {assert(idx<n_elements()); return *celement(idx);}
+		inline VoxelElement& get_element(const uint64_t idx) {assert(idx<n_elements()); return *element(idx);};
+
+		//check if elements are active (present in the mesh)
+		inline bool is_active(const VoxelElement el) const {return find_element(el)!=uint64_t(-1);}
 
 		//get iterators to start of elements
 		inline Iterator begin() {return Iterator::begin(elements);}
 		inline CIterator cbegin() const {return CIterator::begin(elements);}
 		inline CIterator begin() const {return cbegin();}
+
+		//get iterators to arbitrary elements
+		inline Iterator element(const uint64_t idx) {return Iterator{elements, idx};}
+		inline CIterator celement(const uint64_t idx) const {return CIterator{elements, idx};}
+		inline CIterator element(const uint64_t idx) const {return celement(idx);}
 
 		//get iterators to end of elements
 		inline Iterator end() {return Iterator::end(elements);}
@@ -139,7 +174,10 @@ namespace GV
 		inline auto depth_end(const uint64_t dd) {assert(dd<=MAX_DEPTH); return elements[dd].end();}
 		inline auto depth_cend(const uint64_t dd) const {assert(dd<=MAX_DEPTH); return elements[dd].cend();}
 		inline auto depth_end(const uint64_t dd) const {return depth_cend(dd);}
+		//////////////////////////////////////////////////////////
 
+		//////////////////////////////////////////////////////////
+		/// Methods primarily for mesh coloring and parallelism 
 		//sort the elements by linear index or color
 		void sort_by_color();
 		void sort_by_index();
@@ -162,9 +200,13 @@ namespace GV
 			const uint64_t end   = color_block_index[dd][clr+1];
 			return {elements[dd].data()+start, end-start};
 		}
+		//////////////////////////////////////////////////////////
+
+		//////////////////////////////////////////////////////////
+		/// Methods primarily for writing to vtk files
 
 		//collect the vertices, usually only used before writing to a vtk file
-		void collect_vertices();
+		void collect_vertices() const;
 		uint64_t vertex_index(VoxelVertex vtx) const {
 			auto it = std::lower_bound(vertices.begin(), vertices.end(), vtx);
 			if (it == vertices.end() || *it!=vtx) {return uint64_t(-1);}
@@ -176,9 +218,254 @@ namespace GV
 		inline CIterator element_end() const {return cend();}
 		inline auto vertex_begin() const {return vertices.cbegin();}
 		inline auto vertex_end() const {return vertices.cend();}
+		inline std::span<const VoxelVertex> get_vertices() const {return vertices;}
 		void save_as_ascii(const std::string& filename, const std::string& description = "") const {print_topology_vtk<Mesh_t,true>(filename, *this, description);}
 		void save_as_binary(const std::string& filename, const std::string& description = "") const {print_topology_vtk<Mesh_t,false>(filename, *this, description);}
+
+		template<typename... Lookup_ts>
+		inline void append_cell_data_field_ascii(const std::string& filename, const std::string field_name, const Lookup_ts&... lookups) const {
+			append_cell_data_field_vtk<Mesh_t,true>(filename, *this, field_name, lookups...);
+		}
+		template<typename... Lookup_ts>
+		inline void append_cell_data_field_binary(const std::string& filename, const std::string field_name, const Lookup_ts&... lookups) const {
+			append_cell_data_field_vtk<Mesh_t,false>(filename, *this, field_name, lookups...);
+		}
+		template<typename... Lookup_ts>
+		inline void append_point_data_field_ascii(const std::string& filename, const std::string field_name, const Lookup_ts&... lookups) const {
+			append_point_data_field_vtk<Mesh_t,true>(filename, *this, field_name, lookups...);
+		}
+		template<typename... Lookup_ts>
+		inline void append_point_data_field_binary(const std::string& filename, const std::string field_name, const Lookup_ts&... lookups) const {
+			append_point_data_field_vtk<Mesh_t,false>(filename, *this, field_name, lookups...);
+		}
+
+		//////////////////////////////////////////////////////////
+
+		//////////////////////////////////////////////////////////
+		/// Methods primarily for mesh manipulation
+
+		template<typename Predicate>
+		void remove_elements(Predicate&& pred) const requires (OPENMP);
+
+
+		template<typename Predicate>
+		void remove_elements(Predicate&& pred) const requires (!OPENMP);
+
+		void make_disjoint();
+		void set_depth(const uint64_t dd);
+		inline void activate(const VoxelElement el) const {request_active.push_back(el);}
+		inline void deactivate(const VoxelElement el) const {request_deactive.push_back(el);}
+		inline void activate(std::span<const VoxelElement> els) const {request_active.insert(request_active.end(), els.begin(), els.end());}
+		inline void deactivate(std::span<const VoxelElement> els) const {request_deactive.insert(request_deactive.end(), els.begin(), els.end());}
+		void process_requests();
+		//////////////////////////////////////////////////////////
+
+		//////////////////////////////////////////////////////////
+		/// Methods for looping over elements
+
+		template<typename Action>
+		void for_each_active_element(Action&& action);
+		template<typename Action>
+		void for_each_active_element(Action&& action) const;
+		template<typename Action>
+		void for_each_active_element_omp(Action&& action) requires OPENMP;
+		template<typename Action>
+		void for_each_active_element_omp(Action&& action) const requires OPENMP;
+		template<typename Action>
+		void for_each_active_element_color_omp(const uint64_t clr, Action&& action) requires OPENMP;
+		template<typename Action>
+		void for_each_active_element_color_omp(const uint64_t clr, Action&& action) const requires OPENMP;
+		//////////////////////////////////////////////////////////
 	};
+
+	template<uint64_t MAX_DEPTH>
+	uint64_t UnstructuredVoxelMesh<MAX_DEPTH>::find_element(const VoxelElement el) const {
+		auto& list = elements[el.depth()];
+		if (is_index_sorted()) {
+			auto it = std::lower_bound(list.begin(), list.end(), el);
+			if (it == list.end() || *it != el) {return uint64_t(-1);}
+			return n_elements_below(el.depth()) + std::distance(list.begin(), it);
+		}
+		else if (is_color_sorted()) {
+			uint64_t offset = 0;
+			for (uint64_t clr = 0; clr<n_colors(); ++clr) {
+				auto block = color_block(el.depth(), clr);
+				auto it = std::lower_bound(block.begin(), block.end(), el);
+				if (it == block.end() || *it != el) {offset += block.size();}
+				return n_elements_below(el.depth()) + offset + std::distance(block.begin(), it);
+			}
+			return uint64_t(-1);
+		}
+		else {
+			auto it = std::find(list.begin(), list.end(), el);
+			if (it==list.end()) {return uint64_t(-1);}
+			return n_elements_below(el.depth()) + std::distance(list.begin(), it);
+		}
+	}
+
+
+	template<uint64_t MAX_DEPTH>
+	template<typename Action>
+	void UnstructuredVoxelMesh<MAX_DEPTH>::for_each_active_element_color_omp(const uint64_t clr, Action&& action) requires OPENMP {
+		assert(is_colored());
+		assert(is_color_sorted());
+		assert(clr<n_colors());
+
+		//process each color block per depth
+		for (uint64_t dd=0; dd<=MAX_DEPTH; ++dd) {
+			const auto block = color_block(dd, clr);
+			const uint64_t N = block.size();
+			#pragma omp parallel for schedule(static, 512)
+			for (uint64_t i=0; i<N; ++i) {
+				action(block[i]);
+			}
+		}
+	}
+
+	template<uint64_t MAX_DEPTH>
+	template<typename Action>
+	void UnstructuredVoxelMesh<MAX_DEPTH>::for_each_active_element_color_omp(const uint64_t clr, Action&& action) const requires OPENMP {
+		assert(is_colored());
+		assert(is_color_sorted());
+		assert(clr<n_colors());
+
+		//process each color block per depth
+		for (uint64_t dd=0; dd<=MAX_DEPTH; ++dd) {
+			const auto block = color_block(dd, clr);
+			const uint64_t N = block.size();
+			#pragma omp parallel for schedule(static, 512)
+			for (uint64_t i=0; i<N; ++i) {
+				action(block[i]);
+			}
+		}
+	}
+
+	template<uint64_t MAX_DEPTH>
+	void UnstructuredVoxelMesh<MAX_DEPTH>::process_requests() {
+		//clean up request lists
+		std::sort(request_active.begin(), request_active.end());
+		auto last = std::unique(request_active.begin(), request_active.end());
+		request_active.erase(last, request_active.end());
+
+		std::sort(request_deactive.begin(), request_deactive.end());
+		last = std::unique(request_deactive.begin(), request_deactive.end());
+		request_deactive.erase(last, request_deactive.end());
+		
+		//add the requested elements
+		for (VoxelElement el : request_active) {
+			elements[el.depth()].push_back(el);
+		}
+		request_active.clear();
+
+		//to remove elements, the mesh must be sorted by index
+		sort_by_index();
+
+		#ifdef _OPENMP
+		#pragma omp parallel for
+		#endif
+		for (uint64_t dd=0; dd<MAX_DEPTH; ++dd) {
+			const VoxelElement first_element{dd,0};
+			const VoxelElement last_element{dd+1,0};
+			auto rem_begin = std::lower_bound(request_deactive.begin(), request_deactive.end(), first_element);
+			auto rem_end   = std::lower_bound(request_deactive.begin(), request_deactive.end(), last_element);
+			
+			if (rem_begin==rem_end) {continue;}
+
+			auto& list = elements[dd];
+			std::vector<VoxelElement> new_list;
+			new_list.reserve(list.size());
+			std::set_difference(list.begin(), list.end(), rem_begin, rem_end, std::back_inserter(new_list));
+			list = std::move(new_list);
+		}
+		request_deactive.clear();
+	}
+
+	template<uint64_t MAX_DEPTH>
+	template<typename Predicate>
+	void UnstructuredVoxelMesh<MAX_DEPTH>::remove_elements(Predicate&& pred) const requires (!OPENMP) {
+		auto action = [&](VoxelElement el) {if (pred(el)) {deactivate(el);}};
+		for_each_active_element(action);
+	}
+
+	template<uint64_t MAX_DEPTH>
+	template<typename Predicate>
+	void UnstructuredVoxelMesh<MAX_DEPTH>::remove_elements(Predicate&& pred) const requires (OPENMP) {
+		const uint64_t omp_threads = omp_get_max_threads();
+		std::vector<std::vector<VoxelElement>> remove_lists(omp_threads);
+		auto action = [&](VoxelElement el) {if (pred(el)) {remove_lists[omp_get_thread_num()].push_back(el);}};
+		for_each_active_element_omp(action);
+		for (auto& list : remove_lists) {deactivate(list);}
+	}
+
+
+	template<uint64_t MAX_DEPTH>
+	template<typename Action>
+	void UnstructuredVoxelMesh<MAX_DEPTH>::for_each_active_element(Action&& action) {
+		for (Iterator it=begin(); it!=end(); ++it){
+			action(*it);
+		}
+	}
+
+	template<uint64_t MAX_DEPTH>
+	template<typename Action>
+	void UnstructuredVoxelMesh<MAX_DEPTH>::for_each_active_element(Action&& action) const {
+		for (CIterator it=cbegin(); it!=cend(); ++it){
+			action(*it);
+		}
+	}
+
+	template<uint64_t MAX_DEPTH>
+	template<typename Action>
+	void UnstructuredVoxelMesh<MAX_DEPTH>::for_each_active_element_omp(Action&& action) requires OPENMP {
+		const uint64_t N_ELS      = n_elements();
+		const uint64_t CHUNK_SIZE = 512; //number of elements to process at once
+		
+		#pragma omp parallel for schedule(static)
+		for (uint64_t start=0; start<N_ELS; start+=CHUNK_SIZE)
+		{
+			const uint64_t end = std::min(start+CHUNK_SIZE, N_ELS);
+			Iterator it = element(start);
+			for (uint64_t i=start; i<end; ++i) {
+				action(*it);
+				++it;
+			}
+		}
+	}
+
+	template<uint64_t MAX_DEPTH>
+	template<typename Action>
+	void UnstructuredVoxelMesh<MAX_DEPTH>::for_each_active_element_omp(Action&& action) const requires OPENMP {
+		const uint64_t N_ELS      = n_elements();
+		const uint64_t CHUNK_SIZE = 512; //number of elements to process at once
+		
+		#pragma omp parallel for schedule(static)
+		for (uint64_t start=0; start<N_ELS; start+=CHUNK_SIZE)
+		{
+			const uint64_t end = std::min(start+CHUNK_SIZE, N_ELS);
+			CIterator it = celement(start);
+			for (uint64_t i=start; i<end; ++i) {
+				action(*it);
+				++it;
+			}
+		}
+	}
+
+
+	template<uint64_t MAX_DEPTH>
+	void UnstructuredVoxelMesh<MAX_DEPTH>::set_depth(const uint64_t dd) {
+		clear();
+		const uint64_t N = uint64_t{1}<<(3*dd); //2^dd elements per side, 3d array
+		elements[dd].resize(N); 
+
+		#pragma omp simd
+		for (uint64_t i=0; i<N; ++i) {
+			elements[dd][i] = VoxelElement{dd,i};
+		}
+
+		_sort_by_index_ = true;
+		_sort_by_color_ = false;
+		_colored_		= false;
+	}
 
 
 	template<uint64_t MAX_DEPTH>
@@ -257,7 +544,7 @@ namespace GV
 	}
 
 	template<uint64_t MAX_DEPTH>
-	void UnstructuredVoxelMesh<MAX_DEPTH>::collect_vertices() {
+	void UnstructuredVoxelMesh<MAX_DEPTH>::collect_vertices() const {
 		vertices.clear();
 		for (const VoxelElement el : *this) {
 			for (VoxelVertex vtx : el.vertices()) {
@@ -270,8 +557,6 @@ namespace GV
 		vertices.erase(last, vertices.end());
 		_vertices_found_ = true;
 	}
-
-
 
 	//Implement the Iterator class over all elements
 	template<uint64_t MAX_DEPTH, typename Element_t, bool CONST_FLAG>
@@ -296,6 +581,7 @@ namespace GV
 		
 		//constructor
 		IteratorBase(container_ref els, uint64_t dd, uint64_t ii) : elements(&els), depth(dd), idx(ii) {advance_to_valid();}
+		IteratorBase(container_ref els, uint64_t n) : elements(&els), depth(0), idx(0) {(*this)+=n; advance_to_valid();}
 
 		//implicit conversion from non-const to const
 		IteratorBase(const IteratorBase<MAX_DEPTH,Element_t,false>& it) requires (CONST_FLAG) 
@@ -305,6 +591,9 @@ namespace GV
 		static IteratorBase end(container_ref els) {return IteratorBase{els, MAX_DEPTH+1, 0};}
 		static IteratorBase begin(container_ref els) {return IteratorBase{els,0,0};}
 
+		//random access operations
+		reference operator[](uint64_t n) const {return *(*this+n);}
+
 		//advance to the next valid depth/index pair (if the current is valid, they aren't changed)
 		//this should just skip over any empty depths
 		void advance_to_valid() {
@@ -312,6 +601,23 @@ namespace GV
 				++depth;
 				idx = 0;
 			}
+		}
+
+		uint64_t total_length() const {
+			uint64_t len=0;
+			for (const auto& list : *elements) {len+=list.size();}
+			return len;
+		}
+
+		uint64_t index() const {
+			if (depth>MAX_DEPTH) {return total_length();}
+
+			uint64_t el_idx = 0;
+			for (uint64_t dd=0; dd<depth; ++dd) {
+				el_idx += (*elements)[dd].size();
+			}
+			el_idx += idx;
+			return el_idx;
 		}
 
 		//access data
@@ -338,6 +644,53 @@ namespace GV
 			++(*this);
 			return tmp;
 		}
+
+		IteratorBase& operator+=(uint64_t n) {
+			//move to the correct depth and update the increment
+			while (n>0 && depth<=MAX_DEPTH) {
+				const uint64_t remaining_in_depth = (*elements)[depth].size() - idx;
+				if (n<remaining_in_depth) {idx += n; n=0;}
+				else {
+					n -= remaining_in_depth;
+					++depth;
+					idx = 0;
+				}
+			}
+			return *this;
+		}
+
+		IteratorBase operator+(uint64_t n) const {
+			IteratorBase tmp = *this;
+			tmp+=n;
+			return tmp;
+		}
+
+		friend IteratorBase operator+(uint64_t n, const IteratorBase& it) {
+			return it+n;
+		}
+
+		IteratorBase& operator-=(uint64_t n) {
+			uint64_t flat = index();
+			assert(n<=flat);
+			*this = IteratorBase(*elements, flat-n);
+			return *this;
+		}
+
+		IteratorBase operator-(uint64_t n) const {
+			IteratorBase tmp = *this;
+			tmp-=n;
+			return tmp;
+		}
+
+		//implement ordering and comparisons
+		difference_type operator-(const IteratorBase& other) const {
+			return static_cast<difference_type>(index()) - static_cast<difference_type>(other.index());
+		}
+
+		bool operator<(const IteratorBase& other) const {return (*this - other) < 0;}
+		bool operator>(const IteratorBase& other) const {return (*this - other) > 0;}
+		bool operator<=(const IteratorBase& other) const {return (*this - other) <= 0;}
+		bool operator>=(const IteratorBase& other) const {return (*this - other) >= 0;}
 
 		bool operator==(const IteratorBase& other) const {
 			return depth==other.depth && idx==other.idx;
