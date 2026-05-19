@@ -47,6 +47,7 @@ namespace GV
 		inline constexpr uint64_t color() const {return BASE::free();}
 		#pragma omp declare simd
 		inline constexpr void set_color(const uint64_t clr) {BASE::set_free(clr);}
+		static constexpr uint64_t NO_COLOR = BASE::F_M >> BASE::F_S;
 
 		//define useful constants
 		static constexpr uint64_t MAX_VERTEX_INDEX = BASE::MAX_INDEX;
@@ -75,7 +76,7 @@ namespace GV
 		//define vertex specific constructors
 		constexpr VoxelVertexKey(const uint64_t dd, const uint64_t ii, const uint64_t jj, const uint64_t kk) :
 			BASE(	ii, jj, kk,
-					0, dd, BC, 0) {
+					0, dd, BC, NO_COLOR) {
 				if (dd>MAX_DEPTH) {_data_ = DOES_NOT_EXIST; return;}
 				if constexpr (PX||PY||PZ) {
 					//2^d elements per axis, one extra vertex

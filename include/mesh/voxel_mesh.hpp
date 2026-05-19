@@ -86,14 +86,18 @@ namespace GV
 	public:
 		using GeoPoint_t = Point<3,double>; //points in space
 		
-		const GeoPoint_t low;
-		const GeoPoint_t high;
-		const GeoPoint_t diag;
+		const GeoPoint_t _low;
+		const GeoPoint_t _high;
+		const GeoPoint_t _diag;
+
+		inline GeoPoint_t low() const {return _low;}
+		inline GeoPoint_t high() const {return _high;}
+		inline GeoPoint_t diag() const {return _diag;}
 
 		VoxelMesh(const GeoPoint_t low_, const GeoPoint_t high_) :
-			low{elmin(low_, high_)},
-			high{elmax(low_, high_)},
-			diag{high-low}
+			_low{elmin(low_, high_)},
+			_high{elmax(low_, high_)},
+			_diag{_high-_low}
 		{
 			#ifdef _OPENMP
 				request_active.resize(omp_get_max_threads());

@@ -47,6 +47,8 @@ namespace GV
 		inline constexpr uint64_t color() const {return BASE::free();}
 		#pragma omp declare simd
 		inline constexpr void set_color(const uint64_t clr) {BASE::set_free(clr);}
+		static constexpr uint64_t NO_COLOR = BASE::F_M >> BASE::F_S;
+
 
 		//define useful constants
 		using BASE::MAX_DEPTH;
@@ -76,7 +78,7 @@ namespace GV
 		#pragma omp declare simd
 		constexpr VoxelElementKey(const uint64_t dd, const uint64_t ii, const uint64_t jj, const uint64_t kk) :
 			BASE( 	ii, jj, kk,
-					0, dd, BC, 0) {
+					0, dd, BC, NO_COLOR) {
 			if (dd>MAX_DEPTH) {_data_ = DOES_NOT_EXIST; return;}
 			if constexpr (PX||PY||PZ) {
 				const uint64_t me = uint64_t{1} << dd; //2^d elements per axis
@@ -175,6 +177,71 @@ namespace GV
 		inline constexpr std::array<VoxelVertexKey<MAX_DEPTH_,BC>,8> vertices() const;
 		inline constexpr auto face(int i) const {return faces()[i];}
 		inline constexpr std::array<VoxelFaceKey<MAX_DEPTH_,BC>,6> faces() const;
+
+		constexpr std::array<VoxelElementKey,26> neighbors() const {
+			const uint64_t ii=i(), jj=j(), kk=k(), dd=depth();
+			const uint64_t me = (uint64_t{1}<<dd)-1; //maximum valid i,j,k index
+			uint64_t im1, jm1, km1, ip1, jp1, kp1;
+
+			if constexpr (PX) {
+				im1 = ii==0   ? me : ii-1;
+				ip1 = ii==me ? 0   : ii+1;
+			} else {
+				im1 = ii-1;
+				ip1 = ii+1;
+			}
+
+			if constexpr (PY) {
+				jm1 = jj==0   ? me : jj-1;
+				jp1 = jj==me ? 0   : jj+1;
+			} else {
+				jm1 = jj-1;
+				jp1 = jj+1;
+			}
+
+			if constexpr (PZ) {
+				km1 = kk==0   ? me : kk-1;
+				kp1 = kk==me ? 0   : kk+1;
+			} else {
+				km1 = kk-1;
+				kp1 = kk+1;
+			}
+
+			return {
+				//bottom slice
+				VoxelElementKey{dd, im1, jm1, km1},
+				VoxelElementKey{dd, ii , jm1, km1},
+				VoxelElementKey{dd, ip1, jm1, km1},
+				VoxelElementKey{dd, im1, jj , km1},
+				VoxelElementKey{dd, ii , jj , km1},
+				VoxelElementKey{dd, ip1, jj , km1},
+				VoxelElementKey{dd, im1, jp1, km1},
+				VoxelElementKey{dd, ii , jp1, km1},
+				VoxelElementKey{dd, ip1, jp1, km1},
+
+				//middle slice (remove center)
+				VoxelElementKey{dd, im1, jm1, kk},
+				VoxelElementKey{dd, ii , jm1, kk},
+				VoxelElementKey{dd, ip1, jm1, kk},
+				VoxelElementKey{dd, im1, jj , kk},
+				// VoxelElementKey{dd, ii , jj , kk},
+				VoxelElementKey{dd, ip1, jj , kk},
+				VoxelElementKey{dd, im1, jp1, kk},
+				VoxelElementKey{dd, ii , jp1, kk},
+				VoxelElementKey{dd, ip1, jp1, kk},
+
+				//top slice
+				VoxelElementKey{dd, im1, jm1, kp1},
+				VoxelElementKey{dd, ii , jm1, kp1},
+				VoxelElementKey{dd, ip1, jm1, kp1},
+				VoxelElementKey{dd, im1, jj , kp1},
+				VoxelElementKey{dd, ii , jj , kp1},
+				VoxelElementKey{dd, ip1, jj , kp1},
+				VoxelElementKey{dd, im1, jp1, kp1},
+				VoxelElementKey{dd, ii , jp1, kp1},
+				VoxelElementKey{dd, ip1, jp1, kp1}
+			};
+		}
 
 		//iterator logic
 		#pragma omp declare simd

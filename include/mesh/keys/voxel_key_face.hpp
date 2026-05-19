@@ -43,6 +43,7 @@ namespace GV
 		inline constexpr uint64_t color() const {return BASE::free();}
 		#pragma omp declare simd
 		inline constexpr void set_color(const uint64_t clr) {BASE::set_free(clr);}
+		static constexpr uint64_t NO_COLOR = BASE::F_M >> BASE::F_S;
 
 		//re-name other_c() to axis() for readability
 		//get the normal axis to the face
@@ -79,8 +80,7 @@ namespace GV
 		//define face specific constructors
 		VoxelFaceKey(const uint64_t aa, const uint64_t dd, const uint64_t ii, const uint64_t jj, const uint64_t kk) :
 			BASE( 	ii, jj, kk,
-					aa, dd, BC, 0
-				) {
+					aa, dd, BC, NO_COLOR) {
 				if (dd>MAX_DEPTH) {_data_ = DOES_NOT_EXIST; return;}
 				if constexpr (PX||PY||PZ) {
 

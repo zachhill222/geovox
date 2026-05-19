@@ -78,7 +78,8 @@ namespace GV
 	class Stokes
 	{
 		public:
-		using Mesh_t  		= UnstructuredVoxelMesh<MAX_DEPTH>; //TODO: use Morton order and mesh coloring
+		// using Mesh_t  		= VoxelMesh<MAX_DEPTH>; //Structured, good for assigning dofs
+		using Mesh_t	 	= UnstructuredVoxelMesh<MAX_DEPTH>; //Unstructured, good for looping over active elements and coloring
 		using Elem_t        = typename Mesh_t::VoxelElement;
 		using Vert_t  		= typename Mesh_t::VoxelVertex;
 		using V_DofKey_t 	= typename Mesh_t::VoxelVertex::PeriodicVariant<V_BC>;
@@ -238,6 +239,9 @@ namespace GV
 			const auto np = pressure_handler.n_dofs();
 			const auto nv = velocity_handler.n_dofs();
 			X.assign(3*nv+np,0.0);
+
+			mesh.color_by_index();
+			mesh.sort_by_color();
 		}
 
 		//TODO: add dof and mesh predicates (i.e., refine low accuracy dofs and only activate relevant elements)
@@ -282,6 +286,10 @@ namespace GV
 			velocity_handler.update_coefs(v(), as_span(X_old,nv_old,nv_old));
 			velocity_handler.update_coefs(w(), as_span(X_old,2*nv_old,nv_old));
 			pressure_handler.update_coefs(p(), as_span(X_old,3*nv_old, np_old));
+
+			//re-color the mesh
+			mesh.color_by_index();
+			mesh.sort_by_color();
 		}
 
 		//apply dirichlet BC for velocity
@@ -311,6 +319,9 @@ namespace GV
 		inline void compute_F(Container_t& F) const {compute_F(as_span(F));}
 
 		void compute_F(std::span<double> F) const {
+			#pragma omp parallel
+			{
+
 			const auto N = n_vel_individual();
 			assert(F.size()==n_vel_total());
 			assert(F.size()==3*N);
@@ -337,8 +348,9 @@ namespace GV
 
 			//perform the loop
 			//TODO: parallel by element color?
-			mesh.for_each_active_element(action);
-
+			// mesh.for_each_active_element(action);
+			mesh.for_each_active_element_color_omp(action);
+			}
 			//set the BC
 			apply_velocity_bc(F);
 		}
@@ -355,6 +367,8 @@ namespace GV
 			assert(U.size()%3 == 0);
 			const auto N = U.size() / 3;
 
+			#pragma omp parallel 
+			{
 			//only need one bilinear form
 			using Form_t = BilinH1_t;
 			Form_t A_form(velocity_handler,velocity_handler);
@@ -376,7 +390,9 @@ namespace GV
 
 			//perform the loop
 			//TODO: parallel by element color?
-			mesh.for_each_active_element(action);
+			// mesh.for_each_active_element(action);
+			mesh.for_each_active_element_color_omp(action);
+			}//end parallel
 
 			//apply the boundary conditions to treat each corresponding row as an identity row
 			u_bc.apply_matvec(KU.subspan(0,N),   U.subspan(0,N));
@@ -456,6 +472,7 @@ namespace GV
 
 				//compute D and rhs-(L+U)*
 				mesh.for_each_active_element(action);
+				// mesh.for_each_active_element_color_omp(action);
 
 				//finalize inverse
 				A_form.finalize_inverse();
@@ -477,6 +494,8 @@ namespace GV
 			assert(GP.size()%3 == 0);
 			const auto N = GP.size() / 3;
 
+			#pragma omp parallel 
+			{
 			//set up the bilinear form for each velocity (test dof) component
 			using Form0_type = BilinHdiv_t<0>;
 			using Form1_type = BilinHdiv_t<1>;
@@ -507,7 +526,9 @@ namespace GV
 
 			//perform the loop
 			//TODO: parallel by element color?
-			mesh.for_each_active_element(action);
+			// mesh.for_each_active_element(action);
+			mesh.for_each_active_element_color_omp(action);
+			}
 		}
 
 
@@ -521,6 +542,8 @@ namespace GV
 			assert(U.size()%3 == 0);
 			const auto N = U.size() / 3;
 
+			#pragma omp parallel 
+			{
 			//set up the bilinear form for each velocity (trial dof) component
 			using Form0_type = BilinHdivAdj_t<0>;
 			using Form1_type = BilinHdivAdj_t<1>;
@@ -551,7 +574,9 @@ namespace GV
 
 			//perform the loop
 			//TODO: parallel by element color?
-			mesh.for_each_active_element(action);
+			// mesh.for_each_active_element(action);
+			mesh.for_each_active_element_color_omp(action);
+			}
 		}
 
 		//compute M*P (pressure component of the block diagonal preconditioner)
@@ -577,6 +602,7 @@ namespace GV
 			//perform the loop
 			//TODO: parallel by element color?
 			mesh.for_each_active_element(action);
+			// mesh.for_each_active_element_color_omp(action);
 		}
 
 		//compute some number of iterations of Gauss-Seidel (forwards or backwards) on M*P=H
@@ -606,6 +632,7 @@ namespace GV
 			//TODO: parallel by element color?
 			for (int n=0; n<n_steps; ++n) {
 				mesh.for_each_active_element(action);
+				// mesh.for_each_active_element_color_omp(action);
 			}
 		}
 
@@ -705,7 +732,7 @@ namespace GV
 			LogTime timer{"Stokes::save_as"};
 			//write the mesh and get the number of vertices
 			mesh.collect_vertices();
-			mesh.save_as_ascii(filename);
+			mesh.save_as_binary(filename);
 
 			//interpolate the solution to the vertex values
 			auto u_vals = velocity_handler.interpolate_to_vertices(u(), mesh.get_vertices());
@@ -713,10 +740,13 @@ namespace GV
 			auto w_vals = velocity_handler.interpolate_to_vertices(w(), mesh.get_vertices());
 			auto p_vals = pressure_handler.interpolate_to_vertices(p(), mesh.get_vertices());
 
-			auto v_lookup = make_index_lookup<uint64_t>([&](uint64_t idx){return std::array<double,3>{u_vals[idx], v_vals[idx], w_vals[idx]};}, "velocity");
-			auto p_lookup = make_index_lookup<uint64_t>([&](uint64_t idx){return p_vals[idx];}, "pressure");
+			auto v_lookup = make_index_lookup<std::array<double,3>>([&](uint64_t idx){return std::array<double,3>{u_vals[idx], v_vals[idx], w_vals[idx]};}, "velocity");
+			auto p_lookup = make_index_lookup<double>([&](uint64_t idx){return p_vals[idx];}, "pressure");
 
-			mesh.append_point_data_field_ascii(filename,"solution",v_lookup,p_lookup);
+			auto C_lookup = make_feature_lookup<Elem_t>([](Elem_t el){return el.color();}, "color");
+
+			mesh.append_point_data_field_binary(filename,"solution",v_lookup,p_lookup);
+			mesh.append_cell_data_field_binary(filename,"debug",C_lookup);
 		}
 	};
 
