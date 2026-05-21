@@ -216,6 +216,9 @@ namespace GV
 		template<int I>
 		const auto& form() const {return std::get<I>(Threads).form;}
 
+		//get the underlying mesh
+		const auto& get_mesh() const {return form<0>().mesh;}
+
 		Kernel(	Form_ts&... Forms) : Threads(Forms...) {
 			//let the quadrature class collect the mesh extents to compute jacobians
 			q_map.set_bounds(form<0>().test_handler.mesh.low(), form<0>().test_handler.mesh.high());
@@ -236,7 +239,14 @@ namespace GV
 
 		//interface to use in the element loop
 		//note that set_basis must be called on each form individually
-		inline void set_element(QuadElem_t el) {q_map.set_quad_element(el);}
+		inline void set_element(QuadElem_t el) {
+			q_map.set_quad_element(el);
+		}
+
+		//sometimes it is convenient to set the basis from here, but it could lead to more dof lookups than needed in the dof handlers
+		inline void set_basis(QuadElem_t el) {
+			std::apply([](auto&... threads){ (threads.form.set_basis(el),...);}, Threads);
+		}
 
 		//main dispatch loop
 		void dispatch_all() {
@@ -257,4 +267,9 @@ namespace GV
 		//synchronization data
 		std::barrier<> sync{N_FORMS+1};
 	};
+
+
+	//deduction guide
+	template<int Q, typename... Forms>
+	Kernel(Forms&...) -> Kernel<Q, Forms...>;
 }

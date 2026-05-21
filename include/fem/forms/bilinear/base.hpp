@@ -55,8 +55,8 @@ namespace GV
 			: test_handler(TestH), trial_handler(TrialH), mesh(test_handler.mesh) {}
 
 		//store dofs on the current element
-		std::span<const TestDOF_t>  test_dofs;		//local test basis functions (row dofs) (note a span is non-owning)
-		std::span<const TrialDOF_t> trial_dofs; 	//local trial basis functions (column dofs)
+		std::vector<TestDOF_t>  test_dofs;		//local test basis functions (row dofs) (note a span is non-owning)
+		std::vector<TrialDOF_t> trial_dofs; 	//local trial basis functions (column dofs)
 		uint64_t n_test=0, m_trial=0;
 
 		//store global dof information
@@ -74,9 +74,13 @@ namespace GV
 			set_basis(as_span(test), as_span(trial));
 		}
 
+		inline void set_basis(QuadElem_t el) {
+			set_basis(test_handler.basis_active(el), trial_handler.basis_active(el));
+		}
+
 		void set_basis(std::span<const TestDOF_t> test, std::span<const TrialDOF_t> trial) {
-			test_dofs   = test;
-			trial_dofs  = trial;
+			test_dofs.assign(test.begin(), test.end());
+			trial_dofs.assign(trial.begin(), trial.end());
 			n_test      = test.size();
 			m_trial     = trial.size();
 

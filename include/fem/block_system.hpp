@@ -1,6 +1,8 @@
 #pragma once
 
+#include "fem/forms/bilinear/matrix_multiply.hpp"
 #include "util/concepts.hpp"
+
 
 #include <type_traits>
 #include <cstdint>
@@ -84,12 +86,16 @@ namespace GV
 		void set_trial_handler(const TrialHandler_t& trial) {n_cols=trial.n_dofs();}
 	};
 
-	template<typename TestHandler_t, typename TrialHandler_t, typename EvalPolicy>
-	struct Block<BlockType::BilinearForm, TestHandler_t, TrialHandler_t, EvalPolicy>
+	template<typename TestHandler_type, typename TrialHandler_type, typename EvalPolicy_type>
+	struct Block<BlockType::BilinearForm, TestHandler_type, TrialHandler_type, EvalPolicy_type>
 	{
-		static_assert(!std::is_same_v<TestHandler_t,void>, "BilinearForm Blocks need a test dof handler");
-		static_assert(!std::is_same_v<TrialHandler_t,void>, "BilinearForm Blocks need a trial dof handler");
-		static_assert(!std::is_same_v<EvalPolicy,void>, "BilinearForm Blocks need an evaluation policy");
+		static_assert(!std::is_same_v<TestHandler_type,void>, "BilinearForm Blocks need a test dof handler");
+		static_assert(!std::is_same_v<TrialHandler_type,void>, "BilinearForm Blocks need a trial dof handler");
+		static_assert(!std::is_same_v<EvalPolicy_type,void>, "BilinearForm Blocks need an evaluation policy");
+
+		using TestHandler_t  = TestHandler_type;
+		using TrialHandler_t = TrialHandler_type;
+		using EvalPolicy_t   = EvalPolicy_type;
 
 		uint64_t n_rows, n_cols;
 		static constexpr BlockType type = BlockType::BilinearForm;
@@ -97,7 +103,7 @@ namespace GV
 		//need access to the handlers and evaluation policy to construct the requested form
 		TestHandler_t const* test_handler{nullptr};
 		TrialHandler_t const* trial_handler{nullptr};
-		EvalPolicy eval_policy{};
+		EvalPolicy_t eval_policy{};
 
 		Block(const TestHandler_t& test, const TrialHandler_t& trial) 
 			: n_rows(test.n_dofs()), n_cols(trial.n_dofs()), 
@@ -113,8 +119,15 @@ namespace GV
 			trial_handler = &trial;
 		}
 
-		void set_eval_policy(EvalPolicy eval) {eval_policy = eval;}
-		EvalPolicy& get_eval_policy() {return eval_policy;}
+		void set_eval_policy(EvalPolicy_t eval) {eval_policy = eval;}
+		EvalPolicy_t& get_eval_policy() {return eval_policy;}
+
+		auto build_matvec_form() {
+			assert(test_handler!=nullptr); assert(trial_handler!=nullptr);
+
+			using Form_t = BilinearFormMultiply<TestHandler_t,TrialHandler_t,EvalPolicy_t>;
+			return Form_t{*test_handler,*trial_handler};
+		}
 	};
 
 
@@ -177,7 +190,7 @@ namespace GV
 			uint64_t N = 0;
 			[&]<size_t... Is>(std::index_sequence<Is...>) {
 				(N+=get_block<Is,0>().n_rows, ...);
-			}(std::make_index_sequence<BLOCK_ROW-1>{});
+			}(std::make_index_sequence<BLOCK_ROW>{});
 			return N;
 		}
 
@@ -187,12 +200,12 @@ namespace GV
 			uint64_t M = 0;
 			[&]<size_t... Js>(std::index_sequence<Js...>) {
 				(M+=get_block<0,Js>().n_cols, ...);
-			}(std::make_index_sequence<BLOCK_COL-1>{});
+			}(std::make_index_sequence<BLOCK_COL>{});
 			return M;
 		}
 
-		inline uint64_t total_rows() const {return row_offset<NROWS+1>();}
-		inline uint64_t total_cols() const {return col_offset<NCOLS+1>();}
+		inline uint64_t total_rows() const {return row_offset<NROWS>();}
+		inline uint64_t total_cols() const {return col_offset<NCOLS>();}
 
 		template<int IDX>
 		void trivial_block_multiply_accumulate(std::span<double> y, std::span<const double> x) const {
@@ -200,8 +213,8 @@ namespace GV
 			if constexpr (type==BlockType::Zero || type==BlockType::BilinearForm) {return;}
 
 			constexpr int BLOCK_I = IDX/NCOLS;
-			constexpr int BLOCK_J = IDX&NCOLS;
-			auto& block = std::get<IDXs>(blocks);
+			constexpr int BLOCK_J = IDX%NCOLS;
+			auto& block = std::get<IDX>(blocks);
 			const auto row_start = row_offset<BLOCK_I>();
 			const auto col_start = col_offset<BLOCK_J>();
 			const auto n_rows = block.n_rows;
@@ -236,8 +249,54 @@ namespace GV
 			[&]<size_t... IDXs>(std::index_sequence<IDXs...>) {(
 				trivial_block_multiply_accumulate<IDXs>(y,x),...);
 			}(std::make_index_sequence<NROWS*NCOLS>{});
+
+			//build the forms and kernel
+			auto forms  = [&]<size_t... IDXs>(std::index_sequence<IDXs...>) {
+				return std::tuple_cat(make_matvec_form<IDXs>(y,x)...);}(std::make_index_sequence<NROWS*NCOLS>{});
+			
+			//if there are no bilinear forms, we can return
+			if constexpr (std::tuple_size_v<decltype(forms)> == 0) {return;}
+
+			//build the kernel, the forms are already linked to storage
+			auto kernel = std::apply([](auto&... form) {
+				return Kernel<4>{form...};
+			}, forms);
+
+			//set up the loop over elements
+			const auto& mesh = kernel.get_mesh();
+
+			auto action = [&](const auto el) {
+				kernel.set_element(el);
+				kernel.set_basis(el);
+				kernel.dispatch_all();
+			};
+
+			//TODO: change to parallel over colors
+			mesh.for_each_active_element(action);
 		};
 
+
+		template<int IDX>
+		auto make_matvec_form(std::span<double> y, std::span<const double> x) {
+			//build the matrix-free multiply bilinear form
+			constexpr BlockType type = Block_t<IDX>::type;
+
+			//the forms will be concatinated, empty tuples will be discarded
+			if constexpr (type!=BlockType::BilinearForm) {return std::tuple<>{};}
+
+			constexpr int BLOCK_I = IDX/NCOLS;
+			constexpr int BLOCK_J = IDX%NCOLS;
+			auto& block = std::get<IDX>(blocks);
+			const auto row_start = row_offset<BLOCK_I>();
+			const auto col_start = col_offset<BLOCK_J>();
+			const auto n_rows = block.n_rows;
+			const auto n_cols = block.n_cols;
+
+			auto form = block.make_matvec_form();
+			form.set_global(y.subspan(row_start,n_rows), x.subspan(col_start,n_cols));
+
+			return std::tuple{std::move(form)};
+		}
 		
 	};
 
