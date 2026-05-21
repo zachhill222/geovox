@@ -239,13 +239,13 @@ namespace GV
 
 		//interface to use in the element loop
 		//note that set_basis must be called on each form individually
-		inline void set_element(QuadElem_t el) {
+		inline void set_element(const QuadElem_t el) {
 			q_map.set_quad_element(el);
 		}
 
 		//sometimes it is convenient to set the basis from here, but it could lead to more dof lookups than needed in the dof handlers
-		inline void set_basis(QuadElem_t el) {
-			std::apply([](auto&... threads){ (threads.form.set_basis(el),...);}, Threads);
+		inline void set_basis(const QuadElem_t el) {
+			std::apply([el](auto&... threads){ (threads.form.set_basis(el),...);}, Threads);
 		}
 
 		//main dispatch loop
@@ -267,9 +267,4 @@ namespace GV
 		//synchronization data
 		std::barrier<> sync{N_FORMS+1};
 	};
-
-
-	//deduction guide
-	template<int Q, typename... Forms>
-	Kernel(Forms&...) -> Kernel<Q, Forms...>;
 }

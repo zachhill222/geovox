@@ -45,6 +45,7 @@ namespace GV
 
 		ComputePolicy_t compute_policy;
 		ScatterPolicy_t scatter_policy;
+		double scale_factor = 1.0;
 
 		//constructor
 		using BASE::BASE;
@@ -68,7 +69,11 @@ namespace GV
 			compute_policy.compute(this->test_dofs, this->trial_dofs, q_map);
 		}
 
+		inline void set_scale_factor(const double alpha) {scale_factor=alpha;}
+
 		inline void finalize() {
+			//scale the local matrix if we are computing y+= scale_factior * A * x
+			if (scale_factor!=1.0) {compute_policy.scale_by(scale_factor);}
 			std::vector<double> x(this->m_trial);
 			for (size_t k=0; k<global_pairs.size(); ++k) {
 				loc_x(x,k);

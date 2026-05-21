@@ -34,6 +34,14 @@ namespace GV
 		}
 
 		inline std::span<const double> data() const {return {loc_mat};}
+
+		void scale_by(const double alpha) {
+			#pragma omp simd
+			for (uint64_t k=0; k<loc_mat.size(); ++k) {
+				loc_mat[k] *= alpha;
+			}
+		}
+
 		std::vector<double> diag() const {
 			assert(n_test==m_trial);
 			std::vector<double> result(n_test);

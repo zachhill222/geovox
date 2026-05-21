@@ -161,18 +161,18 @@ namespace GV
 		//still need to be applied
 		
 		template<typename ContainerA_t, typename ContainerB_t>
-		inline void apply_matvec(ContainerA_t& y, const ContainerB_t& x) const {
-			apply_matvec(as_span(y), as_span(x));
+		inline void apply_matvec(ContainerA_t& y, const ContainerB_t& x, const double alpha=1.0) const {
+			apply_matvec(as_span(y), as_span(x), alpha);
 		}
 
-		void apply_matvec(std::span<double> y, std::span<const double> x) const {
+		void apply_matvec(std::span<double> y, std::span<const double> x, const double alpha=1.0) const {
 			assert(y.size()==x.size());
 			assert(y.size()==compressed_dof_size);
 			
 			#pragma omp simd
 			for (size_t i=0; i<boundary_dofs.size(); ++i) {
 				const uint64_t idx = boundary_dofs[i];
-				y[idx] = x[idx];
+				y[idx] = alpha * x[idx];
 			}
 		}
 	};

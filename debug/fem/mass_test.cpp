@@ -95,7 +95,7 @@ int main(int argc, char* argv[]) {
 	//populate the vec with the x coordinates of each dof to test the stiffness matrix
 	for (size_t i=0; i<dofhandler.curr_compressed_dofs().size(); ++i) {
 		double x = dofhandler.curr_compressed_dofs()[i].key.x();
-		vec[i] = (1.0-x)*mesh.low[0] + x*mesh.high[0];
+		vec[i] = (1.0-x)*mesh.low()[0] + x*mesh.high()[0];
 	}
 
 	std::cout << "stiff: " << (stiff_mat * vec).transpose() * vec << std::endl;

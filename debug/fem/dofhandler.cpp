@@ -1,15 +1,17 @@
-#include "mesh/voxel_mesh.hpp"
+#include "mesh/voxel_mesh_unstructured.hpp"
 #include "fem/handlers/dofhandler_charms.hpp"
 #include "fem/dofs/voxel_dof_Q1.hpp"
+
+#include "mesh/vtk_file_io.hpp"
 
 #include <cmath>
 #include <fstream>
 #include <cstdint>
 
-using Mesh_t   = GV::VoxelMesh<10>;
+using Mesh_t   = GV::UnstructuredVoxelMesh<10>;
 using Elem_t   = Mesh_t::VoxelElement;
 using Vert_t   = Mesh_t::VoxelVertex;
-using DofKey_t = GV::VoxelVertexKey<10,0>;
+using DofKey_t = typename Vert_t::PeriodicVariant<0>;
 using DOF_t    = GV::VoxelQ1<DofKey_t>;
 using Basis_t  = GV::DofHandlerCharms<Mesh_t,DOF_t>;
 
@@ -25,7 +27,7 @@ int main(int argc, char* argv[])
 	//initialize a test scalar field
 	std::vector<double> coefs(basis.n_dofs(), 0.0);
 	basis.init_coefs_by_dof(coefs, [&mesh](const DOF_t dof) {
-		const auto pt = mesh.ref2geo(static_cast<Vert_t>(dof.key));
+		const auto pt = mesh.geo_coord(static_cast<Vert_t>(dof.key));
 		return std::sqrt(pt[0]*pt[0] + pt[1]*pt[1] + pt[2]*pt[2]);
 	});
 
@@ -34,8 +36,7 @@ int main(int argc, char* argv[])
 		std::vector<double> old_coefs = coefs;
 
 		basis.refine(basis.curr_compressed_dofs());
-		mesh.process_request_active();
-		mesh.process_request_deactive();
+		mesh.process_requests();
 		
 		basis.compress_dof_numbers();
 		std::vector<double> new_coefs(basis.n_dofs(), 0.0);
@@ -46,15 +47,12 @@ int main(int argc, char* argv[])
 
 	//write the mesh structure to a file
 	std::cout << "Writing to file" << std::endl;
-	std::ofstream file("charmsQ1.vtk");
-	const uint64_t n_verts = mesh.write_unstructured_vtk(file);
+	mesh.collect_vertices();
+	mesh.save_as_ascii("dof_test.vtk");
 
-	file << "POINT_DATA " << n_verts << "\n";
-	auto vert_vals = basis.interpolate_to_vertices(coefs, n_verts);
-	mesh.append_unstructured_point_data_vtk(file,
-					"SCALARS val float 1\nLOOKUP_TABLE default", 
-					n_verts, 
-					[&vert_vals](Vert_t vtx){return vert_vals[vtx.linear_index()];});
+	auto vert_vals = basis.interpolate_to_vertices(coefs, mesh.get_vertices());
+	auto v_lookup = GV::make_index_lookup<double>([&](size_t idx){return vert_vals[idx];}, "function_value");
+	mesh.append_point_data_field_ascii("dof_test.vtk", "point_data", v_lookup);
 
 
 
