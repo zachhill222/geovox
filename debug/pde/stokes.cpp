@@ -15,7 +15,7 @@ int main(int argc, char* argv[])
 
 	Stokes stokes(1,1,1);
 	stokes.set_depth(1);
-	stokes.set_body_force(100.0,100.0,0.0);
+	stokes.set_body_force(100.0,0.0,0.0);
 
 	// stokes.check_stokes_op();
 

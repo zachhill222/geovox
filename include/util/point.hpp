@@ -8,6 +8,10 @@
 #include <iostream>
 #include <cassert>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 namespace GV
 {
 	template<int DIM, typename T> requires (DIM>0)
