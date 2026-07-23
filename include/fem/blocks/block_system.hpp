@@ -6,9 +6,6 @@
 #include "fem/forms/bilinear/matrix_multiply.hpp"
 
 #include "util/concepts.hpp"
-#include "util/log_time.hpp"
-
-
 
 #include <type_traits>
 #include <cstdint>

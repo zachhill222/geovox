@@ -1,8 +1,9 @@
 #pragma once
 
+#include "gutil.hpp"
+
 #include "fem/blocks/block_system.hpp"
 #include "util/compatibility.hpp"
-#include "util/log_time.hpp"
 
 #include <Eigen/Core>
 #include <Eigen/Dense>
@@ -65,7 +66,7 @@ namespace Eigen {namespace internal {
 
 		template<typename Dest>
 		static void scaleAndAddTo(Dest& dst, const Operator& lhs, const Rhs& rhs, const Scalar& alpha) {
-			GV::LogTime timer{"BlockSystemOperator - scaleAndAddTo"};
+			gutil::LogTime timer{"BlockSystemOperator - scaleAndAddTo"};
 
 			//this method implements dst += alpha * lhs * rhs inplace
 			//we assume that alpha=1 as is the case in the iterative solvers

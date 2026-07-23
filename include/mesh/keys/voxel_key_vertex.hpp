@@ -1,6 +1,7 @@
 #pragma once
 
-#include "util/point.hpp"
+#include "gutil.hpp"
+
 #include "mesh/keys/voxel_key_base.hpp"
 
 #include <cstdint>
@@ -174,9 +175,9 @@ namespace GV
 			return reduced_key() == other.reduced_key();
 		}
 
-		constexpr Point<3,double> normalized_coordinate() const {
+		constexpr gutil::Point<3,double> normalized_coordinate() const {
 			const int exponent = -static_cast<int>(depth());
-			return Point<3,double>{
+			return gutil::Point<3,double>{
 				std::ldexp(static_cast<double>(i()), exponent),
 				std::ldexp(static_cast<double>(j()), exponent),
 				std::ldexp(static_cast<double>(k()), exponent)
@@ -206,16 +207,16 @@ namespace GV
 
 		//the reference coordinate of this vertex in each of the 8 elements it belongs to
 		static constexpr auto ref_coord(const int i) {return ref_coords()[i];}
-		static constexpr std::array<Point<3,double>,8> ref_coords() {
+		static constexpr std::array<gutil::Point<3,double>,8> ref_coords() {
 			return {
-				Point<3,double>{ 1.0,  1.0,  1.0},
-				Point<3,double>{ 1.0,  1.0, -1.0},
-				Point<3,double>{ 1.0, -1.0,  1.0},
-				Point<3,double>{ 1.0, -1.0, -1.0},
-				Point<3,double>{-1.0,  1.0,  1.0},
-				Point<3,double>{-1.0,  1.0, -1.0},
-				Point<3,double>{-1.0, -1.0,  1.0},
-				Point<3,double>{-1.0, -1.0, -1.0}
+				gutil::Point<3,double>{ 1.0,  1.0,  1.0},
+				gutil::Point<3,double>{ 1.0,  1.0, -1.0},
+				gutil::Point<3,double>{ 1.0, -1.0,  1.0},
+				gutil::Point<3,double>{ 1.0, -1.0, -1.0},
+				gutil::Point<3,double>{-1.0,  1.0,  1.0},
+				gutil::Point<3,double>{-1.0,  1.0, -1.0},
+				gutil::Point<3,double>{-1.0, -1.0,  1.0},
+				gutil::Point<3,double>{-1.0, -1.0, -1.0}
 			};
 		}
 

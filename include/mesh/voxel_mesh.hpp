@@ -1,8 +1,9 @@
 #pragma once
 
+#include "gutil.hpp"
+
 #include "mesh/keys/voxel_key.hpp"
 #include "util/concepts.hpp"
-#include "util/point.hpp"
 
 #include <cstdint>
 #include <type_traits>
@@ -84,20 +85,16 @@ namespace GV
 		mutable std::array<size_t, MAX_DEPTH+2> active_list_depth_start; //depth i uses indices [depth_start[i], depth_start[i+1]) in the active_list
 		mutable bool is_active_list_stale = true; //track if changes have been made since the last time the list was updated
 	public:
-		using GeoPoint_t = Point<3,double>; //points in space
+		using GeoPoint_t = gutil::Point<3,double>; //points in space
 		
-		const GeoPoint_t _low;
-		const GeoPoint_t _high;
-		const GeoPoint_t _diag;
-
-		inline GeoPoint_t low() const {return _low;}
-		inline GeoPoint_t high() const {return _high;}
-		inline GeoPoint_t diag() const {return _diag;}
+		const GeoPoint_t low;
+		const GeoPoint_t high;
+		const GeoPoint_t diag;
 
 		VoxelMesh(const GeoPoint_t low_, const GeoPoint_t high_) :
-			_low{elmin(low_, high_)},
-			_high{elmax(low_, high_)},
-			_diag{_high-_low}
+			low{elmin(low_, high_)},
+			high{elmax(low_, high_)},
+			diag{high-low}
 		{
 			#ifdef _OPENMP
 				request_active.resize(omp_get_max_threads());
@@ -555,7 +552,7 @@ namespace GV
 			write_unstructured_vtk(file);
 			file << "CELL_DATA " << n_elements() << "\n";
 
-			auto lookup_dijk   = [](VoxelElement el) {return Point<4,uint64_t>{el.depth(), el.i(), el.j(), el.k()};};
+			auto lookup_dijk   = [](VoxelElement el) {return gutil::Point<4,uint64_t>{el.depth(), el.i(), el.j(), el.k()};};
 			auto lookup_linear = [](VoxelElement el) {return el.depth_linear_index();};
 			auto lookup_color  = [](VoxelElement el) {return el.color();};
 

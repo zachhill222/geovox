@@ -1,5 +1,6 @@
 #pragma once
 
+#include "gutil.hpp"
 
 #include "mesh/voxel_mesh.hpp"
 #include "fem/handlers/dofhandler_charms.hpp"
@@ -11,9 +12,7 @@
 #include "fem/numerics/kernel.hpp"
 #include "fem/dofs/voxel_dof_Q1.hpp"
 
-#include "util/log_time.hpp"
 #include "util/concepts.hpp"
-#include "util/point.hpp"
 
 #include <Eigen/SparseCore>
 #include <Eigen/IterativeLinearSolvers>
@@ -36,7 +35,7 @@ namespace GV
 		using Mesh_t      = VoxelMesh<8>;
 		using Elem_t      = typename Mesh_t::VoxelElement;
 		using Vert_t      = typename Mesh_t::VoxelVertex;
-		using Point_t     = Point<3,double>;
+		using Point_t     = gutil::Point<3,double>;
 
 		using DOF_t       = VoxelQ1<typename Vert_t::PeriodicVariant<BC>>;
 		using Handler_t   = DofHandlerCharms<Mesh_t,DOF_t>;
@@ -75,7 +74,7 @@ namespace GV
 		//initialize/reset problem to the specified depth of the mesh
 		//the mesh will be in a conformal state after this
 		void set_depth(int dd) {
-			LogTime timer{"PoissonQ1::set_depth"};
+			gutil::LogTime timer{"PoissonQ1::set_depth"};
 			mesh.set_depth(dd);
 			dofhandler.set_depth(dd);
 			dofhandler.compress_dof_numbers();
@@ -106,7 +105,7 @@ namespace GV
 		}
 
 		void integrate() {
-			LogTime timer{"PoissonQ1::integrate"};
+			gutil::LogTime timer{"PoissonQ1::integrate"};
 			StiffForm stiff_form(dofhandler, dofhandler);
 			stiff_mat_coo.clear();
 			stiff_form.set_global(stiff_mat_coo);
@@ -132,25 +131,25 @@ namespace GV
 		}
 
 		void build_matrices() {
-			LogTime timer{"PoissonQ1::build_matrices"};
+			gutil::LogTime timer{"PoissonQ1::build_matrices"};
 			const auto& dofs = dofhandler.curr_compressed_dofs();
 			A = stiff_mat_coo.to_eigen_csr(dofs,dofs);
 		}
 
 		//cache the boundary dofs
 		void cache_bc() {
-			LogTime timer{"PoissonQ1::cache_bc"};
+			gutil::LogTime timer{"PoissonQ1::cache_bc"};
 			bchandler.cache(dofhandler.curr_compressed_dofs());
 		}
 
 		//apply BC to A and the rhs
 		void apply_dirichlet() {
-			LogTime timer{"PoissonQ1::apply_dirichlet"};
+			gutil::LogTime timer{"PoissonQ1::apply_dirichlet"};
 			bchandler.apply(A,rhs,dofhandler.curr_compressed_dofs());
 		}
 
 		void solve() {
-			LogTime timer{"PoissonQ1::solve"};
+			gutil::LogTime timer{"PoissonQ1::solve"};
 
 			Eigen::ConjugateGradient<SpMat_t, Eigen::Lower|Eigen::Upper> cg;
 			cg.compute(A);
@@ -161,7 +160,7 @@ namespace GV
 		}
 
 		void save_as(const std::string filename) const {
-			LogTime timer{"PoissonQ1::save_as"};
+			gutil::LogTime timer{"PoissonQ1::save_as"};
 
 			std::ofstream file(filename);
 			if (!file.is_open()) {

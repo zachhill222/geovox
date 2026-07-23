@@ -45,8 +45,8 @@ namespace GV
 		WRITE_BIG_ENDIAN<F_out>(buffer, as_span(val));
 	}
 
-	template<typename F_out=void, typename OS, int N, typename F_in>
-	void WRITE_BIG_ENDIAN(OS& buffer, const Point<N,F_in>& val) {
-		WRITE_BIG_ENDIAN<F_out>(buffer, as_span(val));
-	}
+	// template<typename F_out=void, typename OS, int N, typename F_in>
+	// void WRITE_BIG_ENDIAN(OS& buffer, const Point<N,F_in>& val) {
+	// 	WRITE_BIG_ENDIAN<F_out>(buffer, as_span(val));
+	// }
 }

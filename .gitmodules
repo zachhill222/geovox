@@ -1,0 +1,4 @@
+[submodule "external/gutil"]
+	path = external/gutil
+	url = https://github.com/zachhill222/GeometryUtility.git
+	branch = main

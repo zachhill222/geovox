@@ -1,5 +1,7 @@
 #pragma once
 
+#include "gutil.hpp"
+
 #include "fem/problems/stokes_wrapper_eigen.hpp" //use the methods in this class for matrix-free iterative solvers in Eigen
 
 #include "fem/forms/bilinear/matrix_multiply.hpp"
@@ -20,7 +22,6 @@
 #include "mesh/vtk_file_io.hpp" //for a helper method to more easily format the data lookups
 
 #include "util/concepts.hpp"
-#include "util/point.hpp"
 
 #include <span>
 #include <vector>
@@ -246,7 +247,7 @@ namespace GV
 
 		//TODO: add dof and mesh predicates (i.e., refine low accuracy dofs and only activate relevant elements)
 		void refine() {
-			LogTime timer{"Stokes::refine"};
+			gutil::LogTime timer{"Stokes::refine"};
 
 			const auto nv_old = velocity_handler.n_dofs();
 			const auto np_old = pressure_handler.n_dofs();
@@ -652,7 +653,7 @@ namespace GV
 		//apply a standard Uzawa iterations using some number of inner Gauss-Seidel iterations
 		template<bool FORWARD=true>
 		void standard_uzawa(std::span<double> U, std::span<double> P, std::span<const double> F, std::span<const double> H, const double w, const int n) const {
-			LogTime timer{"Stokes::standard_uzawa"};
+			gutil::LogTime timer{"Stokes::standard_uzawa"};
 			assert(U.size() == F.size());
 			assert(P.size() == H.size());
 			assert(w>0.0);
@@ -683,7 +684,7 @@ namespace GV
 		//the rhs should incorporate the dirichlet BC
 		template<int N_INNER=2>
 		void smooth(int n_iter, std::span<const double> rhs, double tol=1e-100, bool print_summary=false) {
-			LogTime timer{"Stokes::smooth"};
+			gutil::LogTime timer{"Stokes::smooth"};
 
 			using Operator = StokesOperator<V_BC,P_BC,MAX_DEPTH>;
 			using Preconditioner = StokesPreconditioner<V_BC,P_BC,MAX_DEPTH,N_INNER>;
@@ -729,7 +730,7 @@ namespace GV
 
 		//save solution
 		void save_as(const std::string filename) const {
-			LogTime timer{"Stokes::save_as"};
+			gutil::LogTime timer{"Stokes::save_as"};
 			//write the mesh and get the number of vertices
 			mesh.collect_vertices();
 			mesh.save_as_binary(filename);

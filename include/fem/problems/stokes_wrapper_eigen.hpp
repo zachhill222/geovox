@@ -1,5 +1,6 @@
+#include "gutil.hpp"
+
 #include "util/compatibility.hpp"
-#include "util/log_time.hpp"
 
 #include <span>
 #include <cstdint>
@@ -128,7 +129,7 @@ namespace internal {
 
 		template<typename Dest>
 		static void scaleAndAddTo(Dest& dst, const Operator& lhs, const Rhs& rhs, const Scalar& alpha) {
-			GV::LogTime timer{"StokesOperator - scaleAndAddTo"};
+			gutil::LogTime timer{"StokesOperator - scaleAndAddTo"};
 
 			//this method implements dst += alpha * lhs * rhs inplace
 			//we assume that alpha=1 as is the case in the iterative solvers

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "fem/numerics/quad_point_map.hpp"
-#include "util/log_time.hpp"
 
 #include <thread>
 #include <mutex>
@@ -221,7 +220,7 @@ namespace GV
 
 		Kernel(	Form_ts&... Forms) : Threads(Forms...) {
 			//let the quadrature class collect the mesh extents to compute jacobians
-			q_map.set_bounds(form<0>().test_handler.mesh.low(), form<0>().test_handler.mesh.high());
+			q_map.set_bounds(form<0>().test_handler.mesh.low, form<0>().test_handler.mesh.high);
 			
 			//link kernel to all the threads
 			std::apply([this](auto&... threads){ (threads.link_kernel(sync, q_map), ...);}, Threads);

@@ -1,6 +1,7 @@
 #pragma once
 
-#include "util/point.hpp"
+#include "gutil.hpp"
+
 #include <span>
 #include <vector>
 #include <cassert>
@@ -9,6 +10,17 @@
 
 namespace GV
 {
+	//////////////////////////////////////
+	/// Generic adapter to a span
+	//////////////////////////////////////
+	template<typename T> requires (std::ranges::contiguous_range<T>)
+	inline std::span<T> as_span(T& v) { return std::span<T>{v.begin(), v.end()}; }
+
+	template<typename T> requires (std::ranges::contiguous_range<T>)
+	inline std::span<const T> as_span(const T& v) { return std::span<const T>{v.cbegin(), v.cend()}; }
+	
+
+
 	//////////////////////////////////////
 	/// Adapt std::vector to spans and subspans
 	//////////////////////////////////////
@@ -39,17 +51,17 @@ namespace GV
 	template<typename T, size_t N>
 	inline std::span<const T,N> as_span(const std::array<T,N>& v) {return std::span<const T,N>{v};}
 
-	template<typename T, size_t N>
-	inline std::span<T> as_span(std::array<T,N>& v, const size_t start, const size_t length) {
-		assert(start+length <= N);
-		return {v.data()+start, length};
-	}
+	// template<typename T, size_t N>
+	// inline std::span<T> as_span(std::array<T,N>& v, const size_t start, const size_t length) {
+	// 	assert(start+length <= N);
+	// 	return {v.data()+start, length};
+	// }
 
-	template<typename T, size_t N>
-	inline std::span<const T> as_span(const std::array<T,N>& v, const size_t start, const size_t length) {
-		assert(start+length <= N);
-		return {v.data()+start, length};
-	}
+	// template<typename T, size_t N>
+	// inline std::span<const T> as_span(const std::array<T,N>& v, const size_t start, const size_t length) {
+	// 	assert(start+length <= N);
+	// 	return {v.data()+start, length};
+	// }
 
 
 	//////////////////////////////////////
@@ -89,23 +101,23 @@ namespace GV
 
 
 	//////////////////////////////////////
-	/// Adapt GV::Point to spans and subspans
+	/// Adapt gutil::Point to spans and subspans
 	//////////////////////////////////////
 	template<typename T, int N>
-	inline std::span<T,N> as_span(Point<N,T>& v) {return std::span<T,N>{v._data, size_t(N)};}
+	inline std::span<T,N> as_span(gutil::Point<N,T>& v) {return std::span<T,N>{v.data, size_t(N)};}
 
 	template<typename T, int N>
-	inline std::span<const T,N> as_span(const Point<N,T>& v) {return std::span<const T,N>{v._data, size_t(N)};}
+	inline std::span<const T,N> as_span(const gutil::Point<N,T>& v) {return std::span<const T,N>{v.data, size_t(N)};}
 
 	template<typename T, int N>
-	inline std::span<T> as_span(Point<N,T>& v, const size_t start, const size_t length) {
+	inline std::span<T> as_span(gutil::Point<N,T>& v, const size_t start, const size_t length) {
 		assert(start+length <= size_t(N));
-		return {v._data+start, length};
+		return {v.data+start, length};
 	}
 
 	template<typename T, int N>
-	inline std::span<const T> as_span(const Point<N,T>& v, const size_t start, const size_t length) {
+	inline std::span<const T> as_span(const gutil::Point<N,T>& v, const size_t start, const size_t length) {
 		assert(start+length <= size_t(N));
-		return {v._data+start, length};
+		return {v.data+start, length};
 	}
 }

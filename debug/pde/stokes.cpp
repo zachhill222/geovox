@@ -1,13 +1,13 @@
+#include "gutil.hpp"
+
 #include "fem/problems/stokes.hpp"
-#include "util/point.hpp"
 #include "util/compatibility.hpp"
-#include "util/log_time.hpp"
 
 using Stokes = GV::Stokes<1,0,8>;
 
 int main(int argc, char* argv[])
 {
-	GV::LogTime timer{"Program Time"};
+	gutil::LogTime timer{"Program Time"};
 
 	int refine_depth = 3;
 	if (argc>1) {refine_depth = atoi(argv[1]);}

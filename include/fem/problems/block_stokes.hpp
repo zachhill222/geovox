@@ -1,5 +1,7 @@
 #pragma once
 
+#include "gutil.hpp"
+
 #include "fem/handlers/dofhandler_charms.hpp"
 #include "fem/dofs/voxel_dof_Q1.hpp"
 
@@ -15,7 +17,6 @@
 #include "mesh/vtk_file_io.hpp"
 
 #include "util/concepts.hpp"
-#include "util/point.hpp"
 
 #include <span>
 #include <vector>
@@ -83,7 +84,7 @@ namespace GV
 		std::vector<double> X; //U and P combined
 
 		//constructor
-		BlockStokes(const Point<3,double> low = {0,0,0}, const Point<3,double> high = {1,1,1}) 
+		BlockStokes(const gutil::Point<3,double> low = {0,0,0}, const gutil::Point<3,double> high = {1,1,1}) 
 			: mesh{low, high}, velocity_handler{mesh}, pressure_handler{mesh}, system{}
 		{
 			system.set_test_handlers(velocity_handler, velocity_handler, velocity_handler, pressure_handler);
@@ -216,7 +217,7 @@ namespace GV
 
 		//solve the system with no pre-conditioning
 		void solve_gmres(int n_iter=50) {
-			LogTime timer{"BlockStokes::solve_gmres"};
+			gutil::LogTime timer{"BlockStokes::solve_gmres"};
 			Eigen::VectorXd rhs = Eigen::VectorXd::Zero(n_dofs_total());
 			compute_RHS(as_span(rhs));
 
@@ -233,7 +234,7 @@ namespace GV
 
 		//save to file
 		void save_as(const std::string filename) const {
-			LogTime timer{"BlockStokes::save_as"};
+			gutil::LogTime timer{"BlockStokes::save_as"};
 
 			//save mesh topology
 			mesh.collect_vertices();

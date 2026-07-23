@@ -1,7 +1,8 @@
 #pragma once
 
+#include "gutil.hpp"
+
 #include "mesh/keys/voxel_key.hpp"
-#include "util/point.hpp"
 
 #include <array>
 #include <cstdint>
@@ -24,8 +25,8 @@ namespace GV
 	{
 		//type aliases to distinguish reference coordinates and geometric coordinate
 		//purely for logical aid.
-		using RefPoint_t = Point<3,double>;
-		using GeoPoint_t = Point<3,double>;
+		using RefPoint_t = gutil::Point<3,double>;
+		using GeoPoint_t = gutil::Point<3,double>;
 		using Key_t      = Key_type;
 		using QuadElem_t = VoxelElementKey<Key_t::MAX_DEPTH, Key_t::BC_FLAG>; //TODO: rename to SupportElem_t
 		using Hash       = Key_t::Hash;

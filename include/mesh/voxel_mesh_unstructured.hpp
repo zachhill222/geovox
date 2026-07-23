@@ -1,10 +1,12 @@
 #pragma once
 
+#include "gutil.hpp"
+
 #include "mesh/keys/voxel_key.hpp"
 #include "mesh/vtk_file_io.hpp"
 #include "mesh/voxel_mesh.hpp"
+// #include "mesh/voxel_mesh_structured.hpp"
 #include "util/concepts.hpp"
-#include "util/point.hpp"
 
 #include <cstdint>
 #include <algorithm>
@@ -38,6 +40,7 @@ namespace GV
 		using VoxelVertex  = VoxelVertexKey<MAX_DEPTH,0>;
 		using VoxelFace    = VoxelFaceKey<MAX_DEPTH,0>;
 		using Mesh_t       = UnstructuredVoxelMesh<MAX_DEPTH>; //this mesh type
+		using GeoPoint_t   = gutil::Point<3,double>;
 
 		//random access iterator class to loop through the elements
 		//this wraps the individual vector iterators but wraps to the next depth if possible
@@ -91,21 +94,21 @@ namespace GV
 		//store first index of each color (and one past end) for easier looping by color
 		std::array<std::vector<uint64_t>,MAX_DEPTH+1> color_block_index;
 
-		//store the extents of the mesh
-		Point<3,double> _low_;
-		Point<3,double> _high_;
-
 		//store a list of elements that classes with a const reference to the mesh can use to request
 		//element refinement or unrefinement
 		//TODO: we could make a vector per omp thread
 		mutable std::vector<VoxelElement> request_active;
 		mutable std::vector<VoxelElement> request_deactive;
 	public:
+		//store the extents of the mesh
+		const GeoPoint_t low;
+		const GeoPoint_t high;
+
 		//////////////////////////////////////////////////////////
 		/// Constructors
-		UnstructuredVoxelMesh() : _low_{0,0,0}, _high_{1,1,1} {}
-		UnstructuredVoxelMesh(const Point<3,double>& low, const Point<3,double>& high) : _low_(low), _high_(high) {}
-		explicit UnstructuredVoxelMesh(const VoxelMesh<MAX_DEPTH>& structured) : _low_(structured.low), _high_(structured.high) {
+		UnstructuredVoxelMesh() : low{0,0,0}, high{1,1,1} {}
+		UnstructuredVoxelMesh(const GeoPoint_t& low_, const GeoPoint_t& high_) : low(low_), high(high_) {}
+		explicit UnstructuredVoxelMesh(const VoxelMesh<MAX_DEPTH>& structured) : low(structured.low), high(structured.high) {
 			auto get_active = [&](VoxelElement el) {
 				if (structured.is_active(el)) {
 					elements[el.depth()].push_back(el);
@@ -122,6 +125,18 @@ namespace GV
 			//each loop was in increasing linear index, so the elements are already sorted by index
 			_sort_by_index_ = true;
 		}
+
+		// explicit UnstructuredVoxelMesh(const StructuredVoxelMesh<MAX_DEPTH>& structured) : low(structured.low), high(structured.high) {
+		// 	for (uint64_t i=0; i<structured.TOTAL_POSSIBLE_ELEMENTS; ++i) {
+		// 		VoxelElement el(structured.DEPTH, i);
+		// 		if (structured.is_active(el)) {
+		// 			elements[el.depth()].push_back(el);
+		// 		}
+		// 	}
+
+		// 	//each loop was in increasing linear index, so the elements are already sorted by index
+		// 	_sort_by_index_ = true;
+		// }
 		//////////////////////////////////////////////////////////
 
 		//////////////////////////////////////////////////////////
@@ -143,10 +158,7 @@ namespace GV
 			return count;
 		}
 		inline uint64_t n_elements() const {return n_elements_below(MAX_DEPTH+1);}
-		inline Point<3,double> geo_coord(const VoxelVertex vtx) const {return _low_ + (_high_-_low_)*vtx.normalized_coordinate();}
-
-		inline Point<3,double> high() const {return _high_;}
-		inline Point<3,double> low() const {return _low_;}
+		inline GeoPoint_t geo_coord(const VoxelVertex vtx) const {return low + (high-low)*vtx.normalized_coordinate();}
 		//////////////////////////////////////////////////////////
 
 		//////////////////////////////////////////////////////////
@@ -222,7 +234,7 @@ namespace GV
 		void sort_by_color();
 		void sort_by_index();
 
-		void color();
+		void color() {};
 		void color_by_index();
 
 		//get the span of elements of a given color at a given depth
@@ -711,27 +723,6 @@ namespace GV
 			}
 		}
 	}
-
-	// template<uint64_t MAX_DEPTH>
-	// template<typename DOF_t>
-	// void UnstructuredVoxelMesh<MAX_DEPTH>::collect_support_elements(std::vector<VoxelElement>& result, const DOF_t dof) const {
-	// 	for (const auto& spt_el : dof.support()) {
-	// 		const VoxelElement v_el = static_cast<VoxelElement>(spt_el);
-	// 		collect_active_descendents(result, v_el);
-	// 		if (is_active(v_el)) {result.push_back(v_el);}
-	// 	}
-	// }
-
-	// template<uint64_t MAX_DEPTH>
-	// void UnstructuredVoxelMesh<MAX_DEPTH>::collect_active_descendents(std::vector<VoxelElement>& result, VoxelElement el) const {
-	// 	for (const VoxelElement child : el.children()) {
-	// 		if (!child.exists()) {continue;}
-	// 		if (is_active(child)) {
-	// 			result.push_back(child);
-	// 			collect_active_descendents(result, child);
-	// 		}
-	// 	}
-	// }
 
 	template<uint64_t MAX_DEPTH>
 	void UnstructuredVoxelMesh<MAX_DEPTH>::collect_vertices() const {

@@ -1,5 +1,5 @@
 #set up the include directories
-INC_DIR = -I../include -I/usr/include/eigen3
+INC_DIR = -I../include -I/usr/include/eigen3 -I../external/gutil/include
 
 #get source/target names of all files in the specified directory
 DIR    ?= .
@@ -7,16 +7,16 @@ SRC     = $(wildcard $(DIR)/*.cpp)
 TARGETS = $(SRC:.cpp=)
 
 #default build (debug)
-CXX        =  g++ -std=c++20 -pg -fsanitize=address
-OPT        = -O0
-PAR        =
-DEBUG      = -pg -g3 -Wall
+# CXX        =  g++ -std=c++23
+# OPT        = -O0
+# PAR        = -fopenmp
+# DEBUG      = -pg -g3 -Wall -DGUTIL_N_OCTREE_THREADS=0
 
 #redefine for testing optimizations
-CXX        =  g++ -std=c++20 -funroll-loops
+CXX        =  g++ -std=c++23 -funroll-loops
 OPT        = -O3
 PAR        = -fopenmp
-# DEBUG      = -DNDEBUG
+DEBUG      = -DNDEBUG
 
 #final compiler command
 CC = $(CXX) $(OPT) $(PAR) $(DEBUG)

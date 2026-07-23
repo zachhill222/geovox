@@ -3,8 +3,7 @@
 #include<array>
 
 
-namespace GV
-{
+namespace GV {
 
 
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "util/point.hpp"
+#include "gutil.hpp"
 #include "util/big_endian_helpers.hpp"
 
 #include <cstring>
@@ -16,7 +16,7 @@ namespace GV
 {
 	template<typename OS, typename Mesh_t, bool ASCII>
 	void write_point_field(OS& buffer, const Mesh_t& mesh) {
-		using PrintPoint_t = Point<3,float>;
+		using PrintPoint_t = gutil::Point<3,float>;
 
 		buffer << "POINTS " << mesh.n_vertices() << " float\n";
 		for (auto it=mesh.vertex_begin(); it!=mesh.vertex_end(); ++it) {
