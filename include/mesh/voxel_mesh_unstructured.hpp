@@ -5,8 +5,8 @@
 #include "mesh/keys/voxel_key.hpp"
 #include "mesh/vtk_file_io.hpp"
 #include "mesh/voxel_mesh.hpp"
-// #include "mesh/voxel_mesh_structured.hpp"
 #include "util/concepts.hpp"
+#include "util/macros.hpp"
 
 #include <cstdint>
 #include <algorithm>
@@ -19,21 +19,15 @@
 #include <sstream>
 #include <fstream>
 
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 
-namespace GV
-{
+namespace GV {
 	//forward declare iterator classes
 	template<uint64_t MAX_DEPTH, typename Element_t, bool CONST_FLAG>
 	struct IteratorBase;
 
 	template<uint64_t MAX_DEPTH_=10>
-	class UnstructuredVoxelMesh
-	{
-	public:
+	struct UnstructuredVoxelMesh {
 		//mesh features are never periodic
 		static constexpr uint64_t MAX_DEPTH = MAX_DEPTH_;
 		using VoxelElement = VoxelElementKey<MAX_DEPTH,0>;
@@ -370,7 +364,7 @@ namespace GV
 		if constexpr (std::same_as<Key_t,VoxelElement>) {return active_elem->test(key.linear_index());}
 		else {
 			for (const VoxelElement el : key.elements()) {
-				if (el.exists() && active_elem->test(key)) {return true;}
+				if (el.exists() && active_elem->test(el.linear_index)) {return true;}
 			}
 			return false;
 		}
@@ -385,14 +379,7 @@ namespace GV
 			return n_elements_below(el.depth()) + std::distance(list.begin(), it);
 		}
 		else if (is_color_sorted()) {
-			uint64_t offset = 0;
-			for (uint64_t clr = 0; clr<n_colors(); ++clr) {
-				auto block = color_block(el.depth(), clr);
-				auto it = std::lower_bound(block.begin(), block.end(), el);
-				if (it == block.end() || *it != el) {offset += block.size();}
-				return n_elements_below(el.depth()) + offset + std::distance(block.begin(), it);
-			}
-			return uint64_t(-1);
+			return find_colored_element(el);
 		}
 		else {
 			auto it = std::find(list.begin(), list.end(), el);
@@ -496,9 +483,7 @@ namespace GV
 		//to remove elements, the mesh must be sorted by index
 		sort_by_index();
 
-		#ifdef _OPENMP
-		#pragma omp parallel for
-		#endif
+		GEOVOX_OMP(parallel for)
 		for (uint64_t dd=0; dd<MAX_DEPTH; ++dd) {
 			const VoxelElement first_element{dd,0};
 			const VoxelElement last_element{dd+1,0};
@@ -625,9 +610,7 @@ namespace GV
 
 	template<uint64_t MAX_DEPTH>
 	void UnstructuredVoxelMesh<MAX_DEPTH>::sort_by_index() {
-		#ifdef _OPENMP
-		#pragma omp parallel for
-		#endif
+		GEOVOX_OMP(parallel for)
 		for (uint64_t k=0; k<=MAX_DEPTH; ++k) {
 			auto& list = elements[k];
 			std::sort(list.begin(), list.end(), compare_index);
@@ -661,9 +644,7 @@ namespace GV
 		_n_colors_      = max_color + 1;
 
 		//set color boundaries
-		#ifdef _OPENMP
-		#pragma omp parallel for
-		#endif
+		GEOVOX_OMP(parallel for)
 		for (uint64_t k=0; k<=MAX_DEPTH; ++k) {
 			const auto& list = elements[k];
 			auto& clr_block = color_block_index[k];
@@ -718,7 +699,7 @@ namespace GV
 				nbr = nbr.parent();
 				if (is_active(nbr)) {
 					nbrs.push_back(nbr);
-					continue;
+					break;
 				}
 			}
 		}
@@ -809,8 +790,7 @@ namespace GV
 
 	//Implement the Iterator class over all elements
 	template<uint64_t MAX_DEPTH, typename Element_t, bool CONST_FLAG>
-	struct IteratorBase
-	{
+	struct IteratorBase	{
 		//necessary aliases for the standard library
 		using iterator_category = std::forward_iterator_tag;
 		using value_type		= Element_t;
@@ -905,6 +885,7 @@ namespace GV
 					idx = 0;
 				}
 			}
+			advance_to_valid();
 			return *this;
 		}
 

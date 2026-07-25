@@ -2,12 +2,13 @@
 
 #include "gutil.hpp"
 
+#include "diffuse_domain/periodic_octree.hpp"
 
 namespace GV {
 
-	template<typename T>
-	struct SignedDistanceSpheres : public gutil::VolumeOctree<gutil::Sphere<3,T>> {
-		using BASE = gutil::VolumeOctree<gutil::Sphere<3,T>>;
+	template<gutil::IsReal T, int PeriodicAxes=0>
+	struct SignedDistanceSpheres : public GV::PeriodicVolumeOctree<gutil::Sphere<3,T>, PeriodicAxes> {
+		using BASE = GV::PeriodicVolumeOctree<gutil::Sphere<3,T>, PeriodicAxes>;
 
 		using Sphere_t = typename BASE::value_type;
 		using Point_t = typename BASE::point_type;

@@ -2,179 +2,258 @@
 
 #include "gutil.hpp"
 
+#include "util/macros.hpp"
+
 #include "mesh/keys/voxel_key.hpp"
-#include "mesh/vtk_file_io.hpp"
-#include "mesh/voxel_mesh.hpp"
-#include "util/concepts.hpp"
+#include "mesh/unstructured_layer.hpp"
 
 #include <cstdint>
-#include <algorithm>
 #include <vector>
-#include <array>
-#include <span>
-#include <bitset>
-
-#include <iostream>
-#include <sstream>
-#include <fstream>
 
 #ifdef _OPENMP
 #include <omp.h>
 #endif
 
+
 namespace GV {
 	
+	
+	/////////////////////////////////////////////////////////////////////////////////////////////////////
+	/// A mesh class for a voxel mesh at a single depth. This class will be used to define a hierarchical
+	/// mesh by 'stacking' layers together. When not using this to build a hierarchy, setting MaxDepth=Depth
+	/// is fine. The MaxDepth must be consistent across hierarchy levels.
+	/////////////////////////////////////////////////////////////////////////////////////////////////////
+	template<uint64_t MaxDepth>
+	struct StructuredVoxelMesh {
 
-	//This class is for a structured voxel mesh at a single depth.
-	//This structure allows us to very efficiently store elements, vertices, faces, etc.
-	//The base mesh is 1x1x1 so that every vertex is (in reference coordinates) a dyadic rational number
-	//Elements, vertices, and faces all have special index/key structs for their storage and logical relations.
-	//All information for every element, vertex, and face is compressed into a 64-bit unsigned integer
-	//With the element/vertex/face keys, we must have a maximum depth of 15. If more is needed (unlikely) we can stitch together
-	//multiples of these meshes.
 
-	template<uint64_t Depth>
-	class StructuredVoxelMesh {
-	public:
-		//mesh features are never periodic
-		using VoxelElement = VoxelElementKey<15,0>;
-		using VoxelVertex  = VoxelVertexKey<15,0>;
-		using VoxelFace    = VoxelFaceKey<15,0>;
-		using Mesh_t       = VoxelMesh<15>; //this mesh type
+		//////////////////////////////////////////////////////////////////////////////////////////////////
+		/// Aliases and constants
+		//////////////////////////////////////////////////////////////////////////////////////////////////
+		using VoxelElement = VoxelElementKey<MaxDepth,0>;
+		using VoxelVertex  = VoxelVertexKey<MaxDepth,0>;
+		using VoxelFace    = VoxelFaceKey<MaxDepth,0>;
+		using GeoPoint_t   = gutil::Point<3,double>;
+		using Box_t        = gutil::Box<3,double>;
 
-		static constexpr uint64_t DEPTH = Depth;
-		static constexpr uint64_t TOTAL_POSSIBLE_ELEMENTS = 
-				VoxelElement::depth_linear_start(Depth+1) - VoxelElement::depth_linear_start(Depth);
+		uint64_t depth;										//the depth of this mesh
+		static constexpr uint64_t MAX_DEPTH = MaxDepth;		//the maximum depth to maintain hierarchies
+		
+		static constexpr int DIMENSION = 3;	//TODO: support 2D
+		[[nodiscard]] constexpr uint64_t axis_max_elements() const noexcept { return uint64_t{1} << depth; }
+		[[nodiscard]] constexpr uint64_t max_elements() const noexcept { return uint64_t{1} << (DIMENSION*depth); }
+		
+		//////////////////////////////////////////////////////////////////////////////////////////////////
+		/// Storage
+		/// Allow storing the full mask of all possible elements or just a vector of active elements.
+		//////////////////////////////////////////////////////////////////////////////////////////////////
+		Box_t box;											//physical extents of the domain
+		std::vector<bool> active_mask{};					//mask of active elements using a structured index
+		UnstructuredLayer<MAX_DEPTH> unstructured{};		//a more traditional storage of the mesh
 
+		void init_active_mask() noexcept {
+			active_mask.resize(max_elements());
+		}
+
+		void delete_active_mask() noexcept {
+			active_mask.clear();
+			active_mask.shrink_to_fit();
+		}
+
+
+		//////////////////////////////////////////////////////////////////////////////////////////////////
+		/// Constructors and movement. Copying is disallowed.
+		//////////////////////////////////////////////////////////////////////////////////////////////////
+		StructuredVoxelMesh() = default;
+		StructuredVoxelMesh(const StructuredVoxelMesh&) = delete;
+		StructuredVoxelMesh& operator=(const StructuredVoxelMesh&) = delete;
+		StructuredVoxelMesh(StructuredVoxelMesh&& other) noexcept : 
+			depth{other.depth},
+			box{std::move(other.box)},
+			active_mask{std::move(other.active_mask)}, 
+			unstructured{std::move(other.unstructured)} {}
+		StructuredVoxelMesh& operator=(StructuredVoxelMesh&& other) noexcept {
+			if (this != &other) {
+				depth = other.depth;
+				box = std::move(other.box);
+				active_mask = std::move(other.active_mask);
+				unstructured = std::move(other.unstructured);
+			}
+			return *this;
+		}
+
+		StructuredVoxelMesh(const Box_t& box, uint64_t depth) noexcept : depth{depth}, box{box} {unstructured.box = box;}
+
+
+		//////////////////////////////////////////////////////////////////////////////////////////////////
+		/// Helpful simple queries
+		//////////////////////////////////////////////////////////////////////////////////////////////////
+		[[nodiscard]] bool is_active(VoxelElement el) const noexcept {
+			assert(active_mask.size() == max_elements());
+			return active_mask[el.depth_linear_index()];
+		}
+
+
+		//////////////////////////////////////////////////////////////////////////////////////////////////
+		/// Convert to/from an unstructured mesh for a single layer
+		//////////////////////////////////////////////////////////////////////////////////////////////////
+		StructuredVoxelMesh(const UnstructuredLayer<MAX_DEPTH>& layer) noexcept {
+			set_mask(false);
+
+			for (uint64_t i=0; i<layer.n_elements(); ++i) {
+				active_mask[layer.elements[i].depth_linear_index()] = true;
+			}
+		}
+
+		void update_unstructured() noexcept {
+			unstructured.clear();
+			for (uint64_t i=0; i<max_elements(); ++i) {
+				const VoxelElement el(depth,i);
+				if (is_active(el)) { unstructured.push_back(el); }
+			}
+		}
+
+
+		//////////////////////////////////////////////////////////////////////////////////////////////////
+		/// Set the mask.
+		//////////////////////////////////////////////////////////////////////////////////////////////////
+		template<typename Predicate>
+		void set_mask(Predicate&& pred) noexcept {
+			unstructured.clear();
+			init_active_mask();
+
+			for_each_index( [&](uint64_t i) { active_mask[i] = pred(VoxelElement(depth,i)); });
+		}
+
+		void set_mask(bool val=false) noexcept {
+			unstructured.clear();
+			active_mask.resize(max_elements());
+			std::fill(active_mask.begin(), active_mask.end(), val);
+		}
+
+
+
+		//////////////////////////////////////////////////////////////////////////////////////////////////
+		/// Loop over every possible element. To loop over active elements only, use the unstructured mesh.
+		/// Note Action is allowed to edit the mesh if the caller can capture a non-const reference.
+		///
+		/// Looping over elements in an ADI fashion is possible, but should be explicitly written.
+		//////////////////////////////////////////////////////////////////////////////////////////////////
 		#ifdef _OPENMP
-			static constexpr bool OPENMP = true;
+		template<typename Action>
+		void for_each_element_omp(Action&& action) const noexcept {
+			constexpr uint64_t CHUNK = 512;
+			const uint64_t n_chunk = (max_elements()+CHUNK-1) / CHUNK;
+
+			//each thread gets one contiguous sequence of chunks.
+			//for example, thread 0 may get chunks [0,5), thread 1 chunks [5,10), and thread 2 chunks [10,12)
+			//with the size of each range of chunks split evenly with the remainder sent to the last thread.
+			#pragma omp parallel for schedule(static)
+			for (uint64_t c=0; c<n_chunk; ++c) {
+				const int tid = omp_get_thread_num();
+				const uint64_t c_start = c*CHUNK;
+				const uint64_t c_end   = std::min(c_start+CHUNK, max_elements());
+				
+				VoxelElement el(depth, c_start);
+				for (uint64_t idx=c_start; idx<c_end; ++idx, ++el) {
+					assert(el.linear_index() == idx);
+					if constexpr (std::is_invocable_v<Action, VoxelElement, int>) {
+						action(el, tid);
+					}
+					else {
+						action(el);
+					}
+				}
+			}
+		}
+
+		template<typename Action>
+		void for_each_index_omp(Action&& action) const noexcept {
+			constexpr uint64_t CHUNK = 512;
+			const uint64_t n_chunk = (max_elements()+CHUNK-1) / CHUNK;
+
+			//each thread gets one contiguous sequence of chunks.
+			//for example, thread 0 may get chunks [0,5), thread 1 chunks [5,10), and thread 2 chunks [10,12)
+			//with the size of each range of chunks split evenly with the remainder sent to the last thread.
+			#pragma omp parallel for schedule(static)
+			for (uint64_t c=0; c<n_chunk; ++c) {
+				const int tid = omp_get_thread_num();
+				const uint64_t c_start = c*CHUNK;
+				const uint64_t c_end   = std::min(c_start+CHUNK, max_elements());
+				
+				for (uint64_t idx=c_start; idx<c_end; ++idx) {
+					if constexpr (std::is_invocable_v<Action, uint64_t, int>) {
+						action(idx, tid);
+					}
+					else {
+						action(idx);
+					}
+				}
+			}
+		}
+
+		template<typename Action>
+		void for_each_element_simd(Action&& action) const noexcept {
+			constexpr uint64_t WORD_SIZE = sizeof(size_t);
+			#pragma omp simd safelen(WORD_SIZE)
+			for (uint64_t i=0; i<max_elements(); ++i) {
+				VoxelElement el(depth,i);
+				action(el);
+			}
+		}
+
+		template<typename Action>
+		void for_each_index_simd(Action&& action) const noexcept {
+			constexpr uint64_t WORD_SIZE = sizeof(size_t);
+			#pragma omp simd safelen(WORD_SIZE)
+			for (uint64_t i=0; i<max_elements(); ++i) {
+				action(i);
+			}
+		}
+
 		#else
-			static constexpr bool OPENMP = false;
+
+		template<typename Action>
+		void for_each_element_omp(Action&& action) const noexcept {
+			gutil::Logger::error("Not compiled with OpenMP. Did you forget -fopenmp?");
+			for_each_element(std::forward<Action>(action));
+		}
+
+		template<typename Action>
+		void for_each_element_simd(Action&& action) const noexcept {
+			gutil::Logger::error("Not compiled with OpenMP. Did you forget -fopenmp?");
+			for_each_element(std::forward<Action>(action));
+		}
+
+		template<typename Action>
+		void for_each_index_omp(Action&& action) const noexcept {
+			gutil::Logger::error("Not compiled with OpenMP. Did you forget -fopenmp?");
+			for_each_index(std::forward<Action>(action));
+		}
+
+		template<typename Action>
+		void for_each_index_simd(Action&& action) const noexcept {
+			gutil::Logger::error("Not compiled with OpenMP. Did you forget -fopenmp?");
+			for_each_index(std::forward<Action>(action));
+		}
+
 		#endif
 
-	protected:
-		std::bitset<TOTAL_POSSIBLE_ELEMENTS>* active_elem = new std::bitset<TOTAL_POSSIBLE_ELEMENTS>(1);
 
-	public:
-		using GeoPoint_t = gutil::Point<3,double>; //points in space
-		
-		const GeoPoint_t low;
-		const GeoPoint_t high;
-		const GeoPoint_t diag;
-
-		StructuredVoxelMesh(const GeoPoint_t low_, const GeoPoint_t high_) :
-			low{elmin(low_, high_)},
-			high{elmax(low_, high_)},
-			diag{high-low} {}
-
-		virtual ~StructuredVoxelMesh() {delete active_elem;}
-
-		//simple querries and operations
-		inline void reset() {active_elem->reset();}
-		inline size_t n_elements() const {return active_elem->count();}
-		inline size_t count_elements() const {return active_elem->count();}
-
-		inline void activate(const VoxelElement el) noexcept {
-			assert(el.depth()==DEPTH);
-			assert(el.is_valid());
-			active_elem->set(el.linear_index());
-		}
-
-		inline void deactivate(const VoxelElement el) noexcept {
-			assert(el.depth()==DEPTH);
-			assert(el.is_valid());
-			active_elem->reset(el.linear_index());
-		}
-
-		//test if a feature is active.
-		//active elements are recorded int the active_elem bitset
-		//vertices and faces are active if they belong to an active element
-		//note there may be many vertices at the same geometric location but existing at different levels
-		//you may need to look at parent/child vertices to get the expected result
-		[[nodiscard]] inline bool is_active(const VoxelElement el) const noexcept {
-			assert(el.depth()==DEPTH);
-			assert(el.is_valid()); 
-			return active_elem->test(el.linear_index());
-		}
-		
-		template<typename Key_t> requires (MeshFaceType<Key_t,Mesh_t> || MeshVertexType<Key_t,Mesh_t>)
-		bool is_active(const Key_t key) const {
-			assert(key.depth()==DEPTH);
-			assert(key.is_valid());
-			for (const VoxelElement el : key.elements()) {
-				if (el.exists() and is_active(el)) {return true;}
-			}
-			return false;
-		}
-
-		inline void set(const VoxelElement el, const bool flag = true) {
-			assert(el.depth()==DEPTH);
-			assert(el.is_valid());
-			active_elem->set(el.linear_index(), flag);
-		}
-
-		template<typename Predicate = std::nullptr_t>
-		[[nodiscard]] StructuredVoxelMesh<DEPTH+1> refine(Predicate&& pred = nullptr) requires (DEPTH<MAX_DEPTH) {
-			StructuredVoxelMesh<DEPTH+1> mesh(low,high);
-
-			//set the children of active elements to active and the
-			//children of inactive elements to inactive
-			if constexpr (IS_NULLPTR_T<Predicate>) {
-				#pragma omp parallel for
-				for (size_t i=0; i<TOTAL_POSSIBLE_ELEMENTS; ++i) {
-					const VoxelElement el(DEPTH, i);
-					const bool flag = is_active(el);
-					for (VoxelElement child : el.children()) {
-						mesh.set(child, flag);
-					}
-				}
-			}
-			else {
-				#pragma omp parallel for
-				for (size_t i=0; i<TOTAL_POSSIBLE_ELEMENTS; ++i) {
-					const VoxelElement el(DEPTH, i);
-					for (VoxelElement child : el.children()) {
-						mesh.set(child, pred(child));
-					}
-				}
+		template<typename Action>
+		void for_each_element(Action&& action) const noexcept {
+			VoxelElement el(depth,0);
+			for (uint64_t i=0; i<max_elements(); ++i, ++el) {
+				assert( el == VoxelElement(depth,i) );
+				action(el);
 			}
 		}
 
-		template<typename Predicate = std::nullptr_t>
-		[[nodiscard]] StructuredVoxelMesh<DEPTH+1> coarsen(Predicate&& pred = nullptr) requires (DEPTH>0) {
-			StructuredVoxelMesh<DEPTH-1> mesh(low,high);
-
-			//set the parent of active elements to active if it has more active than inactive children
-			if constexpr (IS_NULLPTR_T<Predicate>) {
-				#pragma omp parallel for
-				for (size_t i=0; i<mesh.TOTAL_POSSIBLE_ELEMENTS; ++i) {
-					const VoxelElement el(DEPTH-1, i);
-					int count = 0;
-					for (VoxelElement child : el.children()) {
-						count += this->is_active(child) ? 1 : 0;
-					}
-					mesh.set(el, count>=4);
-				}
-			}
-			else {
-				#pragma omp parallel for
-				for (size_t i=0; i<mesh.TOTAL_POSSIBLE_ELEMENTS; ++i) {
-					const VoxelElement el(DEPTH-1, i);
-					mesh.set(el, pred(el));
-				}
+		template<typename Action>
+		void for_each_index(Action&& action) const noexcept {
+			for (uint64_t i=0; i<max_elements(); ++i) {
+				action(i);
 			}
 		}
-
-		
-		//geometry operations
-		template<typename V> requires (VoxelEquivFeature<V,VoxelVertex>)
-		inline GeoPoint_t ref2geo(const V vtx) const {
-			return low + diag*vtx.normalized_coordinate();
-		}
-
-		
-		
-
-
 	};
 }

@@ -7,10 +7,10 @@ SRC     = $(wildcard $(DIR)/*.cpp)
 TARGETS = $(SRC:.cpp=)
 
 #default build (debug)
-# CXX        =  g++ -std=c++23
-# OPT        = -O0
-# PAR        = -fopenmp
-# DEBUG      = -pg -g3 -Wall -DGUTIL_N_OCTREE_THREADS=0
+CXX        =  g++ -std=c++23
+OPT        = -O0
+PAR        = -fopenmp
+DEBUG      = -pg -g3 -Wall -DGUTIL_N_OCTREE_THREADS=0
 
 #redefine for testing optimizations
 CXX        =  g++ -std=c++23 -funroll-loops

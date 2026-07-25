@@ -119,7 +119,8 @@ namespace GV
 		static_assert( ((std::same_as<typename Mesh_t::VoxelElement, typename Lookups::MeshFeature_t> || std::same_as<void, typename Lookups::MeshFeature_t>)&& ... ), "all lookups must be for mesh elements");
 
 		//open file
-		const auto mode = ASCII ? std::ios::app : (std::ios::app | std::ios::binary);
+		constexpr auto mode = ASCII ? std::ios::app : (std::ios::app | std::ios::binary);
+		constexpr size_t N_LOOKUPS = sizeof...(lookups);
 		std::ofstream file(filename, mode);
 
 		if (!file.is_open()) {
@@ -132,8 +133,8 @@ namespace GV
 		file << "FIELD " << field_name << " " << sizeof...(lookups) << "\n";
 
 		//write a lambda to do the printing for each lookup
-		auto write_var = [&]<typename Lookup_t>(const Lookup_t& lookup) {
-			file << lookup.header(f_count);
+		auto write_var = [&]<typename Lookup_t>(std::ostringstream& buf, const Lookup_t& lookup) {
+			buf << lookup.header(f_count);
 
 			uint64_t idx = 0;
 			for (auto it = mesh.element_begin(); it != mesh.element_end(); ++it, ++idx) {
@@ -142,21 +143,40 @@ namespace GV
 					else {return lookup(*it);}
 				}();
 				if constexpr (ASCII) {
-					if constexpr (Lookup_t::IS_SCALAR) {file << val << "\n";}
+					if constexpr (Lookup_t::IS_SCALAR) {buf << val << "\n";}
 					else {
-						for (int i=0; i<Lookup_t::N; i++) {file << val[i] << " ";}
-						file << "\n";
+						for (int i=0; i<Lookup_t::N; i++) {buf << val[i] << " ";}
+						buf << "\n";
 					}
 				}
 				else {
-					WRITE_BIG_ENDIAN<typename Lookup_t::OutScalar_t>(file, val);
+					WRITE_BIG_ENDIAN<typename Lookup_t::OutScalar_t>(buf, val);
 				}
 			}
 
-			if constexpr (ASCII) {file << "\n";}
+			if constexpr (ASCII) {buf << "\n";}
 		};
 
-		(write_var(lookups),...);
+		//set up one buffer per lookup, then dispatch one thread per lookup and combine
+		std::array<std::ostringstream, N_LOOKUPS> buffers;
+		if constexpr (!ASCII) {
+			for (auto& b : buffers) { b = std::ostringstream(std::ios::out | std::ios::binary); }
+		}
+
+		auto lookup_refs = std::tie(lookups...);
+
+		[&]<std::size_t... I>(std::index_sequence<I...>) {
+			std::array<std::thread, N_LOOKUPS> threads {
+				std::thread( [&](){ write_var(buffers[I], std::get<I>(lookup_refs)); } )...
+			};
+			for (auto& t : threads) {t.join();}
+		}(std::index_sequence_for<Lookups...>{});
+
+		for (auto& buf : buffers) {
+			const std::string s = buf.str();
+			if constexpr (ASCII) {file << s;}
+			else {file.write(s.data(),s.size());}
+		}
 	}
 
 	template<typename Mesh_t, bool ASCII, typename... Lookups> 
@@ -166,7 +186,8 @@ namespace GV
 		static_assert( ((std::same_as<typename Mesh_t::VoxelVertex, typename Lookups::MeshFeature_t> || std::same_as<void, typename Lookups::MeshFeature_t>)&& ... ), "all lookups must be for mesh vertices");
 
 		//open file
-		const auto mode = ASCII ? std::ios::app : (std::ios::app | std::ios::binary);
+		constexpr auto mode = ASCII ? std::ios::app : (std::ios::app | std::ios::binary);
+		constexpr size_t N_LOOKUPS = sizeof...(lookups);
 		std::ofstream file(filename, mode);
 
 		if (!file.is_open()) {
@@ -176,11 +197,11 @@ namespace GV
 		//write section header and get feature count
 		const uint64_t f_count = mesh.n_vertices();
 		file << "POINT_DATA " << f_count << "\n";
-		file << "FIELD " << field_name << " " << sizeof...(lookups) << "\n";
+		file << "FIELD " << field_name << " " << N_LOOKUPS << "\n";
 
 		//write a lambda to do the printing for each lookup
-		auto write_var = [&]<typename Lookup_t>(const Lookup_t& lookup) {
-			file << lookup.header(f_count);
+		auto write_var = [&]<typename Lookup_t>(std::ostringstream& buf, const Lookup_t& lookup) {
+			buf << lookup.header(f_count);
 
 			uint64_t idx = 0;
 			for (auto it = mesh.vertex_begin(); it != mesh.vertex_end(); ++it, ++idx) {
@@ -189,21 +210,40 @@ namespace GV
 					else {return lookup(*it);}
 				}();
 				if constexpr (ASCII) {
-					if constexpr (Lookup_t::IS_SCALAR) {file << val << "\n";}
+					if constexpr (Lookup_t::IS_SCALAR) {buf << val << "\n";}
 					else {
-						for (int i=0; i<Lookup_t::N; i++) {file << val[i] << " ";}
-						file << "\n";
+						for (int i=0; i<Lookup_t::N; i++) {buf << val[i] << " ";}
+						buf << "\n";
 					}
 				}
 				else {
-					WRITE_BIG_ENDIAN<typename Lookup_t::OutScalar_t>(file, val);
+					WRITE_BIG_ENDIAN<typename Lookup_t::OutScalar_t>(buf, val);
 				}
 			}
 
-			if constexpr (ASCII) {file << "\n";}
+			if constexpr (ASCII) {buf << "\n";}
 		};
 
-		(write_var(lookups),...);
+		//set up one buffer per lookup, then dispatch one thread per lookup and combine
+		std::array<std::ostringstream, N_LOOKUPS> buffers;
+		if constexpr (!ASCII) {
+			for (auto& b : buffers) { b = std::ostringstream(std::ios::out | std::ios::binary); }
+		}
+
+		auto lookup_refs = std::tie(lookups...);
+
+		[&]<std::size_t... I>(std::index_sequence<I...>) {
+			std::array<std::thread, N_LOOKUPS> threads {
+				std::thread( [&](){ write_var(buffers[I], std::get<I>(lookup_refs)); } )...
+			};
+			for (auto& t : threads) {t.join();}
+		}(std::index_sequence_for<Lookups...>{});
+
+		for (auto& buf : buffers) {
+			const std::string s = buf.str();
+			if constexpr (ASCII) {file << s;}
+			else {file.write(s.data(),s.size());}
+		}
 	}
 
 

@@ -1,16 +1,14 @@
 #pragma once
 
+
+#include "util/macros.hpp"
 #include "mesh/keys/voxel_key_base.hpp"
+
 #include <cstdint>
 #include <cassert>
 #include <array>
 
-#ifdef _OPENMP
-#include <omp.h>
-#endif
-
-namespace GV
-{
+namespace GV {
 	//define the element key and implement most methods.
 	//adjacency methods must be implemented in a separate file after
 	//all mesh feature keys are defined
@@ -22,8 +20,7 @@ namespace GV
 	struct VoxelFaceKey;
 
 	template<uint64_t MAX_DEPTH_=16, uint64_t BC=0>
-	struct VoxelElementKey : public VoxelKey<3,0,MAX_DEPTH_+1>
-	{
+	struct VoxelElementKey : public VoxelKey<3,0,MAX_DEPTH_+1> {
 		static_assert(BC<8, "VoxelElementKey: invalid boundary condition. BC must be from 0 to 7.");
 
 		//inherit constructors
@@ -43,9 +40,9 @@ namespace GV
 		using BASE::Hash;
 
 		//usually the fee bits mean a manual color is set
-		#pragma omp declare simd
+		GEOVOX_DECLARE_SIMD()
 		inline constexpr uint64_t color() const {return BASE::free();}
-		#pragma omp declare simd
+		GEOVOX_DECLARE_SIMD()
 		inline constexpr void set_color(const uint64_t clr) {BASE::set_free(clr);}
 		static constexpr uint64_t NO_COLOR = BASE::F_M >> BASE::F_S;
 
@@ -75,7 +72,7 @@ namespace GV
 		}
 
 		//define element specific constructors
-		#pragma omp declare simd
+		GEOVOX_DECLARE_SIMD()
 		constexpr VoxelElementKey(const uint64_t dd, const uint64_t ii, const uint64_t jj, const uint64_t kk) :
 			BASE( 	ii, jj, kk,
 					0, dd, BC, NO_COLOR) {
@@ -88,7 +85,7 @@ namespace GV
 			}
 		}
 
-		#pragma omp declare simd
+		GEOVOX_DECLARE_SIMD()
 		constexpr VoxelElementKey(const uint64_t dd, uint64_t li) {
 			// L = i + j*N + k*N^2
 
@@ -106,7 +103,7 @@ namespace GV
 
 		
 		//check if a voxel is valid
-		#pragma omp declare simd
+		GEOVOX_DECLARE_SIMD()
 		constexpr bool is_valid() const {
 			const uint64_t mei = (uint64_t{1} << depth()) - 1; //max element index
 			if (depth() > MAX_DEPTH) {return false;}
@@ -118,20 +115,20 @@ namespace GV
 
 		//get the linear index of the element at the current depth
 		// L = i + j*N + k*N^2
-		#pragma omp declare simd
+		GEOVOX_DECLARE_SIMD()
 		constexpr uint64_t depth_linear_index() const {
 			assert(is_valid());
 			const uint64_t N = (uint64_t{1} << depth()); //number of elements per side
 			return i() + N*(j() + N*k());
 		}
 
-		#pragma omp declare simd
+		GEOVOX_DECLARE_SIMD()
 		static constexpr uint64_t depth_linear_start(const uint64_t dd) {
 			//sum from d=0 to dd-1 of 8^d
 			return ((uint64_t{1} << (3*dd)) - 1)/7;
 		}
 
-		#pragma omp declare simd
+		GEOVOX_DECLARE_SIMD()
 		constexpr uint64_t linear_index() const {
 			return depth_linear_start(depth()) + depth_linear_index();
 		}
@@ -244,7 +241,7 @@ namespace GV
 		}
 
 		//iterator logic
-		#pragma omp declare simd
+		GEOVOX_DECLARE_SIMD()
 		VoxelElementKey& operator++() {
 			assert(is_valid());
 			const uint64_t dd  = depth();
