@@ -12,12 +12,19 @@
 #include <omp.h>
 #endif
 
-namespace GV
-{
+namespace GV {
+
+
+	////////////////////////////////////////////////////////////////////////////////////////
+	/// A base class for storing dofs at mesh features.
+	////////////////////////////////////////////////////////////////////////////////////////
 	template<VoxelMeshType Mesh_type, typename DOF_type>
-	class DofHandlerBase
-	{
-	public:
+	struct DofHandlerBase {
+
+
+		////////////////////////////////////////////////////////////////////////////////////
+		/// Aliases and constants
+		////////////////////////////////////////////////////////////////////////////////////
 		using DOF_t      = DOF_type;
 		using QuadElem_t = typename DOF_t::QuadElem_t;
 		using DOFKey_t   = typename DOF_t::Key_t;
@@ -47,33 +54,27 @@ namespace GV
 		const Mesh_t& mesh;
 
 		static constexpr uint64_t TOTAL_POSSIBLE_DOFS = total_possible<MeshKey_t>(MAX_DEPTH);
-		static constexpr bool OPENMP = Mesh_t::OPENMP;
-
-		//constructor and destructor
+		
+		
+		////////////////////////////////////////////////////////////////////////////////////
+		/// Constructors and memory management
+		////////////////////////////////////////////////////////////////////////////////////
 		explicit DofHandlerBase(const Mesh_t& mesh) : mesh(mesh) {}
-		virtual ~DofHandlerBase() {
-			delete active_dofs;
-		}
+		~DofHandlerBase() { delete active_dofs; }
 
-		//non-copyable
+		//not copyable or movable
 		DofHandlerBase(const DofHandlerBase&) = delete;
 		DofHandlerBase& operator=(const DofHandlerBase&) = delete;
-
-		//movable by construction
-		DofHandlerBase(DofHandlerBase&& other) :
-			mesh(other.mesh), 
-			active_dofs(other.active_dofs)
-		{
-			other.active_dofs = nullptr;
-		}
-
-		//can't move by assignment
+		DofHandlerBase(DofHandlerBase&& other) = delete;
 		DofHandlerBase& operator=(DofHandlerBase&&) = delete;
 
-		protected:
+	protected:
+		////////////////////////////////////////////////////////////////////////////////////
+		/// Storage
+		////////////////////////////////////////////////////////////////////////////////////
 		//track which dofs are active based on a global numbering system of the voxel features.
 		//instances of the DOF_t act as an iterator into this set.
-		std::bitset<TOTAL_POSSIBLE_DOFS>* active_dofs = new std::bitset<TOTAL_POSSIBLE_DOFS>(0);
+		std::bitset<TOTAL_POSSIBLE_DOFS>* active_dofs = new std::bitset<TOTAL_POSSIBLE_DOFS>{};
 
 		//track a compressed list of active dofs
 		//the bitfield is the "source of truth"
@@ -85,29 +86,58 @@ namespace GV
 		std::vector<DOF_t> active_dof_list_curr;
 		std::unordered_map<DOF_t, uint64_t, typename DOF_t::Hash> dof_to_idx_map;
 
-		public:
-		//simple queries
-		inline constexpr uint64_t n_dofs() const {return active_dof_list_curr.size();}
-		inline constexpr uint64_t count_dofs() const {return active_dofs->count();}
+	public:
+		////////////////////////////////////////////////////////////////////////////////////
+		/// Interface
+		////////////////////////////////////////////////////////////////////////////////////
+		[[nodiscard]] constexpr uint64_t n_dofs() const noexcept {return active_dof_list_curr.size();}
+		[[nodiscard]] constexpr uint64_t count_dofs() const noexcept {return active_dofs->count();}
 
-		inline constexpr bool is_active(const DOF_t dof) const {assert(dof.is_valid()); return active_dofs->test(dof.key.linear_index());}
-		inline constexpr void set_active(const DOF_t dof, const bool b) {assert(dof.is_valid()); active_dofs->set(dof.key.linear_index(), b);}
-
-		inline constexpr bool is_active(const uint64_t idx) const {assert(idx<TOTAL_POSSIBLE_DOFS); return active_dofs->test(idx);}
-		inline constexpr void set_active(const uint64_t idx, const bool b) {assert(idx<TOTAL_POSSIBLE_DOFS); active_dofs->set(idx, b);}
-
-		inline const auto& prev_compressed_dofs() const {return active_dof_list_prev;}
-		inline const auto& curr_compressed_dofs() const {return active_dof_list_curr;}
-		
-		inline const auto& dof_to_idx() const {return dof_to_idx_map;}
-		inline uint64_t compressed_index(const DOF_t dof) const {
-			const auto it = dof_to_idx_map.find(dof);
-			return it    != dof_to_idx_map.end() ? it->second : uint64_t(-1);
+		[[nodiscard]] constexpr bool is_active(const DOF_t dof) const noexcept {
+			assert(dof.is_valid());
+			return active_dofs->test(dof.key.linear_index());
 		}
-		inline DOF_t get_dof(const uint64_t idx) const {assert(idx<active_dof_list_curr.size()); return active_dof_list_curr[idx];}
+
+		[[nodiscard]] constexpr bool is_active(const uint64_t idx) const noexcept {
+			assert(idx<TOTAL_POSSIBLE_DOFS);
+			return active_dofs->test(idx);
+		}
+		
+		constexpr void set_active(const DOF_t dof, const bool b) noexcept {
+			assert(dof.is_valid());
+			active_dofs->set(dof.key.linear_index(), b);
+		}
+
+		constexpr void set_active(const uint64_t idx, const bool b) noexcept {
+			assert(idx<TOTAL_POSSIBLE_DOFS);
+			active_dofs->set(idx, b);
+		}
+
+		[[nodiscard]] const auto& prev_compressed_dofs() const noexcept {return active_dof_list_prev;}
+		[[nodiscard]] const auto& curr_compressed_dofs() const noexcept {return active_dof_list_curr;}
+		
+		[[nodiscard]] const auto& dof_to_idx() const noexcept {return dof_to_idx_map;}
+		
+		[[nodiscard]] uint64_t compressed_index(DOF_t dof) const noexcept {
+			const auto it = dof_to_idx_map.find(dof);
+			return (it != dof_to_idx_map.end()) ? it->second : uint64_t(-1);
+		}
+		
+		[[nodiscard]] DOF_t get_dof(uint64_t idx) const noexcept {
+			assert(idx<active_dof_list_curr.size());
+			return active_dof_list_curr[idx];
+		}
+
+		//determine if the specified feature is 'cononical'. Returns true when
+		//the feature is the feature 
+		[[nodiscard]] bool is_cononical(MeshKey_t key) const noexcept {
+			
+		}
+
+
 
 		//simple management operations
-		inline void set_all_inactive() 	{active_dofs->reset();}
+		void set_all_inactive() noexcept {active_dofs->reset();}
 
 		//activate all dofs at a certain depth if they have an active support element all other dofs are inactive.
 		//that this method will only be called when the user intends to "set/reset" the problem.
@@ -184,10 +214,8 @@ namespace GV
 					active_dof_list_curr.insert(active_dof_list_curr.end(),
 						std::make_move_iterator(list.begin()),
 						std::make_move_iterator(list.end()));
-
 					list.clear();
 				}
-
 				if (active_dof_list_curr.size() == ndofs) {break;}
 			}
 

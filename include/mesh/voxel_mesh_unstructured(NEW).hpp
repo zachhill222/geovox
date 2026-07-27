@@ -19,7 +19,9 @@
 #include <sstream>
 #include <fstream>
 
-
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 namespace GV {
 
@@ -72,13 +74,13 @@ namespace GV {
 	protected:
 		std::array<S_Layer_t,MAX_DEPTH+1> s_layers{};	//the primary mesh storage
 
-		gutil::ThreadPool large_pool{};					//thread pool with the number of available threads equal to the physical cores
-		gutil::ThreadPool small_pool{2};				//smaller thread pool to allow openmp parallelism within the dispatched tasks
+		mutable gutil::ThreadPool large_pool{};			//thread pool with the number of available threads equal to the physical cores
+		mutable gutil::ThreadPool small_pool{2};		//smaller thread pool to allow openmp parallelism within the dispatched tasks
 
 		//store a list of elements that classes with a const reference to the mesh can use to request
 		//element refinement or unrefinement
-		mutable std::array<std::vector<VoxelElement>,MAX_DEPTH+1> request_active{};
-		mutable std::array<std::vector<VoxelElement>,MAX_DEPTH+1> request_deactive{};
+		mutable std::array<std::vector<VoxelElement>,MAX_DEPTH+1> request_refine{};
+		mutable std::array<std::vector<VoxelElement>,MAX_DEPTH+1> request_coarsen{};
 		
 
 		/////////////////////////////////////////////////////////////////////////////////////////////////
@@ -90,6 +92,13 @@ namespace GV {
 				s_layers[dd].box = box;
 				s_layers[dd].init_active_mask();
 			}
+		}
+
+		template<typename T>
+		void sort_and_unique(std::vector<T>& list) const noexcept {
+			std::sort(list.begin(), list.end());
+			auto last = std::unique(list.begin(), list.end());
+			list.erase(last, list.end());
 		}
 
 	public:
@@ -128,8 +137,6 @@ namespace GV {
 
 		void collect_vertices() noexcept {
 			for (S_Layer_t& layer : s_layers) {
-				//passing the true flag means that each layer will only collect
-				//vertices that were introduced at its depth
 				large_pool.submit( [&](){ layer.unstructured.collect_vertices(); });
 			}
 			large_pool.wait_idle();
@@ -145,10 +152,7 @@ namespace GV {
 				}
 
 				//sort and de-duplicate the next list
-				auto& list = s_layers[dd-1].unstructured.vertices;
-				std::sort(list.begin(), list.end());
-				auto last = std::unique(list.begin(), list.end());
-				list.erase(last,list.end());
+				sort_and_unique( s_layers[dd-1].unstructured.vertices );
 
 				//clean up the current list (already sorted, just delete the bad vertices)
 				std::erase_if( s_layers[dd].unstructured.vertices, [dd](VoxelVertex vtx){ return vtx.depth() < dd; });
@@ -156,7 +160,7 @@ namespace GV {
 		}
 		
 		//TODO: when coloring globally, it might be better to return pointers to the actual elements rather than copies
-		std::vector<VoxelElement> neighbors(VoxelElement el) const noexcept {
+		[[nodiscard]] std::vector<VoxelElement> neighbors(VoxelElement el) const noexcept {
 			assert(el.is_valid());
 			std::vector<VoxelElement> result;
 
@@ -244,10 +248,162 @@ namespace GV {
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Methods for manipulating the mesh
 		/////////////////////////////////////////////////////////////////////////////////////////////////
-		void activate(VoxelElement el) const noexcept {request_active[el.depth()].push_back(el);}
-		void deactivate(VoxelElement el) const noexcept {request_deactive[el.depth()].push_back(el);}
-		void process_requests() noexcept;
+		void refine(VoxelElement el) const noexcept {
+			GUTIL_ASSERT(el.depth()<MAX_DEPTH);
+			request_refine[el.depth()].push_back(el);
+		}
+		
+		void coarsen(VoxelElement el) const noexcept {
+			GUTIL_ASSERT(el.depth()>0);
+			request_coarsen[el.depth()].push_back(el);
+		}
+
+		template<typename Predicate>
+		void refine(Predicate&& pred) const noexcept {
+			for (uint64_t dd=0; dd<MAX_DEPTH; ++dd) {
+				auto action = [&, dd](VoxelElement el, int t) {if (pred(el)) { request_refine[dd].push_back(el); }};
+				large_pool.submit( [&, dd, action]() { s_layers[dd].unstructured.for_each_element( action ); });
+			}
+			large_pool.wait_idle();
+		}
+
+		template<typename Predicate>
+		void coarsen(Predicate&& pred) const noexcept {
+			for (uint64_t dd=1; dd<=MAX_DEPTH; ++dd) {
+				auto action = [&, dd](VoxelElement el) {if (pred(el)) { request_coarsen[dd].push_back(el); }};
+				large_pool.submit( [&,dd,action]() { s_layers[dd].unstructured.for_each_element( action ); });
+			}
+			large_pool.wait_idle();
+		}
+
+		void process_coarsen() noexcept;
+
+		template<typename Predicate = std::nullptr_t>
+		void process_refine(Predicate&& pred = nullptr) noexcept;
+
+
+		/////////////////////////////////////////////////////////////////////////////////////////////////
+		/// Forward feature looping per depth
+		/////////////////////////////////////////////////////////////////////////////////////////////////
+		template<typename Key_t, typename Action>
+		inline void for_each_depth(const uint64_t depth, Action&& action) const requires (std::same_as<Key_t,VoxelElement>) {
+			s_layers[depth].for_each_element(std::forward<Action>(action));
+		}
+
+		template<typename Key_t, typename Action> 
+		inline void for_each_depth_omp(const uint64_t depth, Action&& action) const requires (std::same_as<Key_t,VoxelElement>) {
+			s_layers[depth].for_each_element_omp(depth, std::forward<Action>(action));
+		}
+
+
+
 	};
+
+
+	//////////////////////////////////////////////////////////////////////////////////////////////////////
+	/// Implementations
+	//////////////////////////////////////////////////////////////////////////////////////////////////////
+	template<uint64_t MaxDepth>
+	void UnstructuredVoxelMesh<MaxDepth>::process_coarsen() noexcept {
+		//ensure the coarsen lists don't contain duplicates
+		for (uint64_t dd=1; dd<=MAX_DEPTH; ++dd) {
+			auto job = [&,dd]() {
+				sort_and_unique(request_coarsen[dd]);
+			};
+			large_pool.submit(job);
+		}
+		large_pool.wait_idle();
+
+		//we can process in 2 parallel batches due to the 2-1 rule
+		//deactivate specified elements and its siblings at level dd,
+		//then activate its parent at level dd-1
+		for (uint64_t dd=1; dd<=MAX_DEPTH; dd+=2) {
+			auto job = [&,dd]() {
+				for (VoxelElement el : request_coarsen[dd]) {
+					auto sib = el.parent().children();
+					s_layers[dd].set_element(as_span(sib), false);
+					s_layers[dd-1].set_element(el.parent(), true);
+				}
+				request_coarsen[dd].clear();
+			};
+
+			large_pool.submit(job);
+		}
+		large_pool.wait_idle();
+
+		for (uint64_t dd=2; dd<=MAX_DEPTH; dd+=2) {
+			auto job = [&,dd]() {
+				for (VoxelElement el : request_coarsen[dd]) {
+					auto sib = el.parent().children();
+					s_layers[dd].set_element(as_span(sib), false);
+					s_layers[dd-1].set_element(el.parent(), true);
+				}
+				request_coarsen[dd].clear();
+			};
+
+			large_pool.submit(job);
+		}
+		large_pool.wait_idle();
+	}
+
+	template<uint64_t MaxDepth>
+	template<typename Predicate>
+	void UnstructuredVoxelMesh<MaxDepth>::process_refine(Predicate&& pred) noexcept {
+		//ensure the refine lists don't contain duplicates
+		for (uint64_t dd=0; dd<MAX_DEPTH; ++dd) {
+			auto job = [&,dd]() {
+				sort_and_unique(request_refine[dd]);
+			};
+			large_pool.submit(job);
+		}
+		large_pool.wait_idle();
+
+		//we can process in 2 parallel batches due to the 2-1 rule
+		//deactivate specified elements at level dd,
+		//then activate its children that satisfy the predicate at level dd+1
+		for (uint64_t dd=0; dd<MAX_DEPTH; dd+=2) {
+			auto job = [&,dd]() {
+				for (VoxelElement el : request_refine[dd]) {
+					
+					s_layers[dd].set_element(el, false);
+
+					if constexpr (NULLPTR_T<Predicate>) {
+						s_layers[dd+1].set_element(as_span(el.children()), true);
+					}
+					else {
+						for (VoxelElement chi : el.children()) {
+							if (pred(chi)) { s_layers[dd+1].set_element(chi, true); }
+						}
+					}
+				}
+				request_refine[dd].clear();
+			};
+			large_pool.submit(job);
+		}
+		large_pool.wait_idle();
+
+		for (uint64_t dd=1; dd<MAX_DEPTH; dd+=2) {
+			auto job = [&,dd]() {
+				for (VoxelElement el : request_refine[dd]) {
+					
+					s_layers[dd].set_element(el, false);
+
+					if constexpr (NULLPTR_T<Predicate>) {
+						s_layers[dd+1].set_element(as_span(el.children()), true);
+					}
+					else {
+						for (VoxelElement chi : el.children()) {
+							if (pred(chi)) { s_layers[dd+1].set_element(chi, true); }
+						}
+					}
+				}
+				request_refine[dd].clear();
+			};
+			large_pool.submit(job);
+		}
+		large_pool.wait_idle();
+	}
+
 
 
 

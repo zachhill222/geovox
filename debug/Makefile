@@ -10,13 +10,13 @@ TARGETS = $(SRC:.cpp=)
 CXX        =  g++ -std=c++23
 OPT        = -O0
 PAR        = -fopenmp
-DEBUG      = -pg -g3 -Wall -DGUTIL_N_OCTREE_THREADS=0
+DEBUG      = -pg -g3 -Wall
 
 #redefine for testing optimizations
 CXX        =  g++ -std=c++23 -funroll-loops
 OPT        = -O3
 PAR        = -fopenmp
-DEBUG      = -DNDEBUG
+# DEBUG      = -DNDEBUG
 
 #final compiler command
 CC = $(CXX) $(OPT) $(PAR) $(DEBUG)

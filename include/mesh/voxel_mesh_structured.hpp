@@ -125,13 +125,25 @@ namespace GV {
 			for_each_index( [&](uint64_t i) { active_mask[i] = pred(VoxelElement(depth,i)); });
 		}
 
-		void set_mask(bool val=false) noexcept {
+		void set_mask(const bool val=false) noexcept {
 			unstructured.clear();
 			active_mask.resize(max_elements());
 			std::fill(active_mask.begin(), active_mask.end(), val);
 		}
 
+		void set_element(std::span<const VoxelElement> list, const bool val) noexcept {
+			for (VoxelElement el : list) { 
+				if (el.exists()) {
+					active_mask[el.depth_linear_index()] = val;	
+				}
+			}
+		}
 
+		void set_element(VoxelElement el, bool val) noexcept {
+			if (el.exists()) {
+				active_mask[el.depth_linear_index()] = val;
+			}
+		}
 
 		//////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Loop over every possible element. To loop over active elements only, use the unstructured mesh.
@@ -141,14 +153,15 @@ namespace GV {
 		//////////////////////////////////////////////////////////////////////////////////////////////////
 		#ifdef _OPENMP
 		template<typename Action>
-		void for_each_element_omp(Action&& action) const noexcept {
+		void for_each_element_omp(Action&& action, int n_threads=-1) const noexcept {
 			constexpr uint64_t CHUNK = 512;
 			const uint64_t n_chunk = (max_elements()+CHUNK-1) / CHUNK;
+			if (n_threads < 0) { n_threads = omp_get_max_threads(); }
 
 			//each thread gets one contiguous sequence of chunks.
 			//for example, thread 0 may get chunks [0,5), thread 1 chunks [5,10), and thread 2 chunks [10,12)
 			//with the size of each range of chunks split evenly with the remainder sent to the last thread.
-			#pragma omp parallel for schedule(static)
+			#pragma omp parallel for schedule(static) num_threads(n_threads)
 			for (uint64_t c=0; c<n_chunk; ++c) {
 				const int tid = omp_get_thread_num();
 				const uint64_t c_start = c*CHUNK;
@@ -156,7 +169,7 @@ namespace GV {
 				
 				VoxelElement el(depth, c_start);
 				for (uint64_t idx=c_start; idx<c_end; ++idx, ++el) {
-					assert(el.linear_index() == idx);
+					GUTIL_ASSERT(el.depth_linear_index() == idx);
 					if constexpr (std::is_invocable_v<Action, VoxelElement, int>) {
 						action(el, tid);
 					}
@@ -168,14 +181,15 @@ namespace GV {
 		}
 
 		template<typename Action>
-		void for_each_index_omp(Action&& action) const noexcept {
+		void for_each_index_omp(Action&& action, int n_threads=-1) const noexcept {
 			constexpr uint64_t CHUNK = 512;
 			const uint64_t n_chunk = (max_elements()+CHUNK-1) / CHUNK;
+			if (n_threads < 0) { n_threads = omp_get_max_threads(); }
 
 			//each thread gets one contiguous sequence of chunks.
 			//for example, thread 0 may get chunks [0,5), thread 1 chunks [5,10), and thread 2 chunks [10,12)
 			//with the size of each range of chunks split evenly with the remainder sent to the last thread.
-			#pragma omp parallel for schedule(static)
+			#pragma omp parallel for schedule(static) num_threads(n_threads)
 			for (uint64_t c=0; c<n_chunk; ++c) {
 				const int tid = omp_get_thread_num();
 				const uint64_t c_start = c*CHUNK;
@@ -214,7 +228,7 @@ namespace GV {
 		#else
 
 		template<typename Action>
-		void for_each_element_omp(Action&& action) const noexcept {
+		void for_each_element_omp(Action&& action, int n_threads) const noexcept {
 			gutil::Logger::error("Not compiled with OpenMP. Did you forget -fopenmp?");
 			for_each_element(std::forward<Action>(action));
 		}
@@ -226,7 +240,7 @@ namespace GV {
 		}
 
 		template<typename Action>
-		void for_each_index_omp(Action&& action) const noexcept {
+		void for_each_index_omp(Action&& action, int n_threads) const noexcept {
 			gutil::Logger::error("Not compiled with OpenMP. Did you forget -fopenmp?");
 			for_each_index(std::forward<Action>(action));
 		}
