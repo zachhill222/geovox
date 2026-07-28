@@ -90,17 +90,20 @@ namespace GV {
 			for (uint64_t dd=0; dd<=MAX_DEPTH; ++dd) {
 				s_layers[dd].depth = dd;
 				s_layers[dd].box = box;
-				s_layers[dd].init_active_mask();
+				s_layers[dd].init_element_mask();
+				#ifdef _OPENMP
+					s_layers[dd].max_omp_threads = omp_get_max_threads()/small_pool.n_threads();
+				#endif
 			}
 		}
 
 		template<typename T>
-		void sort_and_unique(std::vector<T>& list) const noexcept {
+		static constexpr void sort_and_unique(std::vector<T>& list) noexcept {
 			std::sort(list.begin(), list.end());
 			auto last = std::unique(list.begin(), list.end());
 			list.erase(last, list.end());
 		}
-
+		
 	public:
 		
 
@@ -130,15 +133,16 @@ namespace GV {
 
 		void update_unstructured() noexcept {
 			for (S_Layer_t& layer : s_layers) {
-				layer.update_unstructured_omp();
+				small_pool.submit( [&](){ layer.update_unstructured_omp(); });
 			}
+			small_pool.wait_idle();
 		}
 
 		void collect_vertices() noexcept {
 			for (S_Layer_t& layer : s_layers) {
-				large_pool.submit( [&](){ layer.unstructured.collect_vertices(); });
+				small_pool.submit( [&](){ layer.collect_vertices_omp(); });
 			}
-			large_pool.wait_idle();
+			small_pool.wait_idle();
 
 			//deduplicate by moving 'coarse' vertices to their correct depth.
 			//note that layers with no active elements may have vertices.
@@ -315,18 +319,22 @@ namespace GV {
 
 		template<typename Predicate>
 		void refine(Predicate&& pred) const noexcept {
+			auto action = [&](VoxelElement el, uint64_t dd) { if (pred(el)) request_refine[dd].push_back(el); };
+			auto job = [&](uint64_t dd) { s_layers[dd].for_each_element(action, dd); };
+
 			for (uint64_t dd=0; dd<MAX_DEPTH; ++dd) {
-				auto action = [&, dd](VoxelElement el) {if (pred(el)) { request_refine[dd].push_back(el); }};
-				large_pool.submit( [&, action, dd]() { s_layers[dd].unstructured.for_each_element( action ); });
+				large_pool.submit( job, dd );
 			}
 			large_pool.wait_idle();
 		}
 
 		template<typename Predicate>
 		void coarsen(Predicate&& pred) const noexcept {
+			auto action = [&](VoxelElement el, uint64_t dd) {if (pred(el)) { request_coarsen[dd].push_back(el); }};
+			auto job = [&](uint64_t dd) { s_layers[dd].for_each_element(action, dd); };
+
 			for (uint64_t dd=1; dd<=MAX_DEPTH; ++dd) {
-				auto action = [&, dd](VoxelElement el) {if (pred(el)) { request_coarsen[dd].push_back(el); }};
-				large_pool.submit( [&, action, dd]() { s_layers[dd].unstructured.for_each_element( action ); });
+				large_pool.submit(job, dd);
 			}
 			large_pool.wait_idle();
 		}
@@ -397,10 +405,8 @@ namespace GV {
 			GUTIL_OMP(parallel for num_threads(omp_get_max_threads()/2) if(request_coarsen[dd].size()>4096))
 			for (size_t i=0; i<request_coarsen[dd].size(); ++i) {
 				VoxelElement el = request_coarsen[dd][i];
-				for (VoxelElement sib : el.parent().children()) {
-					s_layers[dd].set_element(sib, false);
-				}
-				s_layers[dd-1].set_element(el.parent(), true);
+				s_layers[dd].set_active(el.parent().children(), false);
+				s_layers[dd-1].set_active(el.parent(), true);
 			}
 			request_coarsen[dd].clear();
 		};
@@ -435,17 +441,19 @@ namespace GV {
 		//deactivate specified elements at level dd,
 		//then activate its children that satisfy the predicate at level dd+1
 		auto job = [&](uint64_t dd) {
-			//TODO: technically UB if different threads attempt to access the same word in the std::vector<bool>
 			GUTIL_OMP(parallel for num_threads(omp_get_max_threads()/2) if(request_refine[dd].size()>4096) schedule(guided,512))
 			for (size_t i=0; i<request_refine[dd].size(); ++i) {
 				VoxelElement el = request_refine[dd][i];
-				s_layers[dd].set_element(el, false);
-				for (VoxelElement chi : el.children()) {
-					if constexpr (NULLPTR_T<Predicate>) {
-						s_layers[dd+1].set_element(chi, true);
-					}
-					else {
-						if (pred(chi)) { s_layers[dd+1].set_element(chi, true); }
+				s_layers[dd].set_active(el, false);
+				
+				if constexpr (NULLPTR_T<Predicate>) {
+					s_layers[dd+1].set_active(el.children(), true);
+				}
+				else {
+					for (VoxelElement chi : el.children()) {
+						if (pred(chi)) {
+							s_layers[dd+1].set_active(chi,true);
+						}
 					}
 				}
 			}

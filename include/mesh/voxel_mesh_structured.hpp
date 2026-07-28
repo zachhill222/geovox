@@ -35,29 +35,39 @@ namespace GV {
 		using VoxelFace    = VoxelFaceKey<MaxDepth,0>;
 		using GeoPoint_t   = gutil::Point<3,double>;
 		using Box_t        = gutil::Box<3,double>;
+		using Mesh_t       = StructuredVoxelMesh<MaxDepth>;
 
 		uint64_t depth;										//the depth of this mesh
+		int max_omp_threads{0};								//how many OpenMP threads this layer is allowed to use
 		static constexpr uint64_t MAX_DEPTH = MaxDepth;		//the maximum depth to maintain hierarchies
-		
+		static_assert(MAX_DEPTH < 16, "Max depth is too large to store in 4 bits");
+
 		static constexpr int DIMENSION = 3;	//TODO: support 2D
 		[[nodiscard]] constexpr uint64_t axis_max_elements() const noexcept { return uint64_t{1} << depth; }
 		[[nodiscard]] constexpr uint64_t max_elements() const noexcept { return uint64_t{1} << (DIMENSION*depth); }
 		
+		static constexpr unsigned char ACTIVE_BIT = 0b00000001;
+		static constexpr unsigned char DEPTH_MASK = 0b00011110;
+		static constexpr unsigned char FREE_MASK  = 0b11100000;
+
 		//////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Storage
 		/// Allow storing the full mask of all possible elements or just a vector of active elements.
+		/// We choose to store element masks as a vector<unsigned char> rather than a vector<bool> so that
+		/// different elements can be safely written to from different threads and so that the remaining bits
+		/// can be used for a depth field for the hierarchical/layered mesh.
 		//////////////////////////////////////////////////////////////////////////////////////////////////
 		Box_t box;											//physical extents of the domain
-		std::vector<bool> active_mask{};					//mask of active elements using a structured index
+		std::vector<unsigned char> element_mask{};				//mask of active elements using a structured index
 		UnstructuredLayer<MAX_DEPTH> unstructured{};		//a more traditional storage of the mesh
 
-		void init_active_mask() noexcept {
-			active_mask.resize(max_elements());
+		void init_element_mask() noexcept {
+			element_mask.resize(max_elements(), 0);
 		}
 
-		void delete_active_mask() noexcept {
-			active_mask.clear();
-			active_mask.shrink_to_fit();
+		void delete_element_mask() noexcept {
+			element_mask.clear();
+			element_mask.shrink_to_fit();
 		}
 
 
@@ -69,14 +79,16 @@ namespace GV {
 		StructuredVoxelMesh& operator=(const StructuredVoxelMesh&) = delete;
 		StructuredVoxelMesh(StructuredVoxelMesh&& other) noexcept : 
 			depth{other.depth},
+			max_omp_threads{other.max_omp_threads},
 			box{std::move(other.box)},
-			active_mask{std::move(other.active_mask)}, 
+			element_mask{std::move(other.element_mask)}, 
 			unstructured{std::move(other.unstructured)} {}
 		StructuredVoxelMesh& operator=(StructuredVoxelMesh&& other) noexcept {
 			if (this != &other) {
 				depth = other.depth;
+				max_omp_threads = other.max_omp_threads;
 				box = std::move(other.box);
-				active_mask = std::move(other.active_mask);
+				element_mask = std::move(other.element_mask);
 				unstructured = std::move(other.unstructured);
 			}
 			return *this;
@@ -86,22 +98,83 @@ namespace GV {
 
 
 		//////////////////////////////////////////////////////////////////////////////////////////////////
-		/// Helpful simple queries
+		/// Helpful simple queries and routines to set the mask
 		//////////////////////////////////////////////////////////////////////////////////////////////////
-		[[nodiscard]] bool is_active(VoxelElement el) const noexcept {
-			assert(active_mask.size() == max_elements());
-			return active_mask[el.depth_linear_index()];
+	private:
+		GUTIL_DECLARE_SIMD(uniform(vec))
+		[[nodiscard]] static constexpr bool is_active_impl(uint64_t idx, const unsigned char* vec) noexcept {
+			return vec[idx]&ACTIVE_BIT;
 		}
 
+		GUTIL_DECLARE_SIMD(uniform(vec))
+		static constexpr void set_active_impl(uint64_t idx, unsigned char* vec, bool val) noexcept {
+			val ? vec[idx]|=ACTIVE_BIT : vec[idx]&=~ACTIVE_BIT;
+		}
+
+		GUTIL_DECLARE_SIMD(uniform(vec))
+		[[nodiscard]] static constexpr unsigned char read_depth_impl(uint64_t idx, const unsigned char* vec) noexcept {
+			return (vec[idx]&DEPTH_MASK) >> 1;
+		}
+
+		GUTIL_DECLARE_SIMD(uniform(vec))
+		static constexpr void set_depth_impl(uint64_t idx, unsigned char* vec, unsigned char val) noexcept {
+			vec[idx]&=~DEPTH_MASK;
+			vec[idx]|= (val<<1)&DEPTH_MASK;
+		}
+	public:
+
+		[[nodiscard]] bool is_active(VoxelElement el) const noexcept {
+			GUTIL_ASSERT(element_mask.size() == max_elements());
+			return is_active_impl(el.depth_linear_index(), &element_mask[0]);
+		}
+
+		[[nodiscard]] unsigned char read_depth(VoxelElement el) const noexcept {
+			GUTIL_ASSERT(element_mask.size() == max_elements());
+			return read_depth_impl(el.depth_linear_index(), &element_mask[0]);
+		}
+
+		GUTIL_DECLARE_SIMD()
+		[[nodiscard]] bool is_active(uint64_t idx) const noexcept {
+			GUTIL_ASSERT(element_mask.size() == max_elements());
+			return is_active_impl(idx, &element_mask[0]);
+		}
+
+		GUTIL_DECLARE_SIMD()
+		[[nodiscard]] unsigned char read_depth(uint64_t idx) const noexcept {
+			GUTIL_ASSERT(element_mask.size() == max_elements());
+			return (element_mask[idx]&DEPTH_MASK) >> 1;
+		}
+
+		void set_active(VoxelElement el, bool val) noexcept {
+			GUTIL_ASSERT(element_mask.size() == max_elements());
+			set_active_impl(el.depth_linear_index(), &element_mask[0], val);
+		}
+
+		void set_depth(VoxelElement el, unsigned char val) noexcept {
+			GUTIL_ASSERT(element_mask.size() == max_elements());
+			set_depth_impl(el.depth_linear_index(), &element_mask[0], val);
+		}
+
+		GUTIL_DECLARE_SIMD()
+		void set_active(uint64_t idx, bool val) noexcept {
+			GUTIL_ASSERT(element_mask.size() == max_elements());
+			set_active_impl(idx, &element_mask[0], val);
+		}
+
+		GUTIL_DECLARE_SIMD()
+		void set_depth(uint64_t idx, unsigned char val) noexcept {
+			GUTIL_ASSERT(element_mask.size() == max_elements());
+			set_depth_impl(idx, &element_mask[0], val);
+		}
 
 		//////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Convert to/from an unstructured mesh for a single layer
 		//////////////////////////////////////////////////////////////////////////////////////////////////
 		StructuredVoxelMesh(const UnstructuredLayer<MAX_DEPTH>& layer) noexcept {
 			set_mask(false);
-
+			GUTIL_SIMD()
 			for (uint64_t i=0; i<layer.n_elements(); ++i) {
-				active_mask[layer.elements[i].depth_linear_index()] = true;
+				element_mask[layer.elements[i].depth_linear_index()] = ACTIVE_BIT;
 			}
 		}
 
@@ -112,57 +185,117 @@ namespace GV {
 				if (is_active(el)) { unstructured.push_back(el); }
 			}
 		}
-
-		void update_unstructured_omp(int n_threads=-1) noexcept {
-			if (n_threads < 0) {n_threads = omp_get_max_threads();}
-
-			//dispatch jobs
-			std::vector<std::vector<VoxelElement>> thread_elements(n_threads);
-			auto action = [this,&thread_elements](VoxelElement el, int tid) {
-				if (is_active(el)) {thread_elements[tid].push_back(el);}
-			};
-			for_each_element_omp(std::move(action), n_threads);
+		
+		void update_unstructured_omp() noexcept {
+			if (max_omp_threads==0) {
+				update_unstructured();
+				return;
+			}
+			
+			//let every thread work on its own section, then collect the active elements
+			std::vector<std::vector<VoxelElement>> thread_elements(max_omp_threads);
+			for_each_index_omp( [&](uint64_t idx, int tid) {
+				if (is_active(idx)) { thread_elements[tid].emplace_back(depth, idx);}
+			});
 
 			//collect elements
 			unstructured.clear();
-			for (int tid=0; tid<n_threads; ++tid) {
+			for (int tid=0; tid<max_omp_threads; ++tid) {
 				unstructured.elements.insert( unstructured.elements.end(),
 									std::make_move_iterator(thread_elements[tid].begin()),
 									std::make_move_iterator(thread_elements[tid].end()));
 			}
 		}
 
+		void collect_vertices_omp() noexcept {
+			if (max_omp_threads==0) {
+				collect_vertices();
+				return;
+			}
+
+			//let every thread work on its own section, then collect the vertices
+			std::vector<std::vector<VoxelVertex>> thread_vertices(max_omp_threads);
+			for_each_element_omp( [&](VoxelElement el, int tid) {
+				if (is_active(el)) {
+					for (VoxelVertex vtx : el.vertices()) {
+						thread_vertices[tid].push_back(vtx.reduced_key());
+					}
+				}
+			});
+
+			//collect vertices
+			unstructured.vertices.clear();
+			for (int tid=0; tid<max_omp_threads; ++tid) {
+				unstructured.vertices.insert( unstructured.vertices.end(),
+									std::make_move_iterator(thread_vertices[tid].begin()),
+									std::make_move_iterator(thread_vertices[tid].end()));
+			}
+
+			//ensure that there are no duplicates
+			std::sort(unstructured.vertices.begin(), unstructured.vertices.end());
+				auto last = std::unique(unstructured.vertices.begin(), unstructured.vertices.end());
+				unstructured.vertices.erase(last, unstructured.vertices.end());
+		}
 
 		//////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Set the mask.
 		//////////////////////////////////////////////////////////////////////////////////////////////////
-		template<typename Predicate>
-		void set_mask(Predicate&& pred) noexcept {
+		template<typename Predicate, typename... Args>
+		void set_mask(Predicate&& pred, Args&&... args) noexcept {
 			unstructured.clear();
-			init_active_mask();
+			init_element_mask();
 
-			for_each_index( [&](uint64_t i) { active_mask[i] = pred(VoxelElement(depth,i)); });
+			for_each_index( [&](uint64_t i) {
+				element_mask[i] = pred(VoxelElement{depth,i}, std::forward<Args>(args)...) ? 
+						element_mask[i]|ACTIVE_BIT : element_mask[i]&~ACTIVE_BIT;
+			});
+		}
+
+		template<typename Predicate, typename... Args>
+		void set_mask_omp(Predicate&& pred, Args&&... args) noexcept {
+			unstructured.clear();
+			init_element_mask();
+
+			for_each_index_omp( [&](uint64_t i) {
+				element_mask[i] = pred(VoxelElement{depth,i}, std::forward<Args>(args)...) ? 
+						element_mask[i]|ACTIVE_BIT : element_mask[i]&~ACTIVE_BIT;
+			});
 		}
 
 		void set_mask(const bool val=false) noexcept {
 			unstructured.clear();
-			active_mask.resize(max_elements());
-			std::fill(active_mask.begin(), active_mask.end(), val);
+			element_mask.resize(max_elements());
+			const unsigned char mask = val ? ACTIVE_BIT : 0;
+			std::fill(element_mask.begin(), element_mask.end(), mask);
 		}
 
-		void set_element(std::span<const VoxelElement> list, const bool val) noexcept {
-			for (VoxelElement el : list) { 
-				if (el.exists()) {
-					active_mask[el.depth_linear_index()] = val;	
-				}
+		void set_active(std::span<const VoxelElement> list, bool val) noexcept {
+			GUTIL_SIMD()
+			for (uint64_t i=0; i<list.size(); ++i) { 
+				set_active(list[i], val);
 			}
 		}
 
-		void set_element(VoxelElement el, bool val) noexcept {
-			if (el.exists()) {
-				active_mask[el.depth_linear_index()] = val;
-			}
-		}
+
+		//////////////////////////////////////////////////////////////////////////////////////////////////
+		/// Forward unstructured queries and iterators
+		//////////////////////////////////////////////////////////////////////////////////////////////////
+		void color() noexcept { unstructured.color(); }
+		void collect_vertices() noexcept { unstructured.collect_vertices(); }
+
+		[[nodiscard]] uint64_t n_elements() const noexcept { return unstructured.n_elements(); }
+		[[nodiscard]] uint64_t n_vertices() const noexcept { return unstructured.n_vertices(); }
+
+		auto element_begin() const noexcept { return unstructured.element_begin(); }
+		auto element_end() 	 const noexcept { return unstructured.element_end();   }
+		auto vertex_begin()  const noexcept { return unstructured.vertex_begin();  }
+		auto vertex_end()    const noexcept { return unstructured.vertex_end();    }
+
+		auto element_begin() noexcept { return unstructured.element_begin(); }
+		auto element_end()   noexcept { return unstructured.element_end();   }
+		auto vertex_begin()  noexcept { return unstructured.vertex_begin();  }
+		auto vertex_end()    noexcept { return unstructured.vertex_end();    }
+
 
 		//////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Loop over every possible element. To loop over active elements only, use the unstructured mesh.
@@ -171,122 +304,137 @@ namespace GV {
 		/// Looping over elements in an ADI fashion is possible, but should be explicitly written.
 		//////////////////////////////////////////////////////////////////////////////////////////////////
 		#ifdef _OPENMP
-		template<typename Action>
-		void for_each_element_omp(Action&& action, int n_threads=-1) const noexcept {
-			constexpr uint64_t CHUNK = 512;
-			const uint64_t n_chunk = (max_elements()+CHUNK-1) / CHUNK;
-			if (n_threads < 0) { n_threads = omp_get_max_threads(); }
+		template<typename Action, typename... Args>
+		void for_each_element_omp(Action&& action, Args&&... args) const noexcept {
+			GUTIL_ASSERT(max_omp_threads>0);
+			GUTIL_OMP(parallel num_threads(max_omp_threads))
+			{
+				const uint64_t tid = static_cast<uint64_t>(omp_get_thread_num());
+				const uint64_t n_per_thread = n_elements()/max_omp_threads;
+				const uint64_t start = tid*n_per_thread;
+				const uint64_t end = (tid==max_omp_threads-1) ? n_elements() : start + n_per_thread;
 
-			//each thread gets one contiguous sequence of chunks.
-			//for example, thread 0 may get chunks [0,5), thread 1 chunks [5,10), and thread 2 chunks [10,12)
-			//with the size of each range of chunks split evenly with the remainder sent to the last thread.
-			#pragma omp parallel for schedule(static) num_threads(n_threads)
-			for (uint64_t c=0; c<n_chunk; ++c) {
-				const int tid = omp_get_thread_num();
-				const uint64_t c_start = c*CHUNK;
-				const uint64_t c_end   = std::min(c_start+CHUNK, max_elements());
-				
-				VoxelElement el(depth, c_start);
-				for (uint64_t idx=c_start; idx<c_end; ++idx, ++el) {
-					GUTIL_ASSERT(el.depth_linear_index() == idx);
-					if constexpr (std::is_invocable_v<Action, VoxelElement, int>) {
-						action(el, tid);
+				for (uint64_t idx=start; idx<end; ++idx) {
+					if constexpr (std::is_invocable_v<Action, VoxelElement, int, Args...>) {
+						action(unstructured.elements[idx], tid, std::forward<Args>(args)...);
 					}
 					else {
-						action(el);
+						action(unstructured.elements[idx], std::forward<Args>(args)...);
 					}
 				}
 			}
 		}
 
-		template<typename Action>
-		void for_each_index_omp(Action&& action, int n_threads=-1) const noexcept {
-			constexpr uint64_t CHUNK = 512;
-			const uint64_t n_chunk = (max_elements()+CHUNK-1) / CHUNK;
-			if (n_threads < 0) { n_threads = omp_get_max_threads(); }
+		template<typename Action, typename... Args>
+		void for_each_index_omp(Action&& action, Args&&... args) const noexcept {
+			GUTIL_ASSERT(max_omp_threads>0);
+			GUTIL_OMP(parallel num_threads(max_omp_threads))
+			{
+				const uint64_t tid = static_cast<uint64_t>(omp_get_thread_num());
+				const uint64_t n_per_thread = max_elements()/max_omp_threads;
+				const uint64_t start = tid*n_per_thread;
+				const uint64_t end = (tid==max_omp_threads-1) ? max_elements() : start + n_per_thread;
 
-			//each thread gets one contiguous sequence of chunks.
-			//for example, thread 0 may get chunks [0,5), thread 1 chunks [5,10), and thread 2 chunks [10,12)
-			//with the size of each range of chunks split evenly with the remainder sent to the last thread.
-			#pragma omp parallel for schedule(static) num_threads(n_threads)
-			for (uint64_t c=0; c<n_chunk; ++c) {
-				const int tid = omp_get_thread_num();
-				const uint64_t c_start = c*CHUNK;
-				const uint64_t c_end   = std::min(c_start+CHUNK, max_elements());
-				
-				for (uint64_t idx=c_start; idx<c_end; ++idx) {
-					if constexpr (std::is_invocable_v<Action, uint64_t, int>) {
-						action(idx, tid);
+				for (uint64_t idx=start; idx<end; ++idx) {
+					if constexpr (std::is_invocable_v<Action, uint64_t, int, Args...>) {
+						action(idx, tid, std::forward<Args>(args)...);
 					}
 					else {
-						action(idx);
+						action(idx, std::forward<Args>(args)...);
 					}
 				}
 			}
 		}
 
-		template<typename Action>
-		void for_each_element_simd(Action&& action) const noexcept {
-			constexpr uint64_t WORD_SIZE = sizeof(size_t);
-			#pragma omp simd safelen(WORD_SIZE)
-			for (uint64_t i=0; i<max_elements(); ++i) {
-				VoxelElement el(depth,i);
-				action(el);
+		template<typename Action, typename... Args>
+		void for_each_element_simd(Action&& action, Args&&...args) const noexcept {
+			GUTIL_SIMD()
+			for (uint64_t i=0; i<n_elements(); ++i) {
+				action(unstructured.elements[i], std::forward<Args>(args)...);
 			}
 		}
 
-		template<typename Action>
-		void for_each_index_simd(Action&& action) const noexcept {
-			constexpr uint64_t WORD_SIZE = sizeof(size_t);
-			#pragma omp simd safelen(WORD_SIZE)
+		template<typename Action, typename... Args>
+		void for_each_index_simd(Action&& action, Args&&... args) const noexcept {
+			GUTIL_SIMD()
 			for (uint64_t i=0; i<max_elements(); ++i) {
-				action(i);
+				action(i, std::forward<Args>(args)...);
 			}
 		}
-
 		#else
 
-		template<typename Action>
-		void for_each_element_omp(Action&& action, int n_threads) const noexcept {
+		template<typename Action, typename... Args>
+		void for_each_element_omp(Action&& action, Args&&... args) const noexcept {
 			gutil::Logger::error("Not compiled with OpenMP. Did you forget -fopenmp?");
-			for_each_element(std::forward<Action>(action));
+			if constexpr (std::is_invocable_v<Action, int, Args...>) {
+				for_each_element(std::forward<Action>(action), 0, std::forward<Args>(args)...);
+			}
+			else {
+				for_each_element(std::forward<Action>(action), std::forward<Args>(args)...);
+			}
 		}
 
-		template<typename Action>
-		void for_each_element_simd(Action&& action) const noexcept {
+		template<typename Action, typename... Args>
+		void for_each_element_simd(Action&& action, Args&&... args) const noexcept {
 			gutil::Logger::error("Not compiled with OpenMP. Did you forget -fopenmp?");
-			for_each_element(std::forward<Action>(action));
+			for_each_element(std::forward<Action>(action), std::forward<Args>(args)...);
 		}
 
-		template<typename Action>
-		void for_each_index_omp(Action&& action, int n_threads) const noexcept {
+		template<typename Action, typename... Args>
+		void for_each_index_omp(Action&& action, Args&&... args) const noexcept {
 			gutil::Logger::error("Not compiled with OpenMP. Did you forget -fopenmp?");
-			for_each_index(std::forward<Action>(action));
+			if constexpr (std::is_invocable_v<Action, int, Args...>) {
+				for_each_index(std::forward<Action>(action), 0, std::forward<Args>(args)...);
+			}
+			else {
+				for_each_index(std::forward<Action>(action), std::forward<Args>(args)...);
+			}
 		}
 
-		template<typename Action>
-		void for_each_index_simd(Action&& action) const noexcept {
+		template<typename Action, typename... Args>
+		void for_each_index_simd(Action&& action, Args&&... args) const noexcept {
 			gutil::Logger::error("Not compiled with OpenMP. Did you forget -fopenmp?");
-			for_each_index(std::forward<Action>(action));
+			for_each_index(std::forward<Action>(action), std::forward<Args>(args)...);
 		}
-
 		#endif
 
 
-		template<typename Action>
-		void for_each_element(Action&& action) const noexcept {
-			VoxelElement el(depth,0);
-			for (uint64_t i=0; i<max_elements(); ++i, ++el) {
-				assert( el == VoxelElement(depth,i) );
-				action(el);
+		template<typename Action, typename... Args>
+		void for_each_element(Action&& action, Args&&... args) const noexcept {
+			for (uint64_t i=0; i<n_elements(); ++i) {
+				action(unstructured.elements[i], std::forward<Args>(args)...);
 			}
 		}
 
-		template<typename Action>
-		void for_each_index(Action&& action) const noexcept {
+		template<typename Action, typename... Args>
+		void for_each_index(Action&& action, Args&&... args) const noexcept {
 			for (uint64_t i=0; i<max_elements(); ++i) {
-				action(i);
+				action(i, std::forward<Args>(args)...);
 			}
+		}
+
+
+		/////////////////////////////////////////////////////////////////////////////////////////////////
+		/// Methods to write to a VTK file
+		/////////////////////////////////////////////////////////////////////////////////////////////////
+		void save_as_ascii(const std::string& filename, const std::string& description = "") const {print_topology_vtk<Mesh_t,true>(filename, *this, description);}
+		void save_as_binary(const std::string& filename, const std::string& description = "") const {print_topology_vtk<Mesh_t,false>(filename, *this, description);}
+
+		template<typename... Lookup_ts>
+		inline void append_cell_data_field_ascii(const std::string& filename, const std::string field_name, const Lookup_ts&... lookups) const {
+			append_cell_data_field_vtk<Mesh_t,true>(filename, *this, field_name, lookups...);
+		}
+		template<typename... Lookup_ts>
+		inline void append_cell_data_field_binary(const std::string& filename, const std::string field_name, const Lookup_ts&... lookups) const {
+			append_cell_data_field_vtk<Mesh_t,false>(filename, *this, field_name, lookups...);
+		}
+		template<typename... Lookup_ts>
+		inline void append_point_data_field_ascii(const std::string& filename, const std::string field_name, const Lookup_ts&... lookups) const {
+			append_point_data_field_vtk<Mesh_t,true>(filename, *this, field_name, lookups...);
+		}
+		template<typename... Lookup_ts>
+		inline void append_point_data_field_binary(const std::string& filename, const std::string field_name, const Lookup_ts&... lookups) const {
+			append_point_data_field_vtk<Mesh_t,false>(filename, *this, field_name, lookups...);
 		}
 	};
 }

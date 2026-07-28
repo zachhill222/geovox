@@ -10,13 +10,13 @@ TARGETS = $(SRC:.cpp=)
 CXX        =  g++ -std=c++23 -pg -Wall
 OPT        = -O0
 PAR        = -fopenmp
-DEFINE      =
+DEFINE     =
 
 #redefine for testing optimizations
 CXX        =  g++ -std=c++23 -funroll-loops
 OPT        = -O3
 PAR        = -fopenmp
-# DEFINE      = -DNDEBUG
+DEFINE     = -DNDEBUG
 
 #final compiler command
 CC = $(CXX) $(OPT) $(PAR) $(DEFINE)
