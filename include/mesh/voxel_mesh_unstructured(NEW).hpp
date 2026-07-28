@@ -38,6 +38,13 @@ namespace GV {
 	/// An unstructured voxel mesh. Uses 'layers' of structured meshes at each depth.
 	/// The initial mesh is assumed to satisfy a 2-1 refinement constraint. Using the request refine/coarsen
 	/// will maintain the 2-1 invariant.
+	///
+	/// Each layer contains a vector<unsigned char> with one entry for each possible element at that layer.
+	/// One bit is reserved for an active flag and four bits are reserved for a refined depth field tracker.
+	///
+	/// Suppose D is the depth field that corresponds to some element E. If E is active, then D=E.depth.
+	/// If E is not active but has active descendants, then D=max(C.depth) over all active descendants C.
+	/// If E is not active and has no active descendants, then D=0.
 	/////////////////////////////////////////////////////////////////////////////////////////////////////
 	template<uint64_t MaxDepth=10>
 	struct UnstructuredVoxelMesh {
@@ -122,11 +129,23 @@ namespace GV {
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Simple queries and commands
 		/////////////////////////////////////////////////////////////////////////////////////////////////
+		[[nodiscard]] bool is_active(VoxelElement el) const noexcept { return s_layers[el.depth()].is_active(el); }
+		[[nodiscard]] unsigned char read_depth(VoxelElement el) const noexcept { return s_layers[el.depth()].read_depth(el);}
+		[[nodiscard]] const S_Layer_t& get_layer(uint64_t dd) const noexcept {
+			GUTIL_ASSERT(dd<=MAX_DEPTH)
+			return s_layers[dd];
+		}
+
 		void set_depth(uint64_t depth) noexcept {
 			if (depth>MAX_DEPTH) { return; }
 
 			for (S_Layer_t& layer : s_layers) {
-				large_pool.submit( [&](){ layer.set_mask(depth==layer.depth); });
+				large_pool.submit( [&](){
+					layer.set_all_active(depth==layer.depth);
+					if (layer.depth<=depth) {
+						layer.set_all_depth(static_cast<unsigned char>(depth));
+					}
+				});
 			}
 			large_pool.wait_idle();
 		}
@@ -339,6 +358,8 @@ namespace GV {
 			large_pool.wait_idle();
 		}
 
+		void synchronize_depth_field() noexcept;
+
 		void process_coarsen() noexcept;
 
 		template<typename Predicate = std::nullptr_t>
@@ -465,6 +486,30 @@ namespace GV {
 
 		for (uint64_t dd=1; dd<MAX_DEPTH; dd+=2) {large_pool.submit(job,dd);}
 		large_pool.wait_idle();
+	}
+
+	template<uint64_t MaxDepth>
+	void UnstructuredVoxelMesh<MaxDepth>::synchronize_depth_field() noexcept {
+		auto action = [&](uint64_t idx, unsigned char dd) {
+			if (s_layers[dd].is_active(idx)) {
+				s_layers[dd].set_depth(idx,dd);
+			}
+			else if (dd<static_cast<unsigned char>(MAX_DEPTH)) {
+				unsigned char df = 0;
+				//TODO for better simd, use more direct integer math to get the children indices.
+				//ideally the children are [idx*8, idx*8+8). 
+				///Then traversal is just a bit shift idx>>3 for parent and idx<<3 for start of children
+				for (VoxelElement c : VoxelElement{dd,idx}.children()) {
+					df = std::max(df, s_layers[dd+1].read_depth(c));
+				}
+				s_layers[dd].set_depth(idx,df);
+			}
+		};
+
+
+		for (uint64_t dd=MAX_DEPTH+1; dd>0; --dd) {
+			s_layers[dd-1].for_each_index(action, static_cast<unsigned char>(dd-1));
+		}
 	}
 
 	

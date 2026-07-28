@@ -89,22 +89,22 @@ namespace GV {
 		static constexpr bool ELEMENT_DOF = std::same_as<M_KEY, typename Mesh_t::VoxelElement>;
 		static constexpr bool FACE_DOF    = std::same_as<M_KEY, typename Mesh_t::VoxelFace>;
 
-		static constexpr uint8_t ACTIVE_BIT  = uint8_t{1};
-		static constexpr uint8_t REFINED_BIT = uint8_t{1} << 1;
-		static constexpr uint8_t FREE_BITS   = ~(ACTIVE_BIT | REFINED_BIT);
+		static constexpr unsigned char ACTIVE_BIT  = unsigned char{1};
+		static constexpr unsigned char REFINED_BIT = unsigned char{1} << 1;
+		static constexpr unsigned char FREE_BITS   = ~(ACTIVE_BIT | REFINED_BIT);
 
 		/////////////////////////////////////////////////////////////////////////
-		/// Storage. Store a vector<uint8_t> for O(1) active queries.
+		/// Storage. Store a vector<unsigned char> for O(1) active queries.
 		/// Additionally, store a compressed list of active dofs for tracking
 		/// global DOF numbers. It is essential for fast quadrature that we may
 		/// look up all active DOFs whos support OVERLAPS a given active element.
 		///
-		/// Using uint8_t instead of bool guarantees thread safe access of different elements
+		/// Using unsigned char instead of bool guarantees thread safe access of different elements
 		/// and allows one bit to be used for an "is active" flag and another bit for
 		/// "has been refined" flag, which is useful for hierarchical methods. Additionally,
 		/// it gives us 6 more bits that could be used for other purposes.
 		/////////////////////////////////////////////////////////////////////////
-		std::vector<uint8_t> dof_mask;
+		std::vector<unsigned char> dof_mask;
 		std::vector<DOF_t> active_dofs{};
 		gutil::BinSort<DOF_t> active_dof_sorter;
 		mutable gutil::ThreadPool threads{};
@@ -349,7 +349,7 @@ namespace GV {
 		/// Book keeping methods
 		/////////////////////////////////////////////////////////////////////////
 		void clear() noexcept {
-			std::fill(dof_mask.begin(), dof_mask.end(), uint8_t{0});
+			std::fill(dof_mask.begin(), dof_mask.end(), 0);
 			active_dofs.clear();
 		}
 

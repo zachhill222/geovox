@@ -72,10 +72,18 @@ namespace GV {
 
 
 		//////////////////////////////////////////////////////////////////////////////////////////////////
-		/// Constructors and movement. Copying is disallowed.
+		/// Constructors and movement
 		//////////////////////////////////////////////////////////////////////////////////////////////////
 		StructuredVoxelMesh() = default;
-		StructuredVoxelMesh(const StructuredVoxelMesh&) = delete;
+		StructuredVoxelMesh(const StructuredVoxelMesh& other) :
+			depth{other.depth},
+			max_omp_threads{other.max_omp_threads},
+			box{other.box},
+			element_mask{other.element_mask},
+			unstructured{other.unstructured}
+			{
+				GUTIL_DEBUG(gutil::Logger::log("WARNING - copying a potentially large mesh");)
+			}
 		StructuredVoxelMesh& operator=(const StructuredVoxelMesh&) = delete;
 		StructuredVoxelMesh(StructuredVoxelMesh&& other) noexcept : 
 			depth{other.depth},
@@ -170,14 +178,6 @@ namespace GV {
 		//////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Convert to/from an unstructured mesh for a single layer
 		//////////////////////////////////////////////////////////////////////////////////////////////////
-		StructuredVoxelMesh(const UnstructuredLayer<MAX_DEPTH>& layer) noexcept {
-			set_mask(false);
-			GUTIL_SIMD()
-			for (uint64_t i=0; i<layer.n_elements(); ++i) {
-				element_mask[layer.elements[i].depth_linear_index()] = ACTIVE_BIT;
-			}
-		}
-
 		void update_unstructured() noexcept {
 			unstructured.clear();
 			for (uint64_t i=0; i<max_elements(); ++i) {
@@ -262,15 +262,31 @@ namespace GV {
 			});
 		}
 
-		void set_mask(const bool val=false) noexcept {
+		void set_mask(unsigned char val) noexcept {
 			unstructured.clear();
 			element_mask.resize(max_elements());
-			const unsigned char mask = val ? ACTIVE_BIT : 0;
-			std::fill(element_mask.begin(), element_mask.end(), mask);
+			std::fill(element_mask.begin(), element_mask.end(), val);
+		}
+
+		void set_all_active(bool val) noexcept {
+			unstructured.clear();
+			element_mask.resize(max_elements());
+			GUTIL_SIMD()
+			for (uint64_t i=0; i<max_elements(); ++i) {
+				set_active(i,val);
+			}
+		}
+
+		void set_all_depth(unsigned char val) noexcept {
+			unstructured.clear();
+			element_mask.resize(max_elements());
+			GUTIL_SIMD()
+			for (uint64_t i=0; i<max_elements(); ++i) {
+				set_depth(i,val);
+			}
 		}
 
 		void set_active(std::span<const VoxelElement> list, bool val) noexcept {
-			GUTIL_SIMD()
 			for (uint64_t i=0; i<list.size(); ++i) { 
 				set_active(list[i], val);
 			}
@@ -278,10 +294,14 @@ namespace GV {
 
 
 		//////////////////////////////////////////////////////////////////////////////////////////////////
-		/// Forward unstructured queries and iterators
+		/// Fill out the standard mesh interface
 		//////////////////////////////////////////////////////////////////////////////////////////////////
 		void color() noexcept { unstructured.color(); }
 		void collect_vertices() noexcept { unstructured.collect_vertices(); }
+		[[nodiscard]] uint64_t vertex_index(VoxelVertex vtx) const noexcept { return unstructured.vertex_index(vtx); }
+		[[nodiscard]] GeoPoint_t geo_coord(VoxelVertex vtx) const noexcept {
+			{return box.low + (box.high-box.low)*vtx.normalized_coordinate();}
+		}
 
 		[[nodiscard]] uint64_t n_elements() const noexcept { return unstructured.n_elements(); }
 		[[nodiscard]] uint64_t n_vertices() const noexcept { return unstructured.n_vertices(); }

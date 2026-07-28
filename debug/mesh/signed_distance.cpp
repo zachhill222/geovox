@@ -10,7 +10,7 @@
 using Point_t  = gutil::Point<3,double>;
 using Box_t    = gutil::Box<3,double>;
 using Sphere_t = gutil::Sphere<3,double>;
-using Mesh_t   = GV::UnstructuredVoxelMesh<10>;
+using Mesh_t   = GV::UnstructuredVoxelMesh<9>;
 using Vert_t   = typename Mesh_t::VoxelVertex;
 using Elem_t   = typename Mesh_t::VoxelElement;
 
@@ -66,6 +66,10 @@ int main(int argc, char* argv[]) {
 		gutil::LogTime timer{"initialize colors"};
 		mesh.init_color();
 	}
+	{
+		gutil::LogTime timer{"synchronize depth field"};
+		mesh.synchronize_depth_field();
+	}
 	
 
 	//write to file and sample the signed distance
@@ -112,10 +116,48 @@ int main(int argc, char* argv[]) {
 			"color"
 		);
 
+	auto depth_field_lookup = GV::make_feature_lookup<Elem_t>(
+			[&](Elem_t el) {
+				return mesh.read_depth(el);
+			},
+			"depth_field"
+		);
 
 	gutil::Logger::log("write details to file");
 	mesh.append_point_data_field_binary("signed_distance.vtk", "sdf", sd_lookup, heaviside_lookup, dirac_lookup);
-	mesh.append_cell_data_field_binary("signed_distance.vtk", "sdf", depth_lookup, nbr_lookup, color_lookup);
+	mesh.append_cell_data_field_binary("signed_distance.vtk", "sdf", depth_lookup, nbr_lookup, color_lookup, depth_field_lookup);
+
+	
+
+	//get a layer and save its mesh and depth field
+	for (uint64_t dd=0; dd<=N; ++dd) {
+		gutil::LogTime timer{"saving layer " + std::to_string(dd)};
+
+		typename Mesh_t::S_Layer_t layer = mesh.get_layer(dd);
+		layer.set_all_active(true);
+		layer.update_unstructured_omp();
+		layer.collect_vertices_omp();
+
+		const std::string layer_filename = "mesh_layer_" + std::to_string(layer.depth) + ".vtk";
+		layer.save_as_binary(layer_filename);
+
+		auto layer_depth_field_lookup = GV::make_feature_lookup<Elem_t>(
+				[&](Elem_t el) {
+					return layer.read_depth(el);
+				},
+				"depth_field"
+			);
+
+		auto layer_active_lookup = GV::make_feature_lookup<Elem_t>(
+				[&](Elem_t el) {
+					return mesh.is_active(el);
+				},
+				"is_active"
+			);
+
+		layer.append_cell_data_field_binary(layer_filename, "debug_details", layer_depth_field_lookup, layer_active_lookup);
+	}
+
 
 	gutil::Logger::log("done");
 	return 0;
