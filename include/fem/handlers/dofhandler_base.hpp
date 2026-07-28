@@ -34,6 +34,10 @@ namespace GV {
 		using Vert_t     = typename Mesh_t::VoxelVertex;
 		using Face_t     = typename Mesh_t::VoxelFace;
 
+		static constexpr bool IS_VERTEX = std::same_as<MeshKey_t,Vert_t>;
+		static constexpr bool IS_FACE   = std::same_as<MeshKey_t,Face_t>;
+		static constexpr bool IS_ELEM   = std::same_as<MeshKey_t,Elem_t>;
+
 		//note that the DOF feature type (including QuadElem) may be periodic
 		//while the mesh Elem_t is not periodic. Once constructed, the DOF support
 		//and children keys and so on can be safely cast to the mesh version with
@@ -134,6 +138,28 @@ namespace GV {
 			
 		}
 
+		//get begin/end iterators to the mesh feature
+		auto feature_begin() const noexcept {
+			if constexpr (IS_ELEM) { return mesh.element_begin(); }
+			else if constexpr (IS_VERTEX) { return mesh.vertex_begin(); }
+			else { return mesh.face_begin(); }
+		}
+
+		auto feature_end() const noexcept {
+			if constexpr (IS_ELEM) { return mesh.element_end(); }
+			else if constexpr (IS_VERTEX) { return mesh.vertex_end(); }
+			else { return mesh.face_end(); }
+		}
+
+		//convert a mesh feature to a dof
+		[[nodiscard]] static constexpr DOF_t feature_to_dof(MeshKey_t key) noexcept {
+			return DOF_t{static_cast<DOFKey_t>(key)};
+		}
+
+		//convert a mesh feature to a (possibly periodic) feature for the dof
+		[[nodiscard]] static constexpr DOFKey_t mesh_key_to_dof_key(MeshKey_t key) noexcept {
+			return static_cast<DOFKey_t>(key);
+		}
 
 
 		//simple management operations
@@ -185,6 +211,20 @@ namespace GV {
 				}
 			}
 			return false;
+		}
+
+		//build dofs at every conformal feature of the mesh
+		//this requires the mesh to have an iterator for the feature and
+		//for there to be an is_conformal() check
+		void init_conformal() noexcept {
+			set_all_inactive();
+			for (auto it=feature_begin(); it!=feature_end(); ++it) {
+				if (mesh.is_conformal(*it)) {
+					//note that a few periodic dofs may be activated twice,
+					//but this redundant work is minimal.
+					set_active(feature_to_dof(*it), true);
+				}
+			}
 		}
 
 		//transfer computations between mesh refinements

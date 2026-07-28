@@ -10,12 +10,13 @@
 using Point_t  = gutil::Point<3,double>;
 using Box_t    = gutil::Box<3,double>;
 using Sphere_t = gutil::Sphere<3,double>;
-using Mesh_t   = GV::UnstructuredVoxelMesh<8>;
+using Mesh_t   = GV::UnstructuredVoxelMesh<10>;
 using Vert_t   = typename Mesh_t::VoxelVertex;
 using Elem_t   = typename Mesh_t::VoxelElement;
 
 int main(int argc, char* argv[]) {
-	std::string filename = (argc > 1) ? argv[1] : "./testdata/sphere.txt";
+	const int N = (argc>1) ? atoi(argv[1]) : 4;
+	std::string filename = (argc > 2) ? argv[2] : "./testdata/sphere.txt";
 
 	//read data and put into a signed distance octree
 	std::vector<Sphere_t> list = gutil::read_spheres_from_file<3,double>(filename);
@@ -27,29 +28,45 @@ int main(int argc, char* argv[]) {
 	
 	//create a mesh
 	gutil::Logger::log("make mesh");
-	Mesh_t mesh(assembly.bbox(), 3);
+	Mesh_t mesh(box);
 
-
-	for (int i=0; i<4; ++i) {
-		mesh.update_unstructured();
 	
-		gutil::Logger::log("refine mesh (setup)");
-		mesh.refine( [&](Elem_t el) { 
-			Point_t pt = mesh.geo_coord(el.vertex(0));
-			Point_t diag = mesh.geo_coord(el.vertex(7)) - pt;
-			pt += 0.5*diag;
+	for (int i=0; i<N; ++i) {
+		{
+			gutil::LogTime timer{"update_unstructured"};
+			mesh.update_unstructured();
+		}
+	
+		{
+			gutil::LogTime timer{"refine mesh (setup)"};
+			mesh.refine( [&](Elem_t el) { 
+				Point_t pt = mesh.geo_coord(el.vertex(0));
+				Point_t diag = mesh.geo_coord(el.vertex(7)) - pt;
+				pt += 0.5*diag;
 
-			double dist = assembly.signed_distance(pt);
-			return dist*dist < 0.5*gutil::squared_norm(diag);
-			// return el.i() % 10 < 5;
-		});
-
-		gutil::Logger::log("refine mesh (process)");
-		mesh.process_refine();
+				double dist = assembly.signed_distance(pt);
+				return dist*dist < 0.5*gutil::squared_norm(diag);
+			});
+		}
+		
+		{
+			gutil::LogTime timer{"refine mesh (process)"};
+			mesh.process_refine([&](Elem_t el) {
+				return assembly.collides(Box_t{mesh.geo_coord(el.vertex(0)), mesh.geo_coord(el.vertex(7))});});
+			// mesh.process_refine();
+		}
+		
 	}
+
 
 	gutil::Logger::log("make unstructured mesh");
 	mesh.update_unstructured();
+
+	{
+		gutil::LogTime timer{"initialize colors"};
+		mesh.init_color();
+	}
+	
 
 	//write to file and sample the signed distance
 	gutil::Logger::log("make unstructured mesh vertices");
@@ -70,8 +87,35 @@ int main(int argc, char* argv[]) {
 			[&assembly, &mesh](Vert_t vtx) {return assembly.dirac(mesh.geo_coord(vtx), 0.1);},
 			"dirac");
 
+	auto depth_lookup = GV::make_feature_lookup<Elem_t>(
+			[](Elem_t el) {return el.depth();},
+			"depth"
+		);
+
+	auto nbr_lookup = GV::make_feature_lookup<Elem_t>(
+			[&mesh](Elem_t el) {
+				int lo=99, hi=0;
+				for (Elem_t nbr : mesh.neighbors(el)) {
+					const int dd = static_cast<int>(nbr.depth()); 
+					lo = std::min(lo, dd);
+					hi = std::max(hi, dd);
+				}
+				return std::array<int,2>{lo,hi};
+			},
+			"neighbor_depth"
+		);
+
+	auto color_lookup = GV::make_feature_lookup<Elem_t>(
+			[](Elem_t el) {
+				return el.color();
+			},
+			"color"
+		);
+
+
 	gutil::Logger::log("write details to file");
 	mesh.append_point_data_field_binary("signed_distance.vtk", "sdf", sd_lookup, heaviside_lookup, dirac_lookup);
+	mesh.append_cell_data_field_binary("signed_distance.vtk", "sdf", depth_lookup, nbr_lookup, color_lookup);
 
 	gutil::Logger::log("done");
 	return 0;

@@ -7,19 +7,19 @@ SRC     = $(wildcard $(DIR)/*.cpp)
 TARGETS = $(SRC:.cpp=)
 
 #default build (debug)
-CXX        =  g++ -std=c++23
+CXX        =  g++ -std=c++23 -pg -Wall
 OPT        = -O0
 PAR        = -fopenmp
-DEBUG      = -pg -g3 -Wall
+DEFINE      =
 
 #redefine for testing optimizations
 CXX        =  g++ -std=c++23 -funroll-loops
 OPT        = -O3
 PAR        = -fopenmp
-# DEBUG      = -DNDEBUG
+# DEFINE      = -DNDEBUG
 
 #final compiler command
-CC = $(CXX) $(OPT) $(PAR) $(DEBUG)
+CC = $(CXX) $(OPT) $(PAR) $(DEFINE)
 
 all: $(TARGETS)
 

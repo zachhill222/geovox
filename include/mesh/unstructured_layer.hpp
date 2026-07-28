@@ -51,7 +51,15 @@ namespace GV {
 			for (int i=0; i<8; ++i) {
 				color_offsets.push_back(sorter.bin_start(i));
 			}
-			color_offsets.push_back(sorter.bin_end(8));
+			color_offsets.push_back(elements.size());
+
+			//store color in the elements
+			for (uint64_t clr=0; clr<8; ++clr) {
+				GUTIL_SIMD()
+				for (uint64_t idx=color_offsets[clr]; idx<color_offsets[clr+1]; ++idx) {
+					elements[idx].set_color(clr);
+				}
+			}
 		}
 
 		void collect_vertices() noexcept {

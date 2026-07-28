@@ -50,6 +50,7 @@ namespace GV {
 		//define useful constants
 		using BASE::MAX_DEPTH;
 		using BASE::DOES_NOT_EXIST;
+		[[nodiscard]] static constexpr VoxelElementKey None() { return {DOES_NOT_EXIST}; }
 		static_assert(MAX_DEPTH_==MAX_DEPTH);
 
 		//periodic conditions. the BC bits are stored on the other_nocompare field

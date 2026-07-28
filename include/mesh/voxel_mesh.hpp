@@ -18,8 +18,7 @@
 #include <omp.h>
 #endif
 
-namespace GV
-{
+namespace GV {
 	//concepts to constrain feature types to exactly match the/a
 	//corresponding mesh feature
 	template<typename F, typename M>

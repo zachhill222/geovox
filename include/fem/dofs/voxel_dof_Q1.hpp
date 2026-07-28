@@ -61,7 +61,7 @@ namespace GV
 			std::array<double,1> y{xi[1]};
 			std::array<double,1> z{xi[2]};
 
-			grad(gx, gy, gz, support_elem, x, y, z);
+			grad<1>(gx, gy, gz, support_elem, x, y, z);
 			return RefPoint_t{gx[0], gy[0], gz[0]};
 		}
 
@@ -109,6 +109,7 @@ namespace GV
 
 			//check that the index logic is correct
 			assert(el.is_valid());
+			assert(key.depth() == el.depth());
 			#ifndef NDEBUG
 				bool found=false;
 				for (const auto spt : support_impl()) {

@@ -56,6 +56,8 @@ namespace GV
 		using BASE::DOES_NOT_EXIST;
 		static_assert(MAX_DEPTH_==MAX_DEPTH);
 
+		[[nodiscard]] static constexpr VoxelVertexKey None() { return {DOES_NOT_EXIST}; }
+
 		//periodic conditions. the BC bits are stored on the other_nocompare field
 		static constexpr uint64_t BC_FLAG = BC;
 		static constexpr bool PX = BC&1; //periodic in i/x

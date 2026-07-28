@@ -113,6 +113,25 @@ namespace GV {
 			}
 		}
 
+		void update_unstructured_omp(int n_threads=-1) noexcept {
+			if (n_threads < 0) {n_threads = omp_get_max_threads();}
+
+			//dispatch jobs
+			std::vector<std::vector<VoxelElement>> thread_elements(n_threads);
+			auto action = [this,&thread_elements](VoxelElement el, int tid) {
+				if (is_active(el)) {thread_elements[tid].push_back(el);}
+			};
+			for_each_element_omp(std::move(action), n_threads);
+
+			//collect elements
+			unstructured.clear();
+			for (int tid=0; tid<n_threads; ++tid) {
+				unstructured.elements.insert( unstructured.elements.end(),
+									std::make_move_iterator(thread_elements[tid].begin()),
+									std::make_move_iterator(thread_elements[tid].end()));
+			}
+		}
+
 
 		//////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Set the mask.

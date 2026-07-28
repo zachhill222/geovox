@@ -102,7 +102,7 @@ namespace GV
 	constexpr uint64_t total_possible(const uint64_t max_depth) {
 		return Key_t::depth_linear_start(max_depth+1);
 	}
-
+	
 
 	/// ELEMENT IMPLEMENTATIONS
 	template<uint64_t MAX_DEPTH, uint64_t BC>
