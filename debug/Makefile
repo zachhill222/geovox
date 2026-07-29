@@ -1,50 +1,59 @@
-#set up the include directories
-INC_DIR = -I../include -I/usr/include/eigen3 -I../external/gutil/include
-
 #get source/target names of all files in the specified directory
-DIR    ?= .
+ifndef DIR
+	DIR = mesh
+endif
 SRC     = $(wildcard $(DIR)/*.cpp)
 TARGETS = $(SRC:.cpp=)
 
+#header files
+INCLUDE = -I../include -I/usr/include/eigen3 -I../external/gutil/include
+
 #default build (debug)
-CXX        =  g++ -std=c++23 -pg -Wall
-OPT        = -O0
-PAR        = -fopenmp
-DEFINE     =
+CXX     = g++ -std=c++23
 
-#redefine for testing optimizations
-CXX        =  g++ -std=c++23 -funroll-loops
-OPT        = -O3
-PAR        = -fopenmp
-DEFINE     = -DNDEBUG
+#explicit defines
+DEFINES = 
+ifdef PROFILE
+	DEFINES += -DPROFILE=$(PROFILE)
+endif
+ifdef GUTIL_ORTHTREE_MAX_DEPTH
+	DEFINES += -DGUTIL_ORTHTREE_MAX_DEPTH=$(GUTIL_ORTHTREE_MAX_DEPTH)
+endif
+ifdef GUTIL_N_OCTREE_THREADS
+	DEFINES += -DGUTIL_N_OCTREE_THREADS=$(GUTIL_N_OCTREE_THREADS)
+endif
 
-#final compiler command
-CC = $(CXX) $(OPT) $(PAR) $(DEFINE)
+#debug vs release mode
+ifdef NDEBUG
+	CXX += -O3
+	DEFINES += -DNDEBUG
+else
+	CXX += -O0 -Wall -pg
+endif
+
+#link to libraries
+ifndef NO_OMP
+	LIBS = -fopenmp
+else
+	LIBS = 
+endif
+
+#final compile command
+COMPILE = ${CXX} ${INCLUDE} ${LIBS} ${DEFINES}
 
 all: $(TARGETS)
 
 $(DIR)/%: $(DIR)/%.cpp FORCE
-	$(CC) $(INC_DIR) $< -o $@
+	$(COMPILE) $< -o $@
 
-FORCE: ;
+FORCE:
 
-
-#TODO: the clean up commands need to be changed
 .PHONY: clean
-clean: remove_tests
-	rm -f $(TARGETS) *.o
-
-
-.PHONY: remove_tests
-remove_tests:
-	rm -f gmon.out
-	rm -rf *.er
-	rm -f *.vtk
-	rm -f ./outfiles/*
-	rm -f massif.*
+clean:
+	rm -f  *.out *.vtk massif.* ./outfiles/*
 
 .PHONY: print
 print:
-	@echo SOURCES:= $(SRC)
-	@echo TARGETS:= $(TARGETS)
-	@echo INC_DIR:= $(INC_DIR)
+	@echo CXX:=     $(CXX)
+	@echo DIR:=     $(DIR)
+	@echo INCLUDE:= $(INCLUDE)

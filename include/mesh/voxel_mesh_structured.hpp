@@ -175,6 +175,32 @@ namespace GV {
 			set_depth_impl(idx, &element_mask[0], val);
 		}
 
+		void set_active(std::span<const VoxelElement> list, bool val) noexcept {
+			GUTIL_ASSERT(element_mask.size() == max_elements());
+			for (auto el : list) set_active_impl(el.depth_linear_index(), &element_mask[0], val);
+		}
+
+		void set_depth(std::span<const VoxelElement> list, unsigned char val) noexcept {
+			GUTIL_ASSERT(element_mask.size() == max_elements());
+			for (auto el : list) set_depth_impl(el.depth_linear_index(), &element_mask[0], val);
+		}
+
+		void set_active(std::span<const uint64_t> list, bool val) noexcept {
+			GUTIL_ASSERT(element_mask.size() == max_elements());
+			GUTIL_SIMD()
+			for (size_t i=0; i<list.size(); ++i) {
+				set_active_impl(list[i], &element_mask[0], val);
+			}
+		}
+
+		void set_depth(std::span<const uint64_t> list, unsigned char val) noexcept {
+			GUTIL_ASSERT(element_mask.size() == max_elements());
+			GUTIL_SIMD()
+			for (size_t i=0; i<list.size(); ++i) {
+				set_depth_impl(list[i], &element_mask[0], val);
+			}
+		}
+
 		//////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Convert to/from an unstructured mesh for a single layer
 		//////////////////////////////////////////////////////////////////////////////////////////////////
@@ -286,12 +312,6 @@ namespace GV {
 			}
 		}
 
-		void set_active(std::span<const VoxelElement> list, bool val) noexcept {
-			for (uint64_t i=0; i<list.size(); ++i) { 
-				set_active(list[i], val);
-			}
-		}
-
 
 		//////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Fill out the standard mesh interface
@@ -328,11 +348,12 @@ namespace GV {
 		void for_each_element_omp(Action&& action, Args&&... args) const noexcept {
 			GUTIL_ASSERT(max_omp_threads>0);
 			GUTIL_OMP(parallel num_threads(max_omp_threads))
-			{
-				const uint64_t tid = static_cast<uint64_t>(omp_get_thread_num());
-				const uint64_t n_per_thread = n_elements()/max_omp_threads;
-				const uint64_t start = tid*n_per_thread;
-				const uint64_t end = (tid==max_omp_threads-1) ? n_elements() : start + n_per_thread;
+			{	
+				const uint64_t n_threads    = static_cast<uint64_t>(max_omp_threads);
+				const uint64_t tid          = static_cast<uint64_t>(omp_get_thread_num());
+				const uint64_t n_per_thread = n_elements()/n_threads;
+				const uint64_t start        = tid*n_per_thread;
+				const uint64_t end          = (tid==n_threads-1) ? n_elements() : start + n_per_thread;
 
 				for (uint64_t idx=start; idx<end; ++idx) {
 					if constexpr (std::is_invocable_v<Action, VoxelElement, int, Args...>) {
@@ -350,10 +371,11 @@ namespace GV {
 			GUTIL_ASSERT(max_omp_threads>0);
 			GUTIL_OMP(parallel num_threads(max_omp_threads))
 			{
-				const uint64_t tid = static_cast<uint64_t>(omp_get_thread_num());
-				const uint64_t n_per_thread = max_elements()/max_omp_threads;
-				const uint64_t start = tid*n_per_thread;
-				const uint64_t end = (tid==max_omp_threads-1) ? max_elements() : start + n_per_thread;
+				const uint64_t n_threads    = static_cast<uint64_t>(max_omp_threads);
+				const uint64_t tid          = static_cast<uint64_t>(omp_get_thread_num());
+				const uint64_t n_per_thread = max_elements()/n_threads;
+				const uint64_t start        = tid*n_per_thread;
+				const uint64_t end          = (tid==n_threads-1) ? max_elements() : start + n_per_thread;
 
 				for (uint64_t idx=start; idx<end; ++idx) {
 					if constexpr (std::is_invocable_v<Action, uint64_t, int, Args...>) {
