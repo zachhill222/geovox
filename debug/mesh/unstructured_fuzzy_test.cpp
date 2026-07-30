@@ -154,11 +154,11 @@ Mesh_t generate_and_refine_mesh(const std::string& test_name, const Assembly_t& 
 		gutil::LogTime t{"(done)"};
 		auto pred = [&](Elem_t el) {
 			if (el.depth() >= target_depth) {return false;}
-
+			
 			Point_t pt = mesh.geo_coord(el.vertex(0));
 			Point_t diag = mesh.geo_coord(el.vertex(7)) - pt;
 			pt += 0.5*diag;
-
+			
 			double dist = assembly.signed_distance(pt);
 			return dist*dist < 0.5*gutil::squared_norm(diag);
 		};

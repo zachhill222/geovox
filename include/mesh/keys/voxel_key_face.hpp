@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include "mesh/keys/voxel_key_base.hpp"
@@ -57,7 +58,7 @@ namespace GV
 		static constexpr uint64_t A_M				 = BASE::OC_M;
 		using BASE::MAX_DEPTH;
 		using BASE::DOES_NOT_EXIST;
-		[[nodiscard]] static constexpr VoxelFaceKey None() { return {DOES_NOT_EXIST}; }
+		[[nodiscard]] static constexpr VoxelFaceKey None() { return VoxelFaceKey{DOES_NOT_EXIST}; }
 		static_assert(MAX_DEPTH_==MAX_DEPTH);
 
 		//periodic conditions. the BC bits are stored on the other_nocompare field

@@ -56,7 +56,7 @@ namespace GV
 		using BASE::DOES_NOT_EXIST;
 		static_assert(MAX_DEPTH_==MAX_DEPTH);
 
-		[[nodiscard]] static constexpr VoxelVertexKey None() { return {DOES_NOT_EXIST}; }
+		[[nodiscard]] static constexpr VoxelVertexKey None() { return VoxelVertexKey{DOES_NOT_EXIST}; }
 
 		//periodic conditions. the BC bits are stored on the other_nocompare field
 		static constexpr uint64_t BC_FLAG = BC;
@@ -103,11 +103,12 @@ namespace GV
 		}
 
 		[[nodiscard]] static constexpr VoxelVertexKey MakeKeyFromIndex(uint64_t lin_idx) noexcept {
-			uint64_t dd = 0;
-			uint64_t d_start = 0;
-			while (depth_linear_start(dd) < lin_idx) {d_start=depth_linear_start(dd); ++dd;}
-			assert(d_start<=lin_idx);
-			return VoxelVertexKey{dd, lin_idx-d_start};
+			for (uint64_t dd=0; dd<=MAX_DEPTH; ++dd) {
+				if (depth_linear_start(dd) <= lin_idx && lin_idx<depth_linear_start(dd+1)) {
+					return VoxelVertexKey{dd, lin_idx - depth_linear_start(dd)};
+				}
+			}
+			return None();
 		}
 
 

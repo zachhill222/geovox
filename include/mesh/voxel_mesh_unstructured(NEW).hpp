@@ -14,6 +14,7 @@
 #include <vector>
 #include <array>
 #include <span>
+#include <mutex>
 
 #include <iostream>
 #include <sstream>
@@ -84,6 +85,8 @@ namespace GV {
 
 		mutable gutil::ThreadPool large_pool{};			//thread pool with the number of available threads equal to the physical cores
 		mutable gutil::ThreadPool small_pool{2};		//smaller thread pool to allow openmp parallelism within the dispatched tasks
+		mutable std::mutex mtx;
+
 
 		//store a list of elements that classes with a const reference to the mesh can use to request
 		//element refinement or unrefinement
@@ -280,6 +283,7 @@ namespace GV {
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		void refine(VoxelElement el) const noexcept {
 			GUTIL_ASSERT(el.depth()<MAX_DEPTH);
+			std::lock_guard<std::mutex> lock(mtx);
 			request_refine[el.depth()].push_back(el);
 		}
 		
@@ -291,11 +295,12 @@ namespace GV {
 			const unsigned char dd = static_cast<unsigned char>(el.depth());
 			for (VoxelElement sib : el.parent().children()) {
 				if (s_layers[dd].read_depth(sib) > dd) {return;}
-				if constexpr (NULLPTR_T<Predicate>) {
+				if constexpr (!NULLPTR_T<Predicate>) {
 					if (s_layers[dd].is_active(sib) && !pred(sib)) {return;}
 				}
 			}
 			//the cell that we want to be active is tracked
+			std::lock_guard<std::mutex> lock(mtx);
 			request_unrefine[dd-1].push_back(el.parent());
 		}
 

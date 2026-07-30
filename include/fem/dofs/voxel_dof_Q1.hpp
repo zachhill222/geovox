@@ -153,7 +153,7 @@ namespace GV
 
 		constexpr std::array<VoxelQ1,N_CHILDREN> children_impl() const {
 			const uint64_t ii=2*key.i(), jj=2*key.j(), kk=2*key.k(), dd=key.depth()+1;
-			assert(dd<Key_t::MAX_DEPTH);
+			assert(dd<=Key_t::MAX_DEPTH);
 			return {
 				//bottom plane (k=-1)
 				VoxelQ1{Key_t{dd, ii-1, jj-1, kk-1}},

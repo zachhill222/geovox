@@ -42,8 +42,8 @@ using Vert_t		= typename Mesh_t::VoxelVertex;
 using Elem_t		= typename Mesh_t::VoxelElement;
 using Assembly_t	= GV::SignedDistanceSpheres<double,GV_TEST_DOMAIN_PERIOD>;
 
-using D_KEY_t       = Vert_t;
-using DOF_t         = GV::VoxelQ1<D_KEY_t>;
+using D_KEY         = Vert_t;
+using DOF_t         = GV::VoxelQ1<D_KEY>;
 using Handler_t     = GV::DofHandler<Mesh_t,DOF_t>;
 
 inline constexpr double DOMAIN_SIZE = GV_TEST_DOMAIN_SIZE;
@@ -106,37 +106,150 @@ Assembly_t generate_assembly(const std::string& test_name, size_t n_spheres, siz
 /// Generate a mesh of the spheres, assign dofs
 /////////////////////////////////////////////////////////////////
 void test_dof_handler(const std::string& test_name, const Assembly_t& assembly, size_t initial_depth) {
+	gutil::Logger::log("test_dof_handler (start)");
+	gutil::Logger::log("initializing mesh (start)");
+	gutil::LogTime* timer = new gutil::LogTime{"initializing mesh (done)"};
+	
 	Mesh_t mesh(domain, initial_depth);
 	mesh.update_unstructured();
-	mesh.collect_vertices();
 	Handler_t handler(mesh);
 	handler.init_dofs();
 	handler.collect_dofs();
-	handler.sort_dofs();
 
-	
+	gutil::Logger::log("dofhandler has ", handler.n_dofs(), " dofs");
+	gutil::Logger::log("mesh has ", mesh.n_elements(), " elements");
+	delete timer;
+
+	{
+		gutil::Logger::log("refining dofs (start)");
+		gutil::LogTime t{"refining dofs (done)"};
+
+		//refine mesh near the boundary
+		auto action = [&](std::span<DOF_t> dofs, double tol) {
+			for (DOF_t dof : dofs) {
+				GUTIL_ASSERT(dof.is_valid())
+				Vert_t vtx = static_cast<Vert_t>(dof.key);
+				if (std::abs( assembly.signed_distance(mesh.geo_coord(vtx)) ) < tol) {
+					handler.refine_quasi_hierarchical(dof);
+				}
+			}
+		};
+
+		double tol = 0.1;
+		for (size_t i=initial_depth; i<MAX_DEPTH; ++i) {
+			handler.dispatch_parallel_active_dof(action, tol);
+			handler.wait();
+
+			//refining dofs request mesh refinement
+			handler.collect_dofs();
+			mesh.process_refine();
+			mesh.update_unstructured();
+		}
+
+		handler.refine_all_quasi_hierarchical();
+		mesh.process_refine();
+		mesh.update_unstructured();
+		gutil::Logger::log("dofhandler has ", handler.n_dofs(), " dofs");
+		gutil::Logger::log("mesh has ", mesh.n_elements(), " elements");
+	}
+
+	{
+		gutil::Logger::log("unrefining dofs (start)");
+		gutil::LogTime t{"unrefining dofs (done)"};
+
+		for (auto it=mesh.element_begin(); it!=mesh.element_end(); ++it) {
+			GUTIL_ASSERT(mesh.is_active(*it));
+			Point_t v0 = mesh.geo_coord(it->vertex(0));
+			Point_t v1 = mesh.geo_coord(it->vertex(7));
+			if (std::abs( assembly.signed_distance(0.5*(v0+v1)) > 0.01 )) {
+				for (Vert_t vtx : it->vertices()) {
+					GUTIL_ASSERT(vtx.is_valid())
+					D_KEY key = static_cast<D_KEY>(vtx);
+					GUTIL_ASSERT(DOF_t{key}.is_valid())
+					handler.unrefine_quasi_hierarchical(DOF_t{key});
+				}
+			}
+		}
+
+		handler.wait();
+		handler.collect_dofs();
+
+		gutil::Logger::log("dofhandler has ", handler.n_dofs(), " dofs");
+		gutil::Logger::log("mesh has ", mesh.n_elements(), " elements");
+	}
+
+	{
+		gutil::Logger::log("remove mesh elements with no conformal dofs dofs (start)");
+		gutil::LogTime t{"remove mesh elements with no conformal dofs dofs (done)"};
+
+		for (auto it=mesh.element_begin(); it!=mesh.element_end(); ++it) {
+			std::vector<DOF_t> dofs;
+			std::vector<size_t> numbers;
+			handler.get_active_dofs_conformal(*it,dofs,numbers);
+			if (dofs.empty()) {
+				std::cout << "no dofs\n";
+				mesh.unrefine(*it);
+			}
+		}
+
+		mesh.process_unrefine();
+		mesh.update_unstructured();
+		gutil::Logger::log("dofhandler has ", handler.n_dofs(), " dofs");
+		gutil::Logger::log("mesh has ", mesh.n_elements(), " elements");
+	}
+
+
+
+
+
+
+
+	gutil::Logger::log("saving file");
 
 	//save mesh and record dof information
 	const std::string filename = test_name + "_dof.vtk";
+	mesh.update_unstructured();
+	mesh.collect_vertices();
 	mesh.save_as_binary(filename);
+
+	auto pt_sd_lookup = GV::make_feature_lookup<Vert_t>(
+			[&](Vert_t vtx) {return assembly.signed_distance(mesh.geo_coord(vtx));},
+			"signed_distance");
 
 	auto pt_dof_active_lookup = GV::make_feature_lookup<Vert_t>(
 			[&](Vert_t vtx) {
-				const DOF_t dof(static_cast<D_KEY_t>(vtx));
-				const size_t idx = handler.global_number(dof);
-				return (idx<handler.n_dofs()) ? static_cast<int>(idx) : -1;
+				vtx = handler.get_dof_vertex(vtx);
+				return vtx.exists() ? handler.global_number(DOF_t{static_cast<D_KEY>(vtx)}) : -1;
 			}, "active_dof_index");
+
+	auto pt_dof_refinable_lookup = GV::make_feature_lookup<Vert_t>(
+			[&](Vert_t vtx) {
+				vtx = handler.get_dof_vertex(vtx);
+				return vtx.exists() ? handler.is_refinable(DOF_t{static_cast<D_KEY>(vtx)}) : -1;
+			}, "dof_refinable");
+
+	auto pt_dof_depth_lookup = GV::make_feature_lookup<Vert_t>(
+			[&](Vert_t vtx) {
+				vtx = handler.get_dof_vertex(vtx);
+				return vtx.exists() ? vtx.depth() : -1;
+			}, "depth");
 
 	auto el_dof_count_lookup = GV::make_feature_lookup<Elem_t>(
 			[&](Elem_t el) {
 				std::vector<DOF_t> dofs;
 				std::vector<size_t> idxs;
+				// handler.get_active_dofs_conformal(el,dofs,idxs);
 				handler.get_active_dofs_full_hierarchical(el,dofs,idxs);
 				return dofs.size();
 			}, "n_active_dofs");
 
-	mesh.append_point_data_field_binary(filename, "point", pt_dof_active_lookup);
-	mesh.append_cell_data_field_binary(filename, "element", el_dof_count_lookup);
+	auto el_depth_lookup = GV::make_feature_lookup<Elem_t>(
+			[&](Elem_t el) {
+				return el.depth();
+			}, "depth");
+
+	mesh.append_point_data_field_binary(filename, "point", pt_sd_lookup, pt_dof_active_lookup, pt_dof_refinable_lookup,pt_dof_depth_lookup);
+	mesh.append_cell_data_field_binary(filename, "element", el_dof_count_lookup,el_depth_lookup);
 }
 
 
