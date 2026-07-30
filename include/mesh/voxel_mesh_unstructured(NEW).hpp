@@ -88,8 +88,7 @@ namespace GV {
 		//store a list of elements that classes with a const reference to the mesh can use to request
 		//element refinement or unrefinement
 		mutable std::array<std::vector<VoxelElement>,MAX_DEPTH+1> request_refine{};
-		mutable std::array<std::vector<VoxelElement>,MAX_DEPTH+1> request_coarsen{};
-		mutable std::array<std::vector<VoxelElement>,MAX_DEPTH+1> request_min_depth_{};
+		mutable std::array<std::vector<VoxelElement>,MAX_DEPTH+1> request_unrefine{};
 
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		/// A few utility methods
@@ -279,31 +278,31 @@ namespace GV {
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Methods for manipulating the mesh
 		/////////////////////////////////////////////////////////////////////////////////////////////////
-		void request_min_depth(VoxelElement el) const noexcept {
-			const unsigned char dd = static_cast<unsigned char>(el.depth());
-			if (s_layers[dd].read_depth(el) < dd) {
-				request_min_depth_[dd].push_back(el);
-			}
-		}
-
 		void refine(VoxelElement el) const noexcept {
 			GUTIL_ASSERT(el.depth()<MAX_DEPTH);
 			request_refine[el.depth()].push_back(el);
 		}
 		
-		void coarsen(VoxelElement el) const noexcept {
+		template<typename Predicate = std::nullptr_t>
+		void unrefine(VoxelElement el, Predicate&& pred=nullptr) const noexcept {
 			GUTIL_ASSERT(el.depth()>0);
-			request_coarsen[el.depth()].push_back(el);
+			//no sibling may have an active descendant
+			//all active siblings must satisfy the predicate
+			const unsigned char dd = static_cast<unsigned char>(el.depth());
+			for (VoxelElement sib : el.parent().children()) {
+				if (s_layers[dd].read_depth(sib) > dd) {return;}
+				if constexpr (NULLPTR_T<Predicate>) {
+					if (s_layers[dd].is_active(sib) && !pred(sib)) {return;}
+				}
+			}
+			//the cell that we want to be active is tracked
+			request_unrefine[dd-1].push_back(el.parent());
 		}
 
 		template<typename Predicate>
 		void refine(Predicate&& pred) const noexcept {
 			auto action = [&](VoxelElement el, uint64_t dd) {
-				if (pred(el)) { request_refine[dd].push_back(el);
-					// for (VoxelElement c : el.children()) {
-					// 	request_refine[dd+1].push_back(el);
-					// }
-				}
+				if (pred(el)) request_refine[dd].push_back(el);
 			};
 			
 			auto job = [&](uint64_t dd) { s_layers[dd].for_each_element(action, dd); };
@@ -315,11 +314,22 @@ namespace GV {
 		}
 
 		template<typename Predicate>
-		void coarsen(Predicate&& pred) const noexcept {
-			auto action = [&](VoxelElement el, uint64_t dd) {if (pred(el)) { request_coarsen[dd].push_back(el); }};
-			auto job = [&](uint64_t dd) { s_layers[dd].for_each_element(action, dd); };
+		void unrefine(Predicate&& pred) const noexcept {
+			auto action = [&](VoxelElement el, unsigned char dd) {
+				//all active siblings must satisfy the predicate to unrefine
+				for (VoxelElement sib : el.parent().children()) {
+					//a sibling must not have an active descendent to be able to unrefine
+					//additionally, all active siblings must satisfy the predicate
+					if (s_layers[dd].read_depth(sib) > static_cast<uint64_t>(dd)) {return;}
+					if (s_layers[dd].is_active(sib) && !pred(sib)) {return;}
+				}
+				//note that the parent will be added 8 times...but will be deduplicated later
+				//probably more efficient to do that than to track if it has already been aded
+				request_unrefine[dd-1].push_back(el.parent());
+			};
+			auto job = [&](unsigned char dd) { s_layers[dd].for_each_element(action, dd); };
 
-			for (uint64_t dd=1; dd<=MAX_DEPTH; ++dd) {
+			for (unsigned char dd=1; dd<=static_cast<unsigned char>(MAX_DEPTH); ++dd) {
 				large_pool.submit(job, dd);
 			}
 			large_pool.wait_idle();
@@ -327,26 +337,7 @@ namespace GV {
 
 		void synchronize_depth_field() noexcept;
 
-		void request_depth(VoxelElement el) const noexcept {
-
-		}
-
-		void process_coarsen() noexcept;
-
-		template<typename Predicate = std::nullptr_t>
-		void process_request_min_depth(Predicate&& pred = nullptr) noexcept;
-
-		template<typename Predicate = std::nullptr_t>
-		void process_request_min_depth(std::array<std::vector<VoxelElement>,MAX_DEPTH+1>& list, Predicate&& pred=nullptr) noexcept {
-			//join the list to the internal list and then call the internal method
-			for (uint64_t dd=0; dd<=MAX_DEPTH; ++dd) {
-				large_pool.submit([&,dd](){
-					request_min_depth_.insert(request_min_depth_.end(), list[dd].begin(), list[dd].end());
-				});
-			}
-			large_pool.wait_idle();
-		}
-
+		void process_unrefine() noexcept;
 
 		template<typename Predicate = std::nullptr_t>
 		void process_refine(Predicate&& pred = nullptr) noexcept;
@@ -428,106 +419,6 @@ namespace GV {
 			}
 			return list;
 		}
-
-		[[nodiscard]] std::vector<VoxelElement> sibling_neighbors(VoxelElement el) const noexcept {
-			assert(el.is_valid());
-			std::vector<VoxelElement> list;
-
-			const uint64_t dd = el.depth();
-			if (dd==0) { return neighbors(el); }
-			if (!s_layers[dd].is_active(el)) { return {}; }
-
-			for (VoxelElement sib : el.parent().children()) {
-				for (VoxelElement nbr : el.neighbors()) {
-					if (!nbr.is_valid()) { continue; }
-
-					if ( s_layers[dd].is_active(nbr) ) { list.push_back(nbr); }
-					else if ( dd>0 && s_layers[dd-1].is_active(nbr.parent())) { list.push_back(nbr.parent()); }
-					else if ( dd<MAX_DEPTH ) {
-						for ( VoxelElement chi : nbr.children() ) {
-							//RMK: this collects the entire 'sibling block' when only a corner or face is needed
-							//this seems fine for most (all?) topological operations.
-							if ( s_layers[dd+1].is_active(chi) ) { list.push_back(chi); }
-						}
-					}
-				}
-			}
-			//TODO: update logic so we don't visit elements more than once
-			sort_and_unique(list);
-			return list;
-		}
-
-	private:
-		//////////////////////////////////////////////////////////////////////////////
-		/// Read-only cone discovery for a single requested (dd, el). Walks up the
-		/// ancestor chain and, at each level, checks same-depth geometric neighbors
-		/// (el.neighbors(), NOT the mesh's activity-gated neighbors() -- candidates
-		/// here may not exist yet), recursively discovering whatever else must be
-		/// activated to maintain 2-1 balance once el's ancestor chain is brought up.
-		/// Reads the CURRENT depth field only -- never mutates anything, this is intended
-		/// to call concurrently across threads against a fixed valid mesh state, with each
-		/// thread writing to its own cone buffer.
-		//////////////////////////////////////////////////////////////////////////////
-		void discover_cone(unsigned char dd, VoxelElement el, std::array<std::vector<VoxelElement>,MAX_DEPTH+1>& cone) const noexcept {
-			if (s_layers[dd].read_depth(el) >= dd) { return; } //already satisfied; nothing to add
-			cone[dd].push_back(el);
-
-			VoxelElement cur = el;
-			unsigned char cur_depth = dd;
-			while (cur_depth > 0) {
-				VoxelElement par = cur.parent();
-				if (!par.exists()) { break; }
-				const unsigned char pd = cur_depth - 1;
-				if (s_layers[pd].read_depth(par) >= cur_depth) { break; }
-
-				for (VoxelElement nbr : par.neighbors()) {
-					if (!nbr.is_valid()) { continue; }
-					if (s_layers[pd].read_depth(nbr) < pd) {
-						discover_cone(pd, nbr, cone); //may re-discover something another call already found; sort_and_unique absorbs it
-					}
-				}
-				cone[pd].push_back(par);
-				cur = par;
-				cur_depth = pd;
-			}
-		}
-
-		//////////////////////////////////////////////////////////////////////////////
-		/// Atomic primitive: bring `el` (at depth dd) up to depth dd, propagating the
-		/// change up the ancestor chain so every intermediate layer's depth field
-		/// stays consistent (matches "depth = max(own, deepest descendant)").
-		/// Does NOT check or enforce 2-1 balance -- that is entirely the job of
-		/// discover_cone(), which must have already run for `el` (and everything it
-		/// implies) before this is ever called. Order-independent: verified that
-		/// applying a fully-discovered cone in any order produces the same result.
-		//////////////////////////////////////////////////////////////////////////////
-		void guarantee_depth(unsigned char dd, VoxelElement el) noexcept {
-			if (s_layers[dd].read_depth(el) >= dd) { return; }
-			s_layers[dd].set_active(el, true);
-			s_layers[dd].set_depth(el, dd);
-
-			VoxelElement cur = el;
-			while (true) {
-				VoxelElement par = cur.parent();
-				if (!par.exists()) { break; }
-				const unsigned char pd = static_cast<unsigned char>(par.depth());
-				if (s_layers[pd].read_depth(par) >= dd) { break; }
-				s_layers[pd].set_depth(par, dd);
-				s_layers[pd].set_active(par, false);
-
-				//par no longer covers its own region -- every OTHER child (sibling of
-				//cur) must become an active leaf, or that 7/8 of par's region is left
-				//with nothing active covering it at all.
-				for (VoxelElement sib : par.children()) {
-					if (sib == cur) { continue; }
-					if (s_layers[pd+1].read_depth(sib) < pd+1) {   //don't clobber something already resolved deeper
-						s_layers[pd+1].set_active(sib, true);
-						s_layers[pd+1].set_depth(sib, pd+1);        //sib's OWN depth, not dd
-					}
-				}
-				cur = par;
-			}
-		}
 	};
 
 
@@ -535,47 +426,67 @@ namespace GV {
 	/// Implementations
 	//////////////////////////////////////////////////////////////////////////////////////////////////////
 	template<uint64_t MaxDepth>
-	void UnstructuredVoxelMesh<MaxDepth>::process_coarsen() noexcept {
-		//ensure the coarsen lists don't contain duplicates
-		//additionally, add elements to coarsen so that the 2-1 refinement rule is respected
-		//note that elements at depth 0 cannot be coarsened and elements at MAX_DEPTH cannot
-		//have neighbors that are 'too fine'
-		for (uint64_t dd=1; dd<MAX_DEPTH; ++dd) {
-			sort_and_unique(request_coarsen[dd]);
-			for (VoxelElement el : request_coarsen[dd]) {
-				for (VoxelElement nbr : sibling_neighbors(el)) {
-					if (nbr.depth() == dd+1) {
-						request_coarsen[dd+1].push_back(nbr);	
+	void UnstructuredVoxelMesh<MaxDepth>::process_unrefine() noexcept {
+		GUTIL_TIMER("process_unrefine : ", n_elements(), " current elements");
+		{
+			//ensure the unrefine lists don't contain duplicates
+			//additionally, add elements to unrefine so that the 2-1 refinement rule is respected
+			//note that elements marked as 'unrefine' are elements that should be activated and
+			//if they have no active descendant, the request is removed.
+			auto job = [&](unsigned char dd) {
+				sort_and_unique(request_unrefine[dd]);
+				//this is only a valid unrefinement target if it is not active and its depth field is greater
+				//than its own depth. The latter guarantees the former as the elements are disjoint.
+				//additionally, rather than adding cells to unrefine, we only refine cells that will still
+				//satisfy the 2-1 rule.
+				std::erase_if(request_unrefine[dd], [&,dd](VoxelElement el) {
+					if (s_layers[dd].read_depth(el) <= dd) {return true;}
+					for (VoxelElement c : el.children()) {
+						if (!s_layers[dd+1].is_active(c)) { continue; }
+						for (VoxelElement nbr : neighbors(c)) {
+							if (nbr.depth() > static_cast<uint64_t>(dd+1)) {
+								return true; //activating will break 2-1	
+							}
+						}
 					}
-				}
+					return false; //we are ok to activate
+				});
+			};
+
+			for (unsigned char dd=0; dd<=static_cast<unsigned char>(MAX_DEPTH); ++dd) {
+				large_pool.submit(job, dd);
 			}
+			large_pool.wait_idle();
 		}
-		sort_and_unique(request_coarsen[MAX_DEPTH]);
 
-		//we can process in 2 parallel batches due to the 2-1 rule
-		//deactivate specified elements and its siblings at level dd,
-		//then activate its parent at level dd-1
-		auto job = [&](uint64_t dd) {
-			GUTIL_OMP(parallel for num_threads(omp_get_max_threads()/2) if(request_coarsen[dd].size()>4096))
-			for (size_t i=0; i<request_coarsen[dd].size(); ++i) {
-				VoxelElement el = request_coarsen[dd][i];
-				s_layers[dd].set_active(el.parent().children(), false);
-				s_layers[dd-1].set_active(el.parent(), true);
-			}
-			request_coarsen[dd].clear();
-		};
+		{
+			//we can process in 2 parallel batches due to the 2-1 rule
+			//deactivate specified elements and its siblings at level dd,
+			//then activate its parent at level dd-1
+			auto job = [&](uint64_t dd) {
+				GUTIL_OMP(parallel for num_threads(omp_get_max_threads()/2) if(request_unrefine[dd].size()>4096))
+				for (size_t i=0; i<request_unrefine[dd].size(); ++i) {
+					VoxelElement el = request_unrefine[dd][i];
+					s_layers[dd+1].set_active(el.children(), false);
+					s_layers[dd].set_active(el, true);
+				}
+				request_unrefine[dd].clear();
+			};
 
-		for (uint64_t dd=1; dd<=MAX_DEPTH; dd+=2) {large_pool.submit(job,dd);}
-		large_pool.wait_idle();
+			for (uint64_t dd=0; dd<MAX_DEPTH; dd+=2) {large_pool.submit(job,dd);}
+			large_pool.wait_idle();
 
-		for (uint64_t dd=2; dd<=MAX_DEPTH; dd+=2) {large_pool.submit(job,dd);}
-		large_pool.wait_idle();
+			for (uint64_t dd=1; dd<MAX_DEPTH; dd+=2) {large_pool.submit(job,dd);}
+			large_pool.wait_idle();
+		}
+
+		synchronize_depth_field();
 	}
 
 	template<uint64_t MaxDepth>
 	template<typename Predicate>
 	void UnstructuredVoxelMesh<MaxDepth>::process_refine(Predicate&& pred) noexcept {
-		// process_request_min_depth(request_refine, std::forward<Predicate>(pred));
+		GUTIL_TIMER("process_refine : ", n_elements(), " current elements");
 
 		//ensure the refine lists don't contain duplicates
 		//additionally, add elements to refine so that the 2-1 refinement rule is respected
@@ -604,13 +515,11 @@ namespace GV {
 				
 				if constexpr (NULLPTR_T<Predicate>) {
 					s_layers[dd+1].set_active(el.children(), true);
-					s_layers[dd+1].set_depth(el.children(), static_cast<unsigned char>(dd+1));
 				}
 				else {
 					for (VoxelElement chi : el.children()) {
 						if (pred(chi)) {
 							s_layers[dd+1].set_active(chi,true);
-							s_layers[dd+1].set_depth(chi,static_cast<unsigned char>(dd+1));
 						}
 					}
 				}
@@ -637,104 +546,18 @@ namespace GV {
 				return;
 			}
 
-			unsigned char cd = 0;
-			for (VoxelElement c : VoxelElement{static_cast<uint64_t>(dd),idx}.children()) {
-				cd = std::max(cd, s_layers[dd+1].read_depth(c));
-			}
-			
-			if (s_layers[dd].read_depth(idx) < cd) {
-				//there was a deeper element with overlapping interior
-				s_layers[dd].set_active(idx,false);
-				s_layers[dd].set_depth(idx, cd);
+			if (s_layers[dd].is_active(idx)) {s_layers[dd].set_depth(idx,dd);}
+			else {
+				unsigned char cd = 0;
+				for (VoxelElement c : VoxelElement{static_cast<uint64_t>(dd),idx}.children()) {
+					cd = std::max(cd, s_layers[dd+1].read_depth(c));
+				}
+				s_layers[dd].set_depth(idx,cd);
 			}
 		};
 
 		for (unsigned char dd=static_cast<unsigned char>(MAX_DEPTH+1); dd>0; --dd) {
 			s_layers[dd-1].for_each_index_simd(action, dd-1);
-		}
-	}
-
-	template<uint64_t MaxDepth>
-	template<typename Predicate>
-	void UnstructuredVoxelMesh<MaxDepth>::process_request_min_depth(Predicate&& pred) noexcept {
-	
-		//pass 0: clean the request lists
-		{
-			gutil::LogTime timer{"pass 0 : clean request depth lists"};
-			auto job = [&](unsigned char dd){
-				sort_and_unique(request_min_depth_[dd]);
-				if constexpr (NULLPTR_T<Predicate>) {
-					std::erase_if(request_min_depth_[dd], [this,dd](VoxelElement el){return s_layers[dd].read_depth(el) >= dd;});
-				}
-				else {
-					std::erase_if(request_min_depth_[dd], [this,dd,pred](VoxelElement el){return !pred(el) || s_layers[dd].read_depth(el) >= dd;});
-				}
-			};
-			for (unsigned char dd=0; dd<=static_cast<unsigned char>(MAX_DEPTH); ++dd) {
-				large_pool.submit(job, dd);
-			}
-			large_pool.wait_idle();
-		}
-
-		//pass 1: MARK. Build a temporary "required depth" map (only for positions
-		//touched this batch); falls back to the mesh's current read_depth() for
-		//anything not yet touched. Cascades fine-to-coarse: propagates up the
-		//ancestor chain, and at EACH level marks (a) all siblings as required to
-		//at least their own depth (the parent is being split, its whole region
-		//needs covering) and (b) same-depth neighbors as required to at least
-		//that level's depth (the 2-1 rule). Sequential -- this mutates a shared
-		//map as it goes, unlike the old read-only cone discovery.
-		std::unordered_map<VoxelElement, unsigned char> required;
-		auto req = [&](VoxelElement el) -> unsigned char {
-			auto it = required.find(el);
-			return (it != required.end()) ? it->second : s_layers[el.depth()].read_depth(el);
-		};
-		auto mark = [&](VoxelElement node, unsigned char target_depth) {
-			if (req(node) >= target_depth) { return; }
-			required[node] = target_depth;
-			VoxelElement cur = node;
-			while (true) {
-				VoxelElement par = cur.parent();
-				if (!par.exists()) { break; }
-				const unsigned char pd = static_cast<unsigned char>(par.depth());
-				if (req(par) >= target_depth) { break; }
-				required[par] = target_depth;
-				for (VoxelElement sib : par.children()) {
-					if (sib != cur && req(sib) < static_cast<unsigned char>(pd+1)) {
-						mark(sib, static_cast<unsigned char>(pd+1));
-					}
-				}
-				for (VoxelElement nbr : par.neighbors()) {
-					if (!nbr.is_valid()) { continue; }
-					if (req(nbr) < pd) { mark(nbr, pd); }
-				}
-				cur = par;
-			}
-		};
-		{
-			gutil::LogTime timer{"pass 1 : mark required depths"};
-			for (unsigned char dd=0; dd<=static_cast<unsigned char>(MAX_DEPTH); ++dd) {
-				for (VoxelElement el : request_min_depth_[dd]) {
-					mark(el, dd);
-				}
-			}
-		}
-
-		//pass 2: ACTIVATE. For every touched position, is_active iff required
-		//exactly equals its own depth -- a genuine, unsuperseded leaf.
-		{
-			gutil::LogTime timer{"pass 2 : activate"};
-			for (auto& [node, val] : required) {
-				const unsigned char d = static_cast<unsigned char>(node.depth());
-				s_layers[d].set_depth(node, val);
-				s_layers[d].set_active(node, val == d);
-			}
-		}
-
-		//pass 3: clear
-		{
-			gutil::LogTime timer{"pass 3 : clear request_min_depth_"};
-			for (auto& list : request_min_depth_) {list.clear();}
 		}
 	}
 

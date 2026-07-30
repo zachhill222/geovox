@@ -16,6 +16,11 @@ namespace GV
 {
 	template<typename OS, typename Mesh_t, bool ASCII>
 	void write_point_field(OS& buffer, const Mesh_t& mesh) {
+		if (mesh.vertex_begin()==mesh.vertex_end()) {
+			gutil::Logger::error("ERROR: no vertices found. Maybe mesh.collect_vertices() was forgotten?");
+			throw;
+		}
+
 		using PrintPoint_t = gutil::Point<3,float>;
 
 		buffer << "POINTS " << mesh.n_vertices() << " float\n";
@@ -34,6 +39,11 @@ namespace GV
 
 	template<typename OS, typename Mesh_t, bool ASCII>
 	void write_cell_field(OS& buffer, const Mesh_t& mesh) {
+		if (mesh.element_begin()==mesh.element_end()) {
+			gutil::Logger::error("ERROR: no elements found. Maybe mesh.update_unstructured() was forgotten?");
+			throw;
+		}
+
 		buffer << "CELLS " << mesh.n_elements() << " " << 9*mesh.n_elements() << "\n";
 		for (auto it=mesh.element_begin(); it!=mesh.element_end(); ++it) {
 			std::array<uint64_t,8> v_idx;

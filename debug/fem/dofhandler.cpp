@@ -1,60 +1,173 @@
-#include "mesh/voxel_mesh_unstructured.hpp"
-#include "fem/handlers/dofhandler_charms.hpp"
+#include "gutil.hpp"
+
+#include "mesh/voxel_mesh_unstructured(NEW).hpp"
+#include "diffuse_domain/signed_distance.hpp"
+#include "fem/handlers/dofhandler.hpp"
 #include "fem/dofs/voxel_dof_Q1.hpp"
 
-#include "mesh/vtk_file_io.hpp"
+/////////////////////////////////////////////////////////////////
+/// Collect compile-time options.
+///		GV_TEST_DOMAIN_PERIOD:
+///				0bzyx (e.g., 6=0b110 is periodic in z and y but not in x)
+///
+/// 	GV_TEST_MAX_DEPTH:
+///				the maximum depth of the voxel mesh, larger than 10 is 
+///				not recommended due to memory. larger than 15 is not supported.
+///
+///		GV_TEST_DOMAIN_SIZE:
+///				the size of the domain (half sidelength) in each axis
+///				the domain is centered at the origin
+/////////////////////////////////////////////////////////////////
 
-#include <cmath>
-#include <fstream>
-#include <cstdint>
+#ifndef GV_TEST_DOMAIN_PERIOD
+	#define GV_TEST_DOMAIN_PERIOD 7
+#endif
 
-using Mesh_t   = GV::UnstructuredVoxelMesh<10>;
-using Elem_t   = Mesh_t::VoxelElement;
-using Vert_t   = Mesh_t::VoxelVertex;
-using DofKey_t = typename Vert_t::PeriodicVariant<0>;
-using DOF_t    = GV::VoxelQ1<DofKey_t>;
-using Basis_t  = GV::DofHandlerCharms<Mesh_t,DOF_t>;
+#ifndef GV_TEST_MAX_DEPTH
+	#define GV_TEST_MAX_DEPTH 8
+#endif
 
-int main(int argc, char* argv[])
-{
-	Mesh_t mesh({0,0,0}, {1,1,1});
-	Basis_t basis(mesh);
+#ifndef GV_TEST_DOMAIN_SIZE
+	#define GV_TEST_DOMAIN_SIZE 1
+#endif
 
-	//activate mesh and basis to depth 4
-	mesh.set_depth(3);
-	basis.set_depth(3);
+/////////////////////////////////////////////////////////////////
+/// Assemble aliases for this test.
+/////////////////////////////////////////////////////////////////
+using Point_t		= gutil::Point<3,double>;
+using Box_t 		= gutil::Box<3,double>;
+using Sphere_t		= gutil::Sphere<3,double>;
+using Mesh_t		= GV::UnstructuredVoxelMesh<GV_TEST_MAX_DEPTH>;
+using Vert_t		= typename Mesh_t::VoxelVertex;
+using Elem_t		= typename Mesh_t::VoxelElement;
+using Assembly_t	= GV::SignedDistanceSpheres<double,GV_TEST_DOMAIN_PERIOD>;
 
-	//initialize a test scalar field
-	std::vector<double> coefs(basis.n_dofs(), 0.0);
-	basis.init_coefs_by_dof(coefs, [&mesh](const DOF_t dof) {
-		const auto pt = mesh.geo_coord(static_cast<Vert_t>(dof.key));
-		return std::sqrt(pt[0]*pt[0] + pt[1]*pt[1] + pt[2]*pt[2]);
-	});
+using D_KEY_t       = Vert_t;
+using DOF_t         = GV::VoxelQ1<D_KEY_t>;
+using Handler_t     = GV::DofHandler<Mesh_t,DOF_t>;
 
-	// refine the mesh to depth 6 in the radial band (0.4, 0.6)
-	for (uint64_t d=3; d<4; ++d) {
-		std::vector<double> old_coefs = coefs;
+inline constexpr double DOMAIN_SIZE = GV_TEST_DOMAIN_SIZE;
+inline constexpr size_t MAX_DEPTH = GV_TEST_MAX_DEPTH;
+inline constexpr Box_t domain{ {-DOMAIN_SIZE,-DOMAIN_SIZE,-DOMAIN_SIZE},
+							   { DOMAIN_SIZE, DOMAIN_SIZE, DOMAIN_SIZE}};
 
-		basis.refine(basis.curr_compressed_dofs());
-		mesh.process_requests();
-		
-		basis.compress_dof_numbers();
-		std::vector<double> new_coefs(basis.n_dofs(), 0.0);
-		basis.update_coefs(new_coefs, old_coefs);
-		coefs = std::move(new_coefs);
+
+/////////////////////////////////////////////////////////////////
+/// Generate a pseudo-random periodic collection of spheres with
+/// no intersections.
+/////////////////////////////////////////////////////////////////
+Assembly_t generate_assembly(const std::string& test_name, size_t n_spheres, size_t seed, double min_r, double max_r) {
+	gutil::Logger::log("Generating Periodic Assembly: START");
+	std::cout << "\ntest= " << test_name << "\n"
+			  << "\tn_spheres= " << n_spheres << "\n"
+			  << "\tseed= " << seed << "\n"
+			  << "\tmin_r= " << min_r << "\n"
+			  << "\tmax_r= " << max_r << "\n" << std::flush;
+	gutil::LogTime timer{"Generating Periodic Assembly: DONE"};
+	
+
+	// set up assembly and rng
+	Assembly_t assembly{domain};
+
+	auto random_point = gutil::UniformRandomPoint<Point_t,true>();
+	random_point.set_parameters(-DOMAIN_SIZE,DOMAIN_SIZE);
+	random_point.set_seed(seed);
+	
+	auto random_radius = gutil::UniformRandomPoint<Point_t,true>();
+	random_radius.set_parameters(min_r,max_r);
+	random_radius.set_seed(seed);
+
+	//insert spheres
+	const size_t max_attempts = 500 * n_spheres;
+	size_t attempts = 0;
+
+	while(assembly.size() < n_spheres && attempts<max_attempts) {
+		++attempts;
+		Sphere_t candidate(random_point(), random_radius.scalar());
+		if (!assembly.collides(candidate)) {
+			assembly.push_back(std::move(candidate));
+		}
 	}
-	std::cout << "Done refining" << std::endl;
 
-	//write the mesh structure to a file
-	std::cout << "Writing to file" << std::endl;
+	if (assembly.size() < n_spheres) {
+		gutil::Logger::log("WARNING: only placed ", assembly.size(), "/", n_spheres,
+							" disjoint periodic spheres after ", max_attempts, " attempts.\n",
+							"Try a smaller number of spheres or radii.");
+	}
+
+	std::string filename = test_name + "_spheres.txt";
+	gutil::write_spheres_to_file(filename, assembly.as_cspan());
+
+	return assembly;
+}
+
+
+/////////////////////////////////////////////////////////////////
+/// Generate a mesh of the spheres, assign dofs
+/////////////////////////////////////////////////////////////////
+void test_dof_handler(const std::string& test_name, const Assembly_t& assembly, size_t initial_depth) {
+	Mesh_t mesh(domain, initial_depth);
+	mesh.update_unstructured();
 	mesh.collect_vertices();
-	mesh.save_as_ascii("dof_test.vtk");
+	Handler_t handler(mesh);
+	handler.init_dofs();
+	handler.collect_dofs();
+	handler.sort_dofs();
 
-	auto vert_vals = basis.interpolate_to_vertices(coefs, mesh.get_vertices());
-	auto v_lookup = GV::make_index_lookup<double>([&](size_t idx){return vert_vals[idx];}, "function_value");
-	mesh.append_point_data_field_ascii("dof_test.vtk", "point_data", v_lookup);
+	
+
+	//save mesh and record dof information
+	const std::string filename = test_name + "_dof.vtk";
+	mesh.save_as_binary(filename);
+
+	auto pt_dof_active_lookup = GV::make_feature_lookup<Vert_t>(
+			[&](Vert_t vtx) {
+				const DOF_t dof(static_cast<D_KEY_t>(vtx));
+				const size_t idx = handler.global_number(dof);
+				return (idx<handler.n_dofs()) ? static_cast<int>(idx) : -1;
+			}, "active_dof_index");
+
+	auto el_dof_count_lookup = GV::make_feature_lookup<Elem_t>(
+			[&](Elem_t el) {
+				std::vector<DOF_t> dofs;
+				std::vector<size_t> idxs;
+				handler.get_active_dofs_full_hierarchical(el,dofs,idxs);
+				return dofs.size();
+			}, "n_active_dofs");
+
+	mesh.append_point_data_field_binary(filename, "point", pt_dof_active_lookup);
+	mesh.append_cell_data_field_binary(filename, "element", el_dof_count_lookup);
+}
 
 
 
+
+
+
+
+
+
+
+int main(int argc, char* argv[]) {
+	std::vector<std::string> args(argv, argv+argc);
+	size_t seed  = 0;
+	size_t n_spheres = 100;
+	double min_r = 0.01;
+	double max_r = 0.5;
+	size_t initial_depth = MAX_DEPTH/3;
+	std::string test_name = "dofhandler";
+
+	for (size_t i=0; i<args.size(); ++i) {
+		if      (args[i] == "-N") { n_spheres = atoi(args[++i].c_str());}
+		else if (args[i] == "-R0") { min_r = atof(args[++i].c_str());}
+		else if (args[i] == "-R1") { max_r = atof(args[++i].c_str());}
+		else if (args[i] == "-S")  { seed = atoi(args[++i].c_str());}
+		else if (args[i] == "-name") {test_name = args[++i];}
+		else if (args[i] == "-ID") {initial_depth = atoi(args[++i].c_str());}
+	}
+
+
+	Assembly_t assembly = generate_assembly(test_name, n_spheres, seed, min_r, max_r);
+	test_dof_handler(test_name, assembly, initial_depth);
 	return 0;
 }

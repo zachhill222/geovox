@@ -1,3 +1,5 @@
+#include "gutil.hpp"
+
 #include "fem/handlers/dofhandler_charms.hpp"
 #include "fem/dofs/voxel_dof_Q1.hpp"
 #include "fem/numerics/kernel.hpp"
@@ -5,7 +7,6 @@
 #include "fem/forms/bilinear/policy_evaluation.hpp"
 #include "fem/forms/bilinear/matrix_multiply.hpp"
 
-#include "util/log_time.hpp"
 #include "util/compatibility.hpp"
 
 using Mesh_t    = GV::VoxelMesh<10>;
@@ -28,7 +29,7 @@ using DivFormAdj_t 	= GV::BilinearFormMultiply<Handler_t, Handler_t, HdivAdjEval
 using Kernel_t  = GV::Kernel<5,BiMass_t,BiStiff_t,DivForm_t,DivFormAdj_t>;
 
 int main(int argc, char* argv[]) {
-	GV::LogTime t0{"Program"};
+	gutil::LogTime t0{"Program"};
 
 	//uniform depth
 	const int depth = 4;

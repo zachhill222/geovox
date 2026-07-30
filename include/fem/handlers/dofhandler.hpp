@@ -89,8 +89,8 @@ namespace GV {
 		static constexpr bool ELEMENT_DOF = std::same_as<M_KEY, typename Mesh_t::VoxelElement>;
 		static constexpr bool FACE_DOF    = std::same_as<M_KEY, typename Mesh_t::VoxelFace>;
 
-		static constexpr unsigned char ACTIVE_BIT  = unsigned char{1};
-		static constexpr unsigned char REFINED_BIT = unsigned char{1} << 1;
+		static constexpr unsigned char ACTIVE_BIT  = 1;	//0b00000001
+		static constexpr unsigned char REFINED_BIT = 2;	//0b00000010
 		static constexpr unsigned char FREE_BITS   = ~(ACTIVE_BIT | REFINED_BIT);
 
 		/////////////////////////////////////////////////////////////////////////
@@ -135,7 +135,7 @@ namespace GV {
 				active_dof_sorter = other.active_dof_sorter;
 			}
 		}
-		[[nodiscard]] DofHandler& operator=(DofHandler&&) noexcept {
+		[[nodiscard]] DofHandler& operator=(DofHandler&& other) noexcept {
 			GUTIL_ASSERT(&mesh==&other.mesh);
 			if (this != &other) {
 				dof_mask = std::move(other.dof_mask);
@@ -216,14 +216,12 @@ namespace GV {
 
 		void wait() const noexcept { threads.wait_idle(); }
 
-		GUTIL_DECLARE_SIMD()
 		void set_active(DOF_t dof, bool val) noexcept {
 			GUTIL_ASSERT(dof.is_valid())
 			const uint64_t d_idx = dof.linear_index();
 			dof_mask[d_idx] = val ? dof_mask[d_idx] | ACTIVE_BIT : dof_mask[d_idx] & ~ACTIVE_BIT;
 		}
 
-		GUTIL_DECLARE_SIMD()
 		void set_refined(DOF_t dof, bool val) noexcept {
 			GUTIL_ASSERT(dof.is_valid())
 			const uint64_t d_idx = dof.linear_index();
@@ -233,14 +231,12 @@ namespace GV {
 		GUTIL_DECLARE_SIMD()
 		void set_active(uint64_t d_idx, bool val) noexcept {
 			GUTIL_ASSERT(d_idx < TOTAL_POSSIBLE_DOFS)
-			const uint64_t d_idx = dof.linear_index();
 			dof_mask[d_idx] = val ? dof_mask[d_idx] | ACTIVE_BIT : dof_mask[d_idx] & ~ACTIVE_BIT;
 		}
 
 		GUTIL_DECLARE_SIMD()
 		void set_refined(uint64_t d_idx, bool val) noexcept {
 			GUTIL_ASSERT(d_idx < TOTAL_POSSIBLE_DOFS)
-			const uint64_t d_idx = dof.linear_index();
 			dof_mask[d_idx] = val ? dof_mask[d_idx] | REFINED_BIT : dof_mask[d_idx] & ~REFINED_BIT;
 		}
 
@@ -257,6 +253,14 @@ namespace GV {
 
 		[[nodiscard]] static constexpr bool is_dof_odd(DOF_t dof) noexcept requires(VERTEX_DOF){
 			return dof.depth()==0 ? true : !dof.key.parent().exists();
+		}
+
+		//get a single dof global number
+		[[nodiscard]] uint64_t global_number(DOF_t dof) const noexcept {
+			const int bin = dof_bin(dof);
+			auto list = active_dof_sorter.get_bin(bin);
+			auto it = std::lower_bound(list.begin(), list.end(), dof);
+			return (it==list.end() || *it!=dof) ? uint64_t(-1) : active_dof_sorter.bin_start(bin) + std::distance(list.begin(), it);
 		}
 
 		//sort the dofs by increasing global index and get their global index
@@ -284,6 +288,10 @@ namespace GV {
 		/////////////////////////////////////////////////////////////////////////
 		void init_dofs() noexcept { dispatch_init_dofs(); wait(); }
 		void dispatch_init_dofs() noexcept {
+			if (feature_begin()==feature_end()) {
+				GUTIL_ABORT("ERROR: no features found.")
+			}
+
 			clear();
 			//to avoid false sharing in the mesh's vector<bool>, we align the dispatched chunks to the word size.
 			//this uses the fact that features and dofs share the same key numbering so two different
@@ -311,6 +319,7 @@ namespace GV {
 			}
 		}
 
+
 		template<typename Action, typename...Args>
 		void dispatch_parallel_active_dof(Action&& action, Args&&... args) const noexcept {
 			GUTIL_ASSERT(threads.n_threads() > 0);
@@ -329,7 +338,7 @@ namespace GV {
 					std::span<DOF_t> list(active_dofs.begin()+start, active_dofs.begin()+end);
 					threads.submit(action, std::ref(list), tid, std::forward<Args>(args)...);
 				}
-				else if constexpr (std::is_invocable_v<Action, std::span<const DOF_t, int, Args...>) {
+				else if constexpr (std::is_invocable_v<Action, std::span<const DOF_t>, int, Args...>) {
 					std::span<const DOF_t> list(active_dofs.begin()+start, active_dofs.begin()+end);
 					threads.submit(action, std::cref(list), tid, std::forward<Args>(args)...);
 				}
@@ -342,7 +351,7 @@ namespace GV {
 					threads.submit(action, std::cref(list), std::forward<Args>(args)...);
 				}
 				else {
-					threads.submit(Action, std::forward<Args>(args)...);
+					threads.submit(std::forward<Action>(action), std::forward<Args>(args)...);
 				}
 			}
 		}
@@ -351,6 +360,8 @@ namespace GV {
 		/////////////////////////////////////////////////////////////////////////
 		/// Book keeping methods
 		/////////////////////////////////////////////////////////////////////////
+		[[nodiscard]] size_t n_dofs() const noexcept { return active_dofs.size(); }
+
 		void clear() noexcept {
 			std::fill(dof_mask.begin(), dof_mask.end(), 0);
 			active_dofs.clear();
@@ -383,23 +394,48 @@ namespace GV {
 			return local_sorter;
 		}
 
-		// void deactivate_stranded_dofs() noexcept {
-		// 	//if the mesh does not honor some element activation request,
-		// 	//it is possible that some active dofs have no active element.
-		// 	//this will cause any global stiffness matrix to be non-invertible
-		// 	//so these dofs should be de-activated
-		// 	//this can happen when the mesh only activates elements that fall within
-		// 	//some specified geometry.
-		// 	std::vector<std::vector<DOF_t>> thread_lists(threads.n_threads());
-		// 	auto action = [&](std::span<const DOF_t> list, int tid) {
-		// 		for (DOF_t dof : list) {
-		// 			GUTIL_ASSERT(is_active(dof));
-		// 			for (Elem_t el : elements(dof)) {
-		// 				if (mesh.)
-		// 			}
-		// 		}
-		// 	}
-		// }
+		void collect_dofs() noexcept {
+			const size_t n_threads = threads.n_threads();
+			const size_t dofs_per_thread = n_threads==0 ? TOTAL_POSSIBLE_DOFS : TOTAL_POSSIBLE_DOFS/n_threads;
+			
+			std::vector<std::vector<DOF_t>> thread_dofs(threads.n_threads());
+			auto job = [&](size_t tid){
+				const size_t start = tid*dofs_per_thread;
+				const size_t end = (tid==threads.n_threads()) ? TOTAL_POSSIBLE_DOFS : start + dofs_per_thread;
+
+				for (size_t idx=start; idx<end; ++idx) {
+					if (is_active(idx)) { thread_dofs[tid].emplace_back(D_KEY::MakeKeyFromIndex(idx)); }
+				}
+			};
+
+			for (size_t tid=0; tid<threads.n_threads(); ++tid) {
+				threads.submit(job, tid);
+			}
+			threads.wait_idle();
+
+			active_dofs.clear();
+			for (auto& list : thread_dofs) {
+				active_dofs.insert(active_dofs.end(), std::make_move_iterator(list.begin()), std::make_move_iterator(list.end()));
+			}
+		}
+
+		void deactivate_stranded_dofs() noexcept {
+			//if the mesh does not honor some element activation request,
+			//it is possible that some active dofs have no active element.
+			//this will cause any global stiffness matrix to be non-invertible
+			//so these dofs should be de-activated
+			//this can happen when the mesh only activates elements that fall within
+			//some specified geometry.
+			GUTIL_OMP(parallel for)
+			for (size_t i=0; i<active_dofs.size(); ++i) {
+				bool has_active_support = false;
+				const unsigned char dd = static_cast<unsigned char>(active_dofs[i].depth());
+				for (Elem_t el : active_dofs[i].support()) {
+					if (mesh.read_depth(el) >= dd) { has_active_support=true; break;}
+				}
+				if (!has_active_support) {deactivate(i);}
+			}
+		}
 
 
 		/////////////////////////////////////////////////////////////////////////
@@ -499,13 +535,10 @@ namespace GV {
 			const unsigned char depth = static_cast<unsigned char>(dof.depth());
 			for (Elem_t el : elements(dof)) {
 				if (mesh.get_layer(depth).read_depth(el) < depth) {
-					//cascade refine calls down to the active element that overlaps this support
-					VoxelVertex anc = el;
-					while( !mesh.get_layer(anc.depth()).is_active(anc) ) {
-						mesh.refine(anc);
-						anc = anc.parent();
-					}
-					mesh.refine(anc);
+					//if the mesh is more than one refinement away from the support being
+					//active, then something went wrong
+					GUTIL_ASSERT(mesh.is_active(el.parent()))
+					mesh.refine(el.parent());
 				}
 			}
 		}

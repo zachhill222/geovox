@@ -22,13 +22,22 @@ endif
 ifdef GUTIL_N_OCTREE_THREADS
 	DEFINES += -DGUTIL_N_OCTREE_THREADS=$(GUTIL_N_OCTREE_THREADS)
 endif
+ifdef GV_TEST_DOMAIN_PERIOD
+	DEFINES += -DGV_DOMAIN_PERIOD=$(GV_DOMAIN_PERIOD)
+endif
+ifdef GV_TEST_MAX_DEPTH
+	DEFINES += -DGV_TEST_MAX_DEPTH=$(GV_TEST_MAX_DEPTH)
+endif
+ifdef GV_TEST_DOMAIN_SIZE
+	DEFINES += -DGV_TEST_DOMAIN_SIZE=$(GV_TEST_DOMAIN_SIZE)
+endif
 
 #debug vs release mode
 ifdef NDEBUG
-	CXX += -O3
+	CXX += -O3 -Wall
 	DEFINES += -DNDEBUG
 else
-	CXX += -O0 -Wall -pg
+	CXX += -O0 -Wall -pg -g
 endif
 
 #link to libraries

@@ -133,11 +133,13 @@ namespace GV {
 
 		[[nodiscard]] bool is_active(VoxelElement el) const noexcept {
 			GUTIL_ASSERT(element_mask.size() == max_elements());
+			GUTIL_ASSERT(el.depth() == depth);
 			return is_active_impl(el.depth_linear_index(), &element_mask[0]);
 		}
 
 		[[nodiscard]] unsigned char read_depth(VoxelElement el) const noexcept {
 			GUTIL_ASSERT(element_mask.size() == max_elements());
+			GUTIL_ASSERT(el.depth() == depth);
 			return read_depth_impl(el.depth_linear_index(), &element_mask[0]);
 		}
 
@@ -155,11 +157,13 @@ namespace GV {
 
 		void set_active(VoxelElement el, bool val) noexcept {
 			GUTIL_ASSERT(element_mask.size() == max_elements());
+			GUTIL_ASSERT(el.depth() == depth);
 			set_active_impl(el.depth_linear_index(), &element_mask[0], val);
 		}
 
 		void set_depth(VoxelElement el, unsigned char val) noexcept {
 			GUTIL_ASSERT(element_mask.size() == max_elements());
+			GUTIL_ASSERT(el.depth() == depth);
 			set_depth_impl(el.depth_linear_index(), &element_mask[0], val);
 		}
 

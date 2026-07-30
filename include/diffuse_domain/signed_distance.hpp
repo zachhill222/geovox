@@ -16,6 +16,11 @@ namespace GV {
 
 		using BASE::BASE;
 
+		[[nodiscard]] Point_t grad_signed_distance(const Point_t& point) const noexcept {
+			const size_t idx = this->find_nearest(point);
+			return this->data_[idx].grad_signed_distance_impl(point);
+		}
+
 		[[nodiscard]] T heaviside(const Point_t& point, const T eps) const noexcept {
 			//return 0 if sgndist(point) < -eps (inside a particle)
 			//return 1 if sgndist(point) > eps (outside all particles)

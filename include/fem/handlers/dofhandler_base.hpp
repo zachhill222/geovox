@@ -59,6 +59,11 @@ namespace GV {
 
 		static constexpr uint64_t TOTAL_POSSIBLE_DOFS = total_possible<MeshKey_t>(MAX_DEPTH);
 		
+		#ifdef _OPENMP
+		static constexpr bool OPENMP = true;
+		#else
+		static constexpr bool OPENMP = false;
+		#endif
 		
 		////////////////////////////////////////////////////////////////////////////////////
 		/// Constructors and memory management
@@ -134,9 +139,9 @@ namespace GV {
 
 		//determine if the specified feature is 'cononical'. Returns true when
 		//the feature is the feature 
-		[[nodiscard]] bool is_cononical(MeshKey_t key) const noexcept {
+		// [[nodiscard]] bool is_cononical(MeshKey_t key) const noexcept {
 			
-		}
+		// }
 
 		//get begin/end iterators to the mesh feature
 		auto feature_begin() const noexcept {

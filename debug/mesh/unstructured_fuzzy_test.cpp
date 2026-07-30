@@ -56,7 +56,7 @@ inline constexpr Box_t domain{
 /// Generate a pseudo-random periodic collection of spheres with
 /// no intersections.
 /////////////////////////////////////////////////////////////////
-Assembly_t generate_assembly(const std::string& test_name, size_t n_spheres=100, size_t seed=0, double min_r=0.01, double max_r=0.5) {
+Assembly_t generate_assembly(const std::string& test_name, size_t n_spheres, size_t seed, double min_r, double max_r) {
 	gutil::Logger::log("Generating Periodic Assembly: START");
 	std::cout << "\ntest= " << test_name << "\n"
 			  << "\tn_spheres= " << n_spheres << "\n"
@@ -69,11 +69,11 @@ Assembly_t generate_assembly(const std::string& test_name, size_t n_spheres=100,
 	// set up assembly and rng
 	Assembly_t assembly{domain};
 
-	auto random_point = gutil::UniformRandomPoint<Point_t,false>();
+	auto random_point = gutil::UniformRandomPoint<Point_t,true>();
 	random_point.set_parameters(-DOMAIN_SIZE,DOMAIN_SIZE);
 	random_point.set_seed(seed);
 	
-	auto random_radius = gutil::UniformRandomPoint<Point_t,false>();
+	auto random_radius = gutil::UniformRandomPoint<Point_t,true>();
 	random_radius.set_parameters(min_r,max_r);
 	random_radius.set_seed(seed);
 
@@ -106,23 +106,23 @@ Assembly_t generate_assembly(const std::string& test_name, size_t n_spheres=100,
 /// Generate a mesh of the spheres, randomly refine, refine the boundary,
 /// and then randomly refine again.
 /////////////////////////////////////////////////////////////////
-Mesh_t generate_and_refine_mesh(const std::string& test_name, const Assembly_t& assembly, size_t seed=0) {
+Mesh_t generate_and_refine_mesh(const std::string& test_name, const Assembly_t& assembly, size_t seed) {
 	gutil::Logger::log("Generating And Refining Mesh: START");
 	std::cout << "\ntest= " << test_name << "\n"
 			  << "\tn_spheres= " << assembly.size() << "\n"
 			  << "\tseed= " << seed << "\n" << std::flush;
 	gutil::LogTime timer{"Generating And Refining Mesh: DONE"};
 
-	auto random_index = gutil::UniformRandomPoint<gutil::Point<1,size_t>,false>();
+	auto random_index = gutil::UniformRandomPoint<gutil::Point<1,size_t>,true>();
 	random_index.set_parameters(size_t{0}, size_t{1}<<MAX_DEPTH);
 	random_index.set_seed(seed);
 
-	const size_t initial_depth = random_index.scalar() % 6;
+	const size_t initial_depth = random_index.scalar() % (MAX_DEPTH-2);
 	const size_t n_random_refines = random_index.scalar() % 100;
 	const size_t target_depth = MAX_DEPTH;
 	Mesh_t mesh(domain);
 	{
-		gutil::Logger::log("setting initial mesh (start)");
+		gutil::Logger::log("setting initial mesh at depth ", initial_depth, " (start)");
 		gutil::LogTime t{"(done)"};
 		mesh.set_depth(initial_depth);
 	}
@@ -136,8 +136,10 @@ Mesh_t generate_and_refine_mesh(const std::string& test_name, const Assembly_t& 
 			//find a random active element
 			size_t d, idx;
 			while (true) {
-				d = random_index.scalar() % (MAX_DEPTH+1);
-				idx = random_index.scalar() % (mesh.get_layer(d).n_elements());
+				d = random_index.scalar() % MAX_DEPTH;
+				size_t n_elem = mesh.get_layer(d).n_elements();
+				if (n_elem == 0) {continue;}
+				idx = random_index.scalar() % n_elem;
 				if (mesh.get_layer(d).is_active(idx)) { break; }
 			}
 
@@ -169,22 +171,17 @@ Mesh_t generate_and_refine_mesh(const std::string& test_name, const Assembly_t& 
 	}
 
 	{
-		gutil::Logger::log("making ", n_random_refines, " random refinements (start)");
+		gutil::Logger::log("unrefining i=0 face (start)");
 		gutil::LogTime t{"(done)"};
-		for (size_t n=0; n<n_random_refines; ++n) {
+		for (size_t i=0; i<target_depth/2; ++i) {
 			mesh.update_unstructured();
-
-			//find a random active element
-			size_t d, idx;
-			while (true) {
-				d = random_index.scalar() % (MAX_DEPTH+1);
-				idx = random_index.scalar() % (mesh.get_layer(d).n_elements());
-				if (mesh.get_layer(d).is_active(idx)) { break; }
-			}
-
-			//refine
-			mesh.refine(Elem_t{d,idx});
-			mesh.process_refine();
+			mesh.unrefine( [&](Elem_t el){
+				Point_t pt = mesh.geo_coord(el.vertex(0));
+				Point_t diag = mesh.geo_coord(el.vertex(7)) - pt;
+				pt += 0.5*diag;
+				return assembly.heaviside(pt,0.1)==0;}
+				);
+			mesh.process_unrefine();
 		}
 	}
 
@@ -192,15 +189,25 @@ Mesh_t generate_and_refine_mesh(const std::string& test_name, const Assembly_t& 
 		gutil::Logger::log("saving mesh (start)");
 		gutil::LogTime t{"(done)"};
 		
+		const std::string filename = test_name + "_initial_mesh.vtk";
+		mesh.update_unstructured();
+		mesh.collect_vertices();
+		mesh.save_as_binary(filename);
+
 		const double sdf_eps = gutil::ldexp(DOMAIN_SIZE, -int{target_depth}); //double the target depth cell size
 		std::cout << "\tsdf_eps= " << sdf_eps << "\n" << std::flush;
 
-		const std::string filename = test_name + "_initial_mesh.vtk";
-		mesh.save_as_binary(filename);
-
+		
 		auto pt_sd_lookup = GV::make_feature_lookup<Vert_t>(
 			[&assembly, &mesh](Vert_t vtx) {return assembly.signed_distance(mesh.geo_coord(vtx));},
 			"signed_distance");
+
+		auto pt_sd_grad_lookup = GV::make_feature_lookup<Vert_t>(
+			[&assembly, &mesh](Vert_t vtx) {
+				Point_t grad = assembly.grad_signed_distance(mesh.geo_coord(vtx));
+				return std::array<double,3>{grad[0], grad[1], grad[2]};
+			},
+			"grad_signed_distance");
 
 		auto pt_heaviside_lookup = GV::make_feature_lookup<Vert_t>(
 				[&assembly, &mesh, sdf_eps](Vert_t vtx) {return assembly.heaviside(mesh.geo_coord(vtx), sdf_eps);},
@@ -246,13 +253,34 @@ Mesh_t generate_and_refine_mesh(const std::string& test_name, const Assembly_t& 
 				"color"
 			);
 
-		mesh.append_point_data_field_binary(filename, "point_data", pt_sd_lookup, pt_heaviside_lookup, pt_dirac_lookup, pt_depth_lookup, pt_ijk_lookup,pt_d_lin_idx_lookup);
-		mesh.append_cell_data_field_binary(filename, "element_data", el_depth_lookup, el_ijk_lookup, el_d_lin_idx_lookup, el_color_lookup);
+		mesh.append_point_data_field_binary(filename, "point_data", pt_sd_lookup, pt_sd_grad_lookup, pt_heaviside_lookup, pt_dirac_lookup);
+		mesh.append_cell_data_field_binary(filename, "element_data", el_depth_lookup, el_color_lookup);
 	}
 
 	return mesh;
 }
 
+
+int main(int argc, char* argv[]) {
+	std::vector<std::string> args(argv, argv+argc);
+	size_t seed  = 0;
+	size_t n_spheres = 100;
+	double min_r = 0.01;
+	double max_r = 0.5;
+	std::string test_name = "unstructured_voxel_mesh";
+
+	for (size_t i=0; i<args.size(); ++i) {
+		if      (args[i] == "-N") { n_spheres = atoi(args[++i].c_str());}
+		else if (args[i] == "-R0") { min_r = atof(args[++i].c_str());}
+		else if (args[i] == "-R1") { max_r = atof(args[++i].c_str());}
+		else if (args[i] == "-S")  { seed = atoi(args[++i].c_str());}
+		else if (args[i] == "-name") {test_name = args[++i];}
+	}
+
+	gutil::LogTime timer{"test: ", test_name, " finished "};
+	Assembly_t assembly = generate_assembly(test_name, n_spheres, seed, min_r, max_r);
+	Mesh_t mesh = generate_and_refine_mesh(test_name, assembly, seed);
+}
 
 
 

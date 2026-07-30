@@ -72,7 +72,7 @@ namespace GV
 		using PeriodicVariant = VoxelVertexKey<MAX_DEPTH_,OTHER_BC>;
 		
 		template<uint64_t OTHER_BC> requires (OTHER_BC<8)
-		inline explicit operator PeriodicVariant<OTHER_BC>() const {
+		explicit operator PeriodicVariant<OTHER_BC>() const {
 			return PeriodicVariant<OTHER_BC>{depth(), i(), j(), k()};
 		}
 
@@ -101,6 +101,15 @@ namespace GV
 
 			_data_ = BASE{ii,jj,kk,0,dd,BC,0}._data_;
 		}
+
+		[[nodiscard]] static constexpr VoxelVertexKey MakeKeyFromIndex(uint64_t lin_idx) noexcept {
+			uint64_t dd = 0;
+			uint64_t d_start = 0;
+			while (depth_linear_start(dd) < lin_idx) {d_start=depth_linear_start(dd); ++dd;}
+			assert(d_start<=lin_idx);
+			return VoxelVertexKey{dd, lin_idx-d_start};
+		}
+
 
 		//check if a voxel is valid
 		constexpr bool is_valid() const {

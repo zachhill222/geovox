@@ -1,16 +1,16 @@
+#include "gutil.hpp"
+
 #include "fem/handlers/dofhandler_charms.hpp"
 #include "fem/dofs/voxel_dof_Q1.hpp"
 #include "fem/numerics/kernel.hpp"
 #include "fem/numerics/csr_storage.hpp"
-#include "mesh/voxel_mesh.hpp"
+#include "mesh/voxel_mesh_unstructured.hpp"
 #include "fem/forms/bilinear/matrix_assembler.hpp"
 #include "fem/forms/bilinear/policy_evaluation.hpp"
 #include "fem/forms/linear/vector_assembler.hpp"
 #include "fem/forms/linear/policy_evaluation.hpp"
-#include "util/log_time.hpp"
 
-
-using Mesh_t    = GV::VoxelMesh<10>;
+using Mesh_t    = GV::UnstructuredVoxelMesh<10>;
 using Elem_t    = Mesh_t::VoxelElement;
 using Vert_t    = Mesh_t::VoxelVertex;
 using DofKey_t  = GV::VoxelVertexKey<10,0>;
@@ -24,7 +24,7 @@ using BiMass_t  = GV::BilinearFormAssembler<Handler_t,Handler_t,L2Eval_t>;
 using BiStiff_t = GV::BilinearFormAssembler<Handler_t,Handler_t,H1Eval_t>;
 
 int main(int argc, char* argv[]) {
-	GV::LogTime t0{"Program"};
+	gutil::LogTime t0{"Program"};
 
 	//uniform depth
 	const int depth = 4;
@@ -60,7 +60,7 @@ int main(int argc, char* argv[]) {
 	};
 
 	{
-		GV::LogTime time{"build COO_CSR"};
+		gutil::LogTime time{"build COO_CSR"};
 		mesh.for_each_depth<Elem_t>(depth,integrate);
 	}
 	
@@ -95,7 +95,7 @@ int main(int argc, char* argv[]) {
 	//populate the vec with the x coordinates of each dof to test the stiffness matrix
 	for (size_t i=0; i<dofhandler.curr_compressed_dofs().size(); ++i) {
 		double x = dofhandler.curr_compressed_dofs()[i].key.x();
-		vec[i] = (1.0-x)*mesh.low()[0] + x*mesh.high()[0];
+		vec[i] = (1.0-x)*mesh.low[0] + x*mesh.high[0];
 	}
 
 	std::cout << "stiff: " << (stiff_mat * vec).transpose() * vec << std::endl;
