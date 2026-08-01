@@ -248,13 +248,8 @@ Mesh_t generate_and_refine_mesh(const std::string& test_name, const Assembly_t& 
 				"depth_linear_index"
 			);
 
-		auto el_color_lookup = GV::make_feature_lookup<Elem_t>(
-				[](Elem_t el) { return el.color(); },
-				"color"
-			);
-
 		mesh.append_point_data_field_binary(filename, "point_data", pt_sd_lookup, pt_sd_grad_lookup, pt_heaviside_lookup, pt_dirac_lookup);
-		mesh.append_cell_data_field_binary(filename, "element_data", el_depth_lookup, el_color_lookup);
+		mesh.append_cell_data_field_binary(filename, "element_data", el_depth_lookup);
 	}
 
 	return mesh;

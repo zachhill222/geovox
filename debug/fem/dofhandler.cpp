@@ -1,5 +1,6 @@
 #include "gutil.hpp"
 
+#include "simd_keys/mesh_key.hpp"
 #include "mesh/voxel_mesh_unstructured(NEW).hpp"
 #include "diffuse_domain/signed_distance.hpp"
 #include "fem/handlers/dofhandler.hpp"
@@ -24,11 +25,15 @@
 #endif
 
 #ifndef GV_TEST_MAX_DEPTH
-	#define GV_TEST_MAX_DEPTH 8
+	#define GV_TEST_MAX_DEPTH 5
 #endif
 
 #ifndef GV_TEST_DOMAIN_SIZE
 	#define GV_TEST_DOMAIN_SIZE 1
+#endif
+
+#ifndef GV_TEST_DOF_PERIOD
+	#define GV_TEST_DOF_PERIOD 0
 #endif
 
 /////////////////////////////////////////////////////////////////
@@ -42,7 +47,7 @@ using Vert_t		= typename Mesh_t::VoxelVertex;
 using Elem_t		= typename Mesh_t::VoxelElement;
 using Assembly_t	= GV::SignedDistanceSpheres<double,GV_TEST_DOMAIN_PERIOD>;
 
-using D_KEY         = Vert_t;
+using D_KEY         = Vert_t::PeriodicVariant<GV_TEST_DOF_PERIOD>;
 using DOF_t         = GV::VoxelQ1<D_KEY>;
 using Handler_t     = GV::DofHandler<Mesh_t,DOF_t>;
 

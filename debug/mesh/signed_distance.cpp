@@ -1,6 +1,5 @@
 #include "gutil.hpp"
 
-// #include "mesh/voxel_mesh_structured.hpp"
 #include "mesh/voxel_mesh_unstructured(NEW).hpp"
 #include "diffuse_domain/signed_distance.hpp"
 
@@ -10,7 +9,7 @@
 using Point_t  = gutil::Point<3,double>;
 using Box_t    = gutil::Box<3,double>;
 using Sphere_t = gutil::Sphere<3,double>;
-using Mesh_t   = GV::UnstructuredVoxelMesh<10>;
+using Mesh_t   = GV::UnstructuredVoxelMesh<10,double>;
 using Vert_t   = typename Mesh_t::VoxelVertex;
 using Elem_t   = typename Mesh_t::VoxelElement;
 
@@ -57,21 +56,8 @@ int main(int argc, char* argv[]) {
 		}
 	}
 
-
-
-
 	gutil::Logger::log("make unstructured mesh");
 	mesh.update_unstructured();
-
-	{
-		gutil::LogTime timer{"initialize colors"};
-		mesh.init_color();
-	}
-	// {
-	// 	gutil::LogTime timer{"synchronize depth field"};
-	// 	mesh.synchronize_depth_field();
-	// }
-	
 
 	//write to file and sample the signed distance
 	gutil::Logger::log("make unstructured mesh vertices");
@@ -115,13 +101,6 @@ int main(int argc, char* argv[]) {
 			"neighbor_depth"
 		);
 
-	auto color_lookup = GV::make_feature_lookup<Elem_t>(
-			[](Elem_t el) {
-				return el.color();
-			},
-			"color"
-		);
-
 	auto depth_field_lookup = GV::make_feature_lookup<Elem_t>(
 			[&](Elem_t el) {
 				return mesh.read_depth(el);
@@ -131,7 +110,7 @@ int main(int argc, char* argv[]) {
 
 	gutil::Logger::log("write details to file");
 	mesh.append_point_data_field_binary("signed_distance.vtk", "sdf", sd_lookup, heaviside_lookup, dirac_lookup);
-	mesh.append_cell_data_field_binary("signed_distance.vtk", "sdf", depth_lookup, ijk_lookup, nbr_lookup, color_lookup, depth_field_lookup);
+	mesh.append_cell_data_field_binary("signed_distance.vtk", "sdf", depth_lookup, ijk_lookup, nbr_lookup, depth_field_lookup);
 
 	
 
