@@ -1,5 +1,7 @@
 #pragma once
 
+#include "gutil.hpp"
+
 #include "fem/dofs/voxel_dof_base.hpp"
 #include "mesh/keys/voxel_key.hpp"
 
@@ -15,13 +17,13 @@ namespace GV
 {
 	//Q1 DOFs
 	template<VoxelVertexKeyType Key_type>
-	struct VoxelQ1 : public VoxelDOFBase<Key_type, VoxelQ1<Key_type>>
-	{
+	struct VoxelQ1 : public VoxelDOFBase<Key_type, VoxelQ1<Key_type>> {
 		//get types from the Base class
-		using Base = VoxelDOFBase<Key_type, VoxelQ1<Key_type>>;
+		using Base       = VoxelDOFBase<Key_type, VoxelQ1<Key_type>>;
 		using RefPoint_t = typename Base::RefPoint_t;
 		using GeoPoint_t = typename Base::GeoPoint_t;
 		using Key_t      = typename Base::Key_t;
+		using SptElem_t  = typename Base::SptElem_t;
 		using QuadElem_t = typename Base::QuadElem_t;
 
 		//constants
@@ -41,13 +43,13 @@ namespace GV
 		using Base::Base;
 
 		//evaluate the basis function (convenience method)
-		double eval(QuadElem_t support_elem, const RefPoint_t& xi) const {
+		double eval(QuadElem_t el, const RefPoint_t& xi) const {
 			std::array<double,1> val;
 			std::array<double,1> x{xi[0]};
 			std::array<double,1> y{xi[1]};
 			std::array<double,1> z{xi[2]};
 
-			eval<1>(val, support_elem, x, y, z);
+			eval<1>(val, el, x, y, z);
 			return val[0];
 		}
 
@@ -55,32 +57,32 @@ namespace GV
 		//compute the gradient of the basis function on the reference coordinate
 		//the caller must scale the gradient to the mesh domain by
 		//multiplying by the inverse transpose jacobian (i.e., divide by half the diagonal of the geometric support element)
-		RefPoint_t grad(QuadElem_t support_elem, const RefPoint_t& xi) const {
+		RefPoint_t grad(QuadElem_t el, const RefPoint_t& xi) const {
 			std::array<double,1> gx, gy, gz;
 			std::array<double,1> x{xi[0]};
 			std::array<double,1> y{xi[1]};
 			std::array<double,1> z{xi[2]};
 
-			grad<1>(gx, gy, gz, support_elem, x, y, z);
+			grad<1>(gx, gy, gz, el, x, y, z);
 			return RefPoint_t{gx[0], gy[0], gz[0]};
 		}
 
 		//vectorized evaluation
-		template<uint64_t N, typename Elem_type> requires (N>0 && VoxelEquivFeature<Elem_type,QuadElem_t>)
+		template<uint64_t N> requires (N>0)
 		void eval(	std::span<double,N>		  vl, //values 
-					Elem_type                 el, //support element
+					SptElem_t                 el, //quadrature element from the mesh (projected to the support depth)
 					std::span<const double,N> qx, //reference/quadrature points
 					std::span<const double,N> qy, 
 					std::span<const double,N> qz) const {
 			//check that the index logic is correct
-			assert(el.is_valid());
-			assert(key.depth() == el.depth());
+			GUTIL_ASSERT(el.is_valid());
+			GUTIL_ASSERT(key.depth() == el.depth());
 			#ifndef NDEBUG
 				bool found=false;
-				for (const auto spt : support_impl()) {
-					if (spt == static_cast<QuadElem_t>(el)) {found=true; break;}
+				for (SptElem_t spt : support_impl()) {
+					if (spt == el) {found=true; break;}
 				}
-				assert(found);
+				GUTIL_ASSERT(found);
 			#endif
 			
 			const bool bx = static_cast<bool>(key.i() - el.i());
@@ -91,31 +93,31 @@ namespace GV
 			const double sy = by ? 1.0 : -1.0;
 			const double sz = bz ? 1.0 : -1.0;
 
-			#pragma omp simd
+			GUTIL_SIMD()
 			for (uint64_t q=0; q<N; ++q) {
 				vl[q] = 0.125 * (1.0+sx*qx[q]) * (1.0+sy*qy[q]) * (1.0+sz*qz[q]);
 			}
 		}
 
 		//vectorized grad
-		template<uint64_t N, typename Elem_type> requires (N>0 && VoxelEquivFeature<Elem_type,QuadElem_t>)
+		template<uint64_t N> requires (N>0)
 		void grad(	std::span<double,N>			gx, //gradient result
 					std::span<double,N> 		gy, 
 					std::span<double,N> 		gz, 
-					Elem_type  	 				el, //support element
+					QuadElem_t  	 			el, //quadrature element from the mesh (projected to the support depth)
 					std::span<const double,N>   qx, //reference/quadratrue points
 					std::span<const double,N>   qy, 
 					std::span<const double,N>   qz) const {
 
 			//check that the index logic is correct
-			assert(el.is_valid());
-			assert(key.depth() == el.depth());
+			GUTIL_ASSERT(el.is_valid());
+			GUTIL_ASSERT(key.depth() == el.depth());
 			#ifndef NDEBUG
 				bool found=false;
 				for (const auto spt : support_impl()) {
 					if (spt == static_cast<QuadElem_t>(el)) {found=true; break;}
 				}
-				assert(found);
+				GUTIL_ASSERT(found);
 			#endif
 			
 			const bool bx = static_cast<bool>(key.i() - el.i());
@@ -126,7 +128,7 @@ namespace GV
 			const double sy = by ? 1.0 : -1.0;
 			const double sz = bz ? 1.0 : -1.0;
 
-			#pragma omp simd
+			GUTIL_SIMD()
 			for (size_t q=0; q<N; ++q) {
 				const double fx = 1.0+sx*qx[q];
 				const double fy = 1.0+sy*qy[q];
@@ -139,13 +141,13 @@ namespace GV
 		}
 
 		//get the support elements
-		constexpr std::array<QuadElem_t, 8> support_impl() const {
+		constexpr std::array<SptElem_t, 8> support_impl() const {
 			//the key constructor will handle any periodic wrapping
-			std::array<QuadElem_t,8> spt = key.elements();
+			std::array<SptElem_t,8> spt = key.elements();
 
 			//handle non-periodic out of bounds
-			for (auto& el : spt) {
-				if (!el.is_valid()) {el = QuadElem_t{};}
+			for (SptElem_t el : spt) {
+				if (!el.is_valid()) {el = SptElem_t::None();}
 			}
 
 			return spt;
@@ -153,7 +155,7 @@ namespace GV
 
 		constexpr std::array<VoxelQ1,N_CHILDREN> children_impl() const {
 			const uint64_t ii=2*key.i(), jj=2*key.j(), kk=2*key.k(), dd=key.depth()+1;
-			assert(dd<=Key_t::MAX_DEPTH);
+			GUTIL_ASSERT(dd<=Key_t::MAX_DEPTH);
 			return {
 				//bottom plane (k=-1)
 				VoxelQ1{Key_t{dd, ii-1, jj-1, kk-1}},

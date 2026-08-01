@@ -591,7 +591,12 @@ namespace GV {
 			//the mesh be able to resolve the support
 			const unsigned char depth = static_cast<unsigned char>(dof.depth());
 			if (depth==0) { return; }	//at depth 0, there is nothing to do
-			for (Elem_t el : dof.support()) {
+			for (auto spt : dof.support()) {
+				if (!spt.exists()) {continue;}
+				Elem_t el = static_cast<Elem_t>(spt); //convert to the non-periodic variant
+				gutil::Logger::log("dof at depth ", dof.depth(), " has support at depth ", el.depth());
+				GUTIL_ASSERT(spt.depth()==el.depth())
+				GUTIL_ASSERT(!el.exists() || el.depth()==dof.depth())
 				if (el.exists() && mesh.get_layer(depth).read_depth(el) < depth) {
 					//if the mesh is more than one refinement away from the support being
 					//active, then something went wrong

@@ -302,7 +302,8 @@ namespace GV
 			else {assert(false && "unknown scalar");}
 		}
 
-		template<typename OtherFeature_t> requires (VoxelFeatureCompatible<OtherFeature_t, Feature_t>)
+		Return_t operator()(Feature_t feature) const {return lookup(feature);}
+		template<typename OtherFeature_t>
 		Return_t operator()(OtherFeature_t feature) const {return lookup(static_cast<Feature_t>(feature));}
 	};
 

@@ -4,8 +4,7 @@
 
 #include "util/macros.hpp"
 
-#include "mesh/keys/voxel_key.hpp"
-#include "mesh/unstructured_layer.hpp"
+#include "simd_keys/mesh/mesh_keys.hpp"
 
 #include <cstdint>
 #include <vector>
@@ -20,46 +19,50 @@ namespace GV {
 	
 	/////////////////////////////////////////////////////////////////////////////////////////////////////
 	/// A mesh class for a voxel mesh at a single depth. This class will be used to define a hierarchical
-	/// mesh by 'stacking' layers together. When not using this to build a hierarchy, setting MaxDepth=Depth
-	/// is fine. The MaxDepth must be consistent across hierarchy levels.
+	/// mesh by 'stacking' layers together.
 	/////////////////////////////////////////////////////////////////////////////////////////////////////
-	template<uint64_t MaxDepth>
+	template<typename T=double>
 	struct StructuredVoxelMesh {
 
 
 		//////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Aliases and constants
 		//////////////////////////////////////////////////////////////////////////////////////////////////
-		using VoxelElement = VoxelElementKey<MaxDepth,0>;
-		using VoxelVertex  = VoxelVertexKey<MaxDepth,0>;
-		using VoxelFace    = VoxelFaceKey<MaxDepth,0>;
-		using GeoPoint_t   = gutil::Point<3,double>;
-		using Box_t        = gutil::Box<3,double>;
-		using Mesh_t       = StructuredVoxelMesh<MaxDepth>;
+		using VoxelElement = Keys::VoxelElement;
+		using VoxelVertex  = Keys::VoxelVertex;
+		using VoxelFace    = void;
+		using GeoPoint_t   = gutil::Point<3,T>;
+		using Box_t        = gutil::Box<3,T>;
+		using Mesh_t       = StructuredVoxelMesh;
 
-		uint64_t depth;										//the depth of this mesh
-		int max_omp_threads{0};								//how many OpenMP threads this layer is allowed to use
-		static constexpr uint64_t MAX_DEPTH = MaxDepth;		//the maximum depth to maintain hierarchies
+		//depths are more convenient to use as 1byte so they are easier to use
+		//with the element_mask.
+		static constexpr uint8_t MAX_DEPTH = static_cast<uint8_t>(Keys::Mesh3D::MAX_DEPTH);
+		uint8_t depth;				//the depth of this mesh
+		int max_omp_threads{0};		//how many OpenMP threads this layer is allowed to use
+		
 		static_assert(MAX_DEPTH < 16, "Max depth is too large to store in 4 bits");
 
 		static constexpr int DIMENSION = 3;	//TODO: support 2D
 		[[nodiscard]] constexpr uint64_t axis_max_elements() const noexcept { return uint64_t{1} << depth; }
 		[[nodiscard]] constexpr uint64_t max_elements() const noexcept { return uint64_t{1} << (DIMENSION*depth); }
 		
-		static constexpr unsigned char ACTIVE_BIT = 0b00000001;
-		static constexpr unsigned char DEPTH_MASK = 0b00011110;
-		static constexpr unsigned char FREE_MASK  = 0b11100000;
+		static constexpr uint8_t ACTIVE_BIT = 0b00000001;
+		static constexpr uint8_t DEPTH_MASK = 0b00011110;
+		static constexpr uint8_t FREE_MASK  = 0b11100000;
 
 		//////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Storage
 		/// Allow storing the full mask of all possible elements or just a vector of active elements.
-		/// We choose to store element masks as a vector<unsigned char> rather than a vector<bool> so that
+		/// We choose to store element masks as a vector<uint8_t> rather than a vector<bool> so that
 		/// different elements can be safely written to from different threads and so that the remaining bits
 		/// can be used for a depth field for the hierarchical/layered mesh.
 		//////////////////////////////////////////////////////////////////////////////////////////////////
 		Box_t box;											//physical extents of the domain
-		std::vector<unsigned char> element_mask{};				//mask of active elements using a structured index
-		UnstructuredLayer<MAX_DEPTH> unstructured{};		//a more traditional storage of the mesh
+		std::vector<uint8_t> element_mask{};				//mask of active elements using a structured index
+		
+		std::vector<VoxelElement> compressed_elements{};	//a more traditional storage of the mesh
+		std::vector<VoxelVertex> compressed_vertices{};	
 
 		void init_element_mask() noexcept {
 			element_mask.resize(max_elements(), 0);
@@ -80,7 +83,8 @@ namespace GV {
 			max_omp_threads{other.max_omp_threads},
 			box{other.box},
 			element_mask{other.element_mask},
-			unstructured{other.unstructured}
+			compressed_elements{other.compressed_elements},
+			compressed_vertices{other.compressed_vertices}
 			{
 				GUTIL_DEBUG(gutil::Logger::log("WARNING - copying a potentially large mesh");)
 			}
@@ -89,20 +93,22 @@ namespace GV {
 			depth{other.depth},
 			max_omp_threads{other.max_omp_threads},
 			box{std::move(other.box)},
-			element_mask{std::move(other.element_mask)}, 
-			unstructured{std::move(other.unstructured)} {}
+			element_mask{std::move(other.element_mask)},
+			compressed_elements{std::move(other.compressed_elements)},
+			compressed_vertices{std::move(other.compressed_vertices)}{}
 		StructuredVoxelMesh& operator=(StructuredVoxelMesh&& other) noexcept {
 			if (this != &other) {
 				depth = other.depth;
 				max_omp_threads = other.max_omp_threads;
 				box = std::move(other.box);
 				element_mask = std::move(other.element_mask);
-				unstructured = std::move(other.unstructured);
+				compressed_elements = std::move(other.compressed_elements);
+				compressed_vertices = std::move(other.compressed_vertices);
 			}
 			return *this;
 		}
 
-		StructuredVoxelMesh(const Box_t& box, uint64_t depth) noexcept : depth{depth}, box{box} {unstructured.box = box;}
+		StructuredVoxelMesh(const Box_t& box, uint8_t depth) noexcept : depth{depth}, box{box} {}
 
 
 		//////////////////////////////////////////////////////////////////////////////////////////////////
@@ -110,22 +116,22 @@ namespace GV {
 		//////////////////////////////////////////////////////////////////////////////////////////////////
 	private:
 		GUTIL_DECLARE_SIMD(uniform(vec))
-		[[nodiscard]] static constexpr bool is_active_impl(uint64_t idx, const unsigned char* vec) noexcept {
+		[[nodiscard]] static constexpr bool is_active_impl(uint64_t idx, const uint8_t* vec) noexcept {
 			return vec[idx]&ACTIVE_BIT;
 		}
 
 		GUTIL_DECLARE_SIMD(uniform(vec))
-		static constexpr void set_active_impl(uint64_t idx, unsigned char* vec, bool val) noexcept {
+		static constexpr void set_active_impl(uint64_t idx, uint8_t* vec, bool val) noexcept {
 			val ? vec[idx]|=ACTIVE_BIT : vec[idx]&=~ACTIVE_BIT;
 		}
 
 		GUTIL_DECLARE_SIMD(uniform(vec))
-		[[nodiscard]] static constexpr unsigned char read_depth_impl(uint64_t idx, const unsigned char* vec) noexcept {
+		[[nodiscard]] static constexpr uint8_t read_depth_impl(uint64_t idx, const uint8_t* vec) noexcept {
 			return (vec[idx]&DEPTH_MASK) >> 1;
 		}
 
 		GUTIL_DECLARE_SIMD(uniform(vec))
-		static constexpr void set_depth_impl(uint64_t idx, unsigned char* vec, unsigned char val) noexcept {
+		static constexpr void set_depth_impl(uint64_t idx, uint8_t* vec, uint8_t val) noexcept {
 			vec[idx]&=~DEPTH_MASK;
 			vec[idx]|= (val<<1)&DEPTH_MASK;
 		}
@@ -134,23 +140,23 @@ namespace GV {
 		[[nodiscard]] bool is_active(VoxelElement el) const noexcept {
 			GUTIL_ASSERT(element_mask.size() == max_elements());
 			GUTIL_ASSERT(el.depth() == depth);
-			return is_active_impl(el.depth_linear_index(), &element_mask[0]);
+			return is_active_impl(el.depth_linear_index(), static_cast<const uint8_t*>(element_mask.data()));
 		}
 
-		[[nodiscard]] unsigned char read_depth(VoxelElement el) const noexcept {
+		[[nodiscard]] uint8_t read_depth(VoxelElement el) const noexcept {
 			GUTIL_ASSERT(element_mask.size() == max_elements());
 			GUTIL_ASSERT(el.depth() == depth);
-			return read_depth_impl(el.depth_linear_index(), &element_mask[0]);
+			return read_depth_impl(el.depth_linear_index(), static_cast<const uint8_t*>(element_mask.data()));
 		}
 
 		GUTIL_DECLARE_SIMD()
 		[[nodiscard]] bool is_active(uint64_t idx) const noexcept {
 			GUTIL_ASSERT(element_mask.size() == max_elements());
-			return is_active_impl(idx, &element_mask[0]);
+			return is_active_impl(idx, static_cast<const uint8_t*>(element_mask.data()));
 		}
 
 		GUTIL_DECLARE_SIMD()
-		[[nodiscard]] unsigned char read_depth(uint64_t idx) const noexcept {
+		[[nodiscard]] uint8_t read_depth(uint64_t idx) const noexcept {
 			GUTIL_ASSERT(element_mask.size() == max_elements());
 			return (element_mask[idx]&DEPTH_MASK) >> 1;
 		}
@@ -158,61 +164,62 @@ namespace GV {
 		void set_active(VoxelElement el, bool val) noexcept {
 			GUTIL_ASSERT(element_mask.size() == max_elements());
 			GUTIL_ASSERT(el.depth() == depth);
-			set_active_impl(el.depth_linear_index(), &element_mask[0], val);
+			set_active_impl(el.depth_linear_index(), static_cast<uint8_t*>(element_mask.data()), val);
 		}
 
-		void set_depth(VoxelElement el, unsigned char val) noexcept {
+		void set_depth(VoxelElement el, uint8_t val) noexcept {
 			GUTIL_ASSERT(element_mask.size() == max_elements());
 			GUTIL_ASSERT(el.depth() == depth);
-			set_depth_impl(el.depth_linear_index(), &element_mask[0], val);
+			set_depth_impl(el.depth_linear_index(), static_cast<uint8_t*>(element_mask.data()), val);
 		}
 
 		GUTIL_DECLARE_SIMD()
 		void set_active(uint64_t idx, bool val) noexcept {
 			GUTIL_ASSERT(element_mask.size() == max_elements());
-			set_active_impl(idx, &element_mask[0], val);
+			set_active_impl(idx, static_cast<uint8_t*>(element_mask.data()), val);
 		}
 
 		GUTIL_DECLARE_SIMD()
-		void set_depth(uint64_t idx, unsigned char val) noexcept {
+		void set_depth(uint64_t idx, uint8_t val) noexcept {
 			GUTIL_ASSERT(element_mask.size() == max_elements());
-			set_depth_impl(idx, &element_mask[0], val);
+			set_depth_impl(idx, static_cast<uint8_t*>(element_mask.data()), val);
 		}
 
 		void set_active(std::span<const VoxelElement> list, bool val) noexcept {
 			GUTIL_ASSERT(element_mask.size() == max_elements());
-			for (auto el : list) set_active_impl(el.depth_linear_index(), &element_mask[0], val);
+			for (auto el : list) set_active_impl(el.depth_linear_index(), static_cast<uint8_t*>(element_mask.data()), val);
 		}
 
-		void set_depth(std::span<const VoxelElement> list, unsigned char val) noexcept {
+		void set_depth(std::span<const VoxelElement> list, uint8_t val) noexcept {
 			GUTIL_ASSERT(element_mask.size() == max_elements());
-			for (auto el : list) set_depth_impl(el.depth_linear_index(), &element_mask[0], val);
+			for (auto el : list) set_depth_impl(el.depth_linear_index(), static_cast<uint8_t*>(element_mask.data()), val);
 		}
 
 		void set_active(std::span<const uint64_t> list, bool val) noexcept {
 			GUTIL_ASSERT(element_mask.size() == max_elements());
 			GUTIL_SIMD()
 			for (size_t i=0; i<list.size(); ++i) {
-				set_active_impl(list[i], &element_mask[0], val);
+				set_active_impl(list[i], static_cast<uint8_t*>(element_mask.data()), val);
 			}
 		}
 
-		void set_depth(std::span<const uint64_t> list, unsigned char val) noexcept {
+		void set_depth(std::span<const uint64_t> list, uint8_t val) noexcept {
 			GUTIL_ASSERT(element_mask.size() == max_elements());
 			GUTIL_SIMD()
 			for (size_t i=0; i<list.size(); ++i) {
-				set_depth_impl(list[i], &element_mask[0], val);
+				set_depth_impl(list[i], static_cast<uint8_t*>(element_mask.data()), val);
 			}
 		}
 
 		//////////////////////////////////////////////////////////////////////////////////////////////////
-		/// Convert to/from an unstructured mesh for a single layer
+		/// Collect the active elements and vertices.
 		//////////////////////////////////////////////////////////////////////////////////////////////////
 		void update_unstructured() noexcept {
-			unstructured.clear();
+			compressed_elements.clear();
+			compressed_vertices.clear();
 			for (uint64_t i=0; i<max_elements(); ++i) {
 				const VoxelElement el(depth,i);
-				if (is_active(el)) { unstructured.push_back(el); }
+				if (is_active(el)) { compressed_elements.push_back(el); }
 			}
 		}
 		
@@ -229,12 +236,22 @@ namespace GV {
 			});
 
 			//collect elements
-			unstructured.clear();
+			compressed_elements.clear();
+			compressed_vertices.clear();
 			for (int tid=0; tid<max_omp_threads; ++tid) {
-				unstructured.elements.insert( unstructured.elements.end(),
+				compressed_elements.insert( compressed_elements.end(),
 									std::make_move_iterator(thread_elements[tid].begin()),
 									std::make_move_iterator(thread_elements[tid].end()));
 			}
+		}
+
+		void collect_vertices() noexcept {
+			compressed_vertices.clear();
+			for_each_element( [&](VoxelElement el) {
+				for (VoxelVertex vtx : el.vertices()) {
+					compressed_vertices.push_back(vtx.reduced_key());
+				}
+			});
 		}
 
 		void collect_vertices_omp() noexcept {
@@ -246,25 +263,23 @@ namespace GV {
 			//let every thread work on its own section, then collect the vertices
 			std::vector<std::vector<VoxelVertex>> thread_vertices(max_omp_threads);
 			for_each_element_omp( [&](VoxelElement el, int tid) {
-				if (is_active(el)) {
-					for (VoxelVertex vtx : el.vertices()) {
-						thread_vertices[tid].push_back(vtx.reduced_key());
-					}
+				for (VoxelVertex vtx : el.vertices()) {
+					thread_vertices[tid].push_back(vtx.reduced_key());
 				}
 			});
 
 			//collect vertices
-			unstructured.vertices.clear();
+			compressed_vertices.clear();
 			for (int tid=0; tid<max_omp_threads; ++tid) {
-				unstructured.vertices.insert( unstructured.vertices.end(),
+				compressed_vertices.insert( compressed_vertices.end(),
 									std::make_move_iterator(thread_vertices[tid].begin()),
 									std::make_move_iterator(thread_vertices[tid].end()));
 			}
 
 			//ensure that there are no duplicates
-			std::sort(unstructured.vertices.begin(), unstructured.vertices.end());
-				auto last = std::unique(unstructured.vertices.begin(), unstructured.vertices.end());
-				unstructured.vertices.erase(last, unstructured.vertices.end());
+			std::sort(compressed_vertices.begin(), compressed_vertices.end());
+				auto last = std::unique(compressed_vertices.begin(), compressed_vertices.end());
+				compressed_vertices.erase(last, compressed_vertices.end());
 		}
 
 		//////////////////////////////////////////////////////////////////////////////////////////////////
@@ -272,7 +287,8 @@ namespace GV {
 		//////////////////////////////////////////////////////////////////////////////////////////////////
 		template<typename Predicate, typename... Args>
 		void set_mask(Predicate&& pred, Args&&... args) noexcept {
-			unstructured.clear();
+			compressed_elements.clear();
+			compressed_vertices.clear();
 			init_element_mask();
 
 			for_each_index( [&](uint64_t i) {
@@ -283,7 +299,8 @@ namespace GV {
 
 		template<typename Predicate, typename... Args>
 		void set_mask_omp(Predicate&& pred, Args&&... args) noexcept {
-			unstructured.clear();
+			compressed_elements.clear();
+			compressed_vertices.clear();
 			init_element_mask();
 
 			for_each_index_omp( [&](uint64_t i) {
@@ -292,14 +309,16 @@ namespace GV {
 			});
 		}
 
-		void set_mask(unsigned char val) noexcept {
-			unstructured.clear();
+		void set_mask(uint8_t val) noexcept {
+			compressed_elements.clear();
+			compressed_vertices.clear();
 			element_mask.resize(max_elements());
 			std::fill(element_mask.begin(), element_mask.end(), val);
 		}
 
 		void set_all_active(bool val) noexcept {
-			unstructured.clear();
+			compressed_elements.clear();
+			compressed_vertices.clear();
 			element_mask.resize(max_elements());
 			GUTIL_SIMD()
 			for (uint64_t i=0; i<max_elements(); ++i) {
@@ -307,8 +326,9 @@ namespace GV {
 			}
 		}
 
-		void set_all_depth(unsigned char val) noexcept {
-			unstructured.clear();
+		void set_all_depth(uint8_t val) noexcept {
+			compressed_elements.clear();
+			compressed_vertices.clear();
 			element_mask.resize(max_elements());
 			GUTIL_SIMD()
 			for (uint64_t i=0; i<max_elements(); ++i) {
@@ -320,25 +340,28 @@ namespace GV {
 		//////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Fill out the standard mesh interface
 		//////////////////////////////////////////////////////////////////////////////////////////////////
-		void color() noexcept { unstructured.color(); }
-		void collect_vertices() noexcept { unstructured.collect_vertices(); }
-		[[nodiscard]] uint64_t vertex_index(VoxelVertex vtx) const noexcept { return unstructured.vertex_index(vtx); }
+		[[nodiscard]] uint64_t vertex_index(VoxelVertex vtx) const noexcept {
+			vtx = vtx.reduced_key();
+			auto it = std::lower_bound(compressed_vertices.begin(), compressed_vertices.end(), vtx);
+			return (it==compressed_vertices.end() || *it!=vtx) ? uint64_t(-1) : 
+							static_cast<uint64_t>(std::distance(compressed_vertices.begin(), it));
+		}
 		[[nodiscard]] GeoPoint_t geo_coord(VoxelVertex vtx) const noexcept {
 			{return box.low + (box.high-box.low)*vtx.normalized_coordinate();}
 		}
 
-		[[nodiscard]] uint64_t n_elements() const noexcept { return unstructured.n_elements(); }
-		[[nodiscard]] uint64_t n_vertices() const noexcept { return unstructured.n_vertices(); }
+		[[nodiscard]] uint64_t n_elements() const noexcept { return compressed_elements.size(); }
+		[[nodiscard]] uint64_t n_vertices() const noexcept { return compressed_vertices.size(); }
 
-		auto element_begin() const noexcept { return unstructured.element_begin(); }
-		auto element_end() 	 const noexcept { return unstructured.element_end();   }
-		auto vertex_begin()  const noexcept { return unstructured.vertex_begin();  }
-		auto vertex_end()    const noexcept { return unstructured.vertex_end();    }
+		auto element_begin() const noexcept { return compressed_elements.cbegin(); }
+		auto element_end() 	 const noexcept { return compressed_elements.cend();   }
+		auto vertex_begin()  const noexcept { return compressed_vertices.cbegin(); }
+		auto vertex_end()    const noexcept { return compressed_vertices.cend();   }
 
-		auto element_begin() noexcept { return unstructured.element_begin(); }
-		auto element_end()   noexcept { return unstructured.element_end();   }
-		auto vertex_begin()  noexcept { return unstructured.vertex_begin();  }
-		auto vertex_end()    noexcept { return unstructured.vertex_end();    }
+		auto element_begin() noexcept { return compressed_elements.begin(); }
+		auto element_end()   noexcept { return compressed_elements.end();   }
+		auto vertex_begin()  noexcept { return compressed_vertices.begin(); }
+		auto vertex_end()    noexcept { return compressed_vertices.end();   }
 
 
 		//////////////////////////////////////////////////////////////////////////////////////////////////
@@ -361,10 +384,10 @@ namespace GV {
 
 				for (uint64_t idx=start; idx<end; ++idx) {
 					if constexpr (std::is_invocable_v<Action, VoxelElement, int, Args...>) {
-						action(unstructured.elements[idx], tid, std::forward<Args>(args)...);
+						action(compressed_elements[idx], tid, std::forward<Args>(args)...);
 					}
 					else {
-						action(unstructured.elements[idx], std::forward<Args>(args)...);
+						action(compressed_elements[idx], std::forward<Args>(args)...);
 					}
 				}
 			}
@@ -396,7 +419,7 @@ namespace GV {
 		void for_each_element_simd(Action&& action, Args&&...args) const noexcept {
 			GUTIL_SIMD()
 			for (uint64_t i=0; i<n_elements(); ++i) {
-				action(unstructured.elements[i], std::forward<Args>(args)...);
+				action(compressed_elements[i], std::forward<Args>(args)...);
 			}
 		}
 
@@ -448,7 +471,7 @@ namespace GV {
 		template<typename Action, typename... Args>
 		void for_each_element(Action&& action, Args&&... args) const noexcept {
 			for (uint64_t i=0; i<n_elements(); ++i) {
-				action(unstructured.elements[i], std::forward<Args>(args)...);
+				action(compressed_elements[i], std::forward<Args>(args)...);
 			}
 		}
 

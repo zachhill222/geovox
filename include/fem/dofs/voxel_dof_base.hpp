@@ -28,7 +28,8 @@ namespace GV
 		using RefPoint_t = gutil::Point<3,double>;
 		using GeoPoint_t = gutil::Point<3,double>;
 		using Key_t      = Key_type;
-		using QuadElem_t = VoxelElementKey<Key_t::MAX_DEPTH, Key_t::BC_FLAG>; //TODO: rename to SupportElem_t
+		using SptElem_t  = VoxelElementKey<Key_t::MAX_DEPTH, Key_t::BC_FLAG>;
+		using QuadElem_t = typename SptElem_t::NonPeriodicVariant; //type of element that will be in the mesh
 		using Hash       = Key_t::Hash;
 		//store the logical key where this element lives
 		//note that this key does not need to correspond to an active feature of the mesh
