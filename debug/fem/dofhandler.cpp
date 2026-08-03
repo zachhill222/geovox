@@ -1,291 +1,357 @@
 #include "gutil.hpp"
 
-#include "simd_keys/mesh_key.hpp"
+#include "simd_keys/dofs/voxelQ1/voxel_Q1_interface.hpp"
 #include "mesh/voxel_mesh_unstructured(NEW).hpp"
 #include "diffuse_domain/signed_distance.hpp"
 #include "fem/handlers/dofhandler.hpp"
 #include "fem/dofs/voxel_dof_Q1.hpp"
+#include "fem/handlers/coef_handler.hpp"
 
 /////////////////////////////////////////////////////////////////
-/// Collect compile-time options.
-///		GV_TEST_DOMAIN_PERIOD:
-///				0bzyx (e.g., 6=0b110 is periodic in z and y but not in x)
+/// Compile-time options
 ///
-/// 	GV_TEST_MAX_DEPTH:
-///				the maximum depth of the voxel mesh, larger than 10 is 
-///				not recommended due to memory. larger than 15 is not supported.
-///
-///		GV_TEST_DOMAIN_SIZE:
-///				the size of the domain (half sidelength) in each axis
-///				the domain is centered at the origin
+///   GV_TEST_DOMAIN_PERIOD  0bzyx periodicity of the MESH (e.g. 6=0b110 -> periodic in y,z)
+///   GV_TEST_DOF_PERIOD     0bzyx periodicity of the DOFS (independent of the mesh's own)
+///   GV_TEST_MAX_DEPTH      max voxel mesh depth (>10 not recommended, >15 unsupported)
+///   GV_TEST_DOMAIN_SIZE    domain half-sidelength per axis, centered at the origin
 /////////////////////////////////////////////////////////////////
-
 #ifndef GV_TEST_DOMAIN_PERIOD
 	#define GV_TEST_DOMAIN_PERIOD 7
 #endif
-
+#ifndef GV_TEST_DOF_PERIOD
+	#define GV_TEST_DOF_PERIOD 0
+#endif
 #ifndef GV_TEST_MAX_DEPTH
 	#define GV_TEST_MAX_DEPTH 5
 #endif
-
 #ifndef GV_TEST_DOMAIN_SIZE
 	#define GV_TEST_DOMAIN_SIZE 1
 #endif
 
-#ifndef GV_TEST_DOF_PERIOD
-	#define GV_TEST_DOF_PERIOD 0
-#endif
-
 /////////////////////////////////////////////////////////////////
-/// Assemble aliases for this test.
+/// Aliases
 /////////////////////////////////////////////////////////////////
-using Point_t		= gutil::Point<3,double>;
-using Box_t 		= gutil::Box<3,double>;
-using Sphere_t		= gutil::Sphere<3,double>;
-using Mesh_t		= GV::UnstructuredVoxelMesh<GV_TEST_MAX_DEPTH>;
-using Vert_t		= typename Mesh_t::VoxelVertex;
-using Elem_t		= typename Mesh_t::VoxelElement;
-using Assembly_t	= GV::SignedDistanceSpheres<double,GV_TEST_DOMAIN_PERIOD>;
+using Point_t       = gutil::Point<3,double>;
+using Box_t         = gutil::Box<3,double>;
+using Sphere_t      = gutil::Sphere<3,double>;
 
-using D_KEY         = Vert_t::PeriodicVariant<GV_TEST_DOF_PERIOD>;
-using DOF_t         = GV::VoxelQ1<D_KEY>;
+using Mesh_t        = GV::UnstructuredVoxelMesh<GV_TEST_MAX_DEPTH>;
+using MeshVert_t    = typename Mesh_t::VoxelVertex;
+using MeshElem_t    = typename Mesh_t::VoxelElement;
+using Assembly_t    = GV::SignedDistanceSpheres<double,GV_TEST_DOMAIN_PERIOD>;
+
+using DOF_t         = GV::Keys::DOFS::VoxelQ1<GV_TEST_DOF_PERIOD>;
 using Handler_t     = GV::DofHandler<Mesh_t,DOF_t>;
+using DofVert_t     = typename Handler_t::DofVert_t;
+using DofElem_t     = typename Handler_t::DofElem_t;
+
+using CoefHandler_t = GV::CoefHandler<Handler_t,double,1>;
 
 inline constexpr double DOMAIN_SIZE = GV_TEST_DOMAIN_SIZE;
-inline constexpr size_t MAX_DEPTH = GV_TEST_MAX_DEPTH;
+inline constexpr size_t MAX_DEPTH   = GV_TEST_MAX_DEPTH;
 inline constexpr Box_t domain{ {-DOMAIN_SIZE,-DOMAIN_SIZE,-DOMAIN_SIZE},
-							   { DOMAIN_SIZE, DOMAIN_SIZE, DOMAIN_SIZE}};
-
+							   { DOMAIN_SIZE, DOMAIN_SIZE, DOMAIN_SIZE} };
 
 /////////////////////////////////////////////////////////////////
-/// Generate a pseudo-random periodic collection of spheres with
-/// no intersections.
+/// Runtime test configuration (from argv)
 /////////////////////////////////////////////////////////////////
-Assembly_t generate_assembly(const std::string& test_name, size_t n_spheres, size_t seed, double min_r, double max_r) {
-	gutil::Logger::log("Generating Periodic Assembly: START");
-	std::cout << "\ntest= " << test_name << "\n"
-			  << "\tn_spheres= " << n_spheres << "\n"
-			  << "\tseed= " << seed << "\n"
-			  << "\tmin_r= " << min_r << "\n"
-			  << "\tmax_r= " << max_r << "\n" << std::flush;
+struct TestConfig {
+	std::string test_name    = "dofhandler";
+	size_t      n_spheres    = 100;
+	size_t      seed         = 0;
+	double      min_r        = 0.01;
+	double      max_r        = 0.5;
+	size_t      initial_depth= MAX_DEPTH/3;
+	double      refine_tol   = 0.5;   	// signed-distance tolerance for boundary refinement
+	double      unrefine_x   = 0.85;  	// normalized-x threshold for the unrefinement demo region
+};
+
+TestConfig parse_args(int argc, char* argv[]) {
+	TestConfig cfg;
+	std::vector<std::string> args(argv, argv+argc);
+	for (size_t i=0; i<args.size(); ++i) {
+		if      (args[i] == "-N")    { cfg.n_spheres     = atoi(args[++i].c_str()); }
+		else if (args[i] == "-R0")   { cfg.min_r         = atof(args[++i].c_str()); }
+		else if (args[i] == "-R1")   { cfg.max_r         = atof(args[++i].c_str()); }
+		else if (args[i] == "-S")    { cfg.seed          = atoi(args[++i].c_str()); }
+		else if (args[i] == "-name") { cfg.test_name     = args[++i]; }
+		else if (args[i] == "-ID")   { cfg.initial_depth = atoi(args[++i].c_str()); }
+		else if (args[i] == "-TOL")  { cfg.refine_tol    = atof(args[++i].c_str()); }
+	}
+	return cfg;
+}
+
+/////////////////////////////////////////////////////////////////
+/// Generate a pseudo-random periodic collection of non-overlapping spheres.
+/////////////////////////////////////////////////////////////////
+Assembly_t generate_assembly(const TestConfig& cfg) {
+	GUTIL_LOG("Generating Periodic Assembly: START");
+	std::cout << "\ntest= "     << cfg.test_name
+			  << "\n\tn_spheres= " << cfg.n_spheres
+			  << "\n\tseed= "      << cfg.seed
+			  << "\n\tmin_r= "     << cfg.min_r
+			  << "\n\tmax_r= "     << cfg.max_r << "\n" << std::flush;
 	gutil::LogTime timer{"Generating Periodic Assembly: DONE"};
-	
 
-	// set up assembly and rng
 	Assembly_t assembly{domain};
 
 	auto random_point = gutil::UniformRandomPoint<Point_t,true>();
-	random_point.set_parameters(-DOMAIN_SIZE,DOMAIN_SIZE);
-	random_point.set_seed(seed);
-	
+	random_point.set_parameters(-DOMAIN_SIZE, DOMAIN_SIZE);
+	random_point.set_seed(cfg.seed);
+
 	auto random_radius = gutil::UniformRandomPoint<Point_t,true>();
-	random_radius.set_parameters(min_r,max_r);
-	random_radius.set_seed(seed);
+	random_radius.set_parameters(cfg.min_r, cfg.max_r);
+	random_radius.set_seed(cfg.seed);
 
-	//insert spheres
-	const size_t max_attempts = 500 * n_spheres;
+	const size_t max_attempts = 500 * cfg.n_spheres;
 	size_t attempts = 0;
-
-	while(assembly.size() < n_spheres && attempts<max_attempts) {
+	while (assembly.size() < cfg.n_spheres && attempts < max_attempts) {
 		++attempts;
 		Sphere_t candidate(random_point(), random_radius.scalar());
-		if (!assembly.collides(candidate)) {
-			assembly.push_back(std::move(candidate));
-		}
+		if (!assembly.collides(candidate)) { assembly.push_back(std::move(candidate)); }
 	}
 
-	if (assembly.size() < n_spheres) {
-		gutil::Logger::log("WARNING: only placed ", assembly.size(), "/", n_spheres,
+	if (assembly.size() < cfg.n_spheres) {
+		GUTIL_ERROR("only placed ", assembly.size(), "/", cfg.n_spheres,
 							" disjoint periodic spheres after ", max_attempts, " attempts.\n",
 							"Try a smaller number of spheres or radii.");
 	}
 
-	std::string filename = test_name + "_spheres.txt";
-	gutil::write_spheres_to_file(filename, assembly.as_cspan());
-
+	gutil::write_spheres_to_file(cfg.test_name + "_spheres.txt", assembly.as_cspan());
 	return assembly;
 }
 
-
 /////////////////////////////////////////////////////////////////
-/// Generate a mesh of the spheres, assign dofs
+/// Phase: mesh + dof handler setup, initial (uniform) coefficient field
 /////////////////////////////////////////////////////////////////
-void test_dof_handler(const std::string& test_name, const Assembly_t& assembly, size_t initial_depth) {
-	gutil::Logger::log("test_dof_handler (start)");
-	gutil::Logger::log("initializing mesh (start)");
-	gutil::LogTime* timer = new gutil::LogTime{"initializing mesh (done)"};
-	
-	Mesh_t mesh(domain, initial_depth);
-	mesh.update_unstructured();
-	Handler_t handler(mesh);
-	handler.init_dofs();
-	handler.collect_dofs();
-
-	gutil::Logger::log("dofhandler has ", handler.n_dofs(), " dofs");
-	gutil::Logger::log("mesh has ", mesh.n_elements(), " elements");
-	delete timer;
-
+void setup_mesh_and_dofs(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_handler) {
+	GUTIL_LOG("initializing mesh (start)");
 	{
-		gutil::Logger::log("refining dofs (start)");
-		gutil::LogTime t{"refining dofs (done)"};
+		gutil::LogTime timer{"initializing mesh (done)"};
+		mesh.update_unstructured();
+		handler.init_dofs();
+		handler.collect_dofs();
+	}
+	GUTIL_LOG("dofhandler has ", handler.n_dofs(), " dofs");
+	GUTIL_LOG("mesh has ", mesh.n_elements(), " elements");
 
-		//refine mesh near the boundary
-		auto action = [&](std::span<DOF_t> dofs, double tol) {
-			for (DOF_t dof : dofs) {
-				GUTIL_ASSERT(dof.is_valid())
-				Vert_t vtx = static_cast<Vert_t>(dof.key);
-				if (std::abs( assembly.signed_distance(mesh.geo_coord(vtx)) ) < tol) {
-					handler.refine_quasi_hierarchical(dof);
-				}
+	coef_handler.init_coefs(0, [](DOF_t /*dof*/){ return 1.0; });
+	// coef_handler.print_coefs(0);
+}
+
+/////////////////////////////////////////////////////////////////
+/// Phase: refine near the sphere-assembly boundary, one depth level at a time.
+/// update_coefs() is called once per level -- calling it after more than one
+/// level of refinement has been applied will silently drop contributions
+/// from dofs that were refined past their immediate children.
+/////////////////////////////////////////////////////////////////
+void refine_near_boundary(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_handler,
+						   const Assembly_t& assembly, const TestConfig& cfg) {
+	GUTIL_LOG("refining dofs (start)");
+	gutil::LogTime timer{"refining dofs (done)"};
+
+	auto refine_action = [&](std::span<DOF_t> dofs, double tol) {
+		gutil::LogTime t{"refine ", dofs.size(), " (done)"};
+		for (DOF_t dof : dofs) {
+			GUTIL_ASSERT(dof.is_valid());
+			MeshVert_t vtx = static_cast<MeshVert_t>(dof);
+			if (std::abs(assembly.signed_distance(mesh.geo_coord(vtx))) < tol) {
+				handler.refine_quasi_hierarchical(dof);
 			}
-		};
-
-		double tol = 0.1;
-		for (size_t i=initial_depth; i<MAX_DEPTH; ++i) {
-			handler.dispatch_parallel_active_dof(action, tol);
-			handler.wait();
-
-			//refining dofs request mesh refinement
-			handler.collect_dofs();
-			mesh.process_refine();
-			mesh.update_unstructured();
 		}
+	};
 
-		handler.refine_all_quasi_hierarchical();
+	for (size_t depth=cfg.initial_depth; depth<MAX_DEPTH; ++depth) {
+		handler.dispatch_parallel_active_dof(refine_action, cfg.refine_tol);
+		// handler.threads.submit(refine_action, std::span<DOF_t>{handler.active_dofs.begin(), handler.active_dofs.end()}, cfg.refine_tol);
+		// handler.refine_all_quasi_hierarchical();
+		handler.wait();
+
+		handler.collect_dofs();
 		mesh.process_refine();
 		mesh.update_unstructured();
-		gutil::Logger::log("dofhandler has ", handler.n_dofs(), " dofs");
-		gutil::Logger::log("mesh has ", mesh.n_elements(), " elements");
+		coef_handler.update_coefs();
 	}
 
-	{
-		gutil::Logger::log("unrefining dofs (start)");
-		gutil::LogTime t{"unrefining dofs (done)"};
-
-		for (auto it=mesh.element_begin(); it!=mesh.element_end(); ++it) {
-			GUTIL_ASSERT(mesh.is_active(*it));
-			Point_t v0 = mesh.geo_coord(it->vertex(0));
-			Point_t v1 = mesh.geo_coord(it->vertex(7));
-			if (std::abs( assembly.signed_distance(0.5*(v0+v1)) > 0.01 )) {
-				for (Vert_t vtx : it->vertices()) {
-					GUTIL_ASSERT(vtx.is_valid())
-					D_KEY key = static_cast<D_KEY>(vtx);
-					GUTIL_ASSERT(DOF_t{key}.is_valid())
-					handler.unrefine_quasi_hierarchical(DOF_t{key});
-				}
-			}
-		}
-
-		handler.wait();
-		handler.collect_dofs();
-
-		gutil::Logger::log("dofhandler has ", handler.n_dofs(), " dofs");
-		gutil::Logger::log("mesh has ", mesh.n_elements(), " elements");
-	}
-
-	{
-		gutil::Logger::log("remove mesh elements with no conformal dofs dofs (start)");
-		gutil::LogTime t{"remove mesh elements with no conformal dofs dofs (done)"};
-
-		for (auto it=mesh.element_begin(); it!=mesh.element_end(); ++it) {
-			std::vector<DOF_t> dofs;
-			std::vector<size_t> numbers;
-			handler.get_active_dofs_conformal(*it,dofs,numbers);
-			if (dofs.empty()) {
-				std::cout << "no dofs\n";
-				mesh.unrefine(*it);
-			}
-		}
-
-		mesh.process_unrefine();
-		mesh.update_unstructured();
-		gutil::Logger::log("dofhandler has ", handler.n_dofs(), " dofs");
-		gutil::Logger::log("mesh has ", mesh.n_elements(), " elements");
-	}
-
-
-
-
-
-
-
-	gutil::Logger::log("saving file");
-
-	//save mesh and record dof information
-	const std::string filename = test_name + "_dof.vtk";
+	// NOTE: verify refine_all_quasi_hierarchical only ever moves dofs one level
+	// below their current depth -- if it can refine multiple levels in one call,
+	// the single update_coefs() below needs to become one call per level instead.
+	// handler.refine_all_quasi_hierarchical();
+	mesh.process_refine();
 	mesh.update_unstructured();
+	coef_handler.update_coefs();
+
+	for (DOF_t dof : handler.active_dofs) {
+		if(!mesh.is_geometrically_conformal(DofVert_t{dof.key})) {
+			std::cout << DofVert_t{dof.key} << ", " << DofVert_t{dof.key}.reduced_key();
+			GUTIL_ERROR("\tERROR: ", dof, " is not conformal");
+			break;
+		}
+	}
+
+	GUTIL_LOG("dofhandler has ", handler.n_dofs(), " dofs");
+	GUTIL_LOG("mesh has ", mesh.n_elements(), " elements");
+}
+
+/////////////////////////////////////////////////////////////////
+/// Phase: unrefine a demo region (normalized x > threshold), coalescing
+/// each qualifying dof's children back into its own, coarser support.
+/////////////////////////////////////////////////////////////////
+void unrefine_demo_region(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_handler,
+						   const TestConfig& cfg) {
+	GUTIL_LOG("unrefining dofs (start)");
+	gutil::LogTime timer{"unrefining dofs (done)"};
+
+	for (auto it=mesh.element_begin(); it!=mesh.element_end(); ++it) {
+		GUTIL_ASSERT(mesh.is_active(*it));
+		for (MeshVert_t vtx : it->vertices()) {
+			MeshVert_t parent = vtx.parent();
+			if (!parent.exists()) { continue; }
+			DOF_t dof{parent};
+			if (dof.exists() && vtx.normalized_coordinate()[0] > cfg.unrefine_x) {
+				handler.unrefine_quasi_hierarchical(dof);
+			}
+		}
+	}
+
+	handler.wait();
+	handler.collect_dofs();
+	coef_handler.update_coefs();
+
+	for (DOF_t dof : handler.active_dofs) {
+		if(!mesh.is_geometrically_conformal(DofVert_t{dof.key})) {
+			gutil::Logger::error("\tERROR: ", dof, " is not conformal");
+			break;
+		}
+	}
+
+	GUTIL_LOG("dofhandler has ", handler.n_dofs(), " dofs");
+	GUTIL_LOG("mesh has ", mesh.n_elements(), " elements");
+}
+
+/////////////////////////////////////////////////////////////////
+/// Phase: drop mesh elements that no longer have any conformal, active dof.
+/////////////////////////////////////////////////////////////////
+void remove_unsupported_elements(Mesh_t& mesh, Handler_t& handler) {
+	GUTIL_LOG("remove mesh elements with no conformal dofs (start)");
+	gutil::LogTime timer{"remove mesh elements with no conformal dofs (done)"};
+
+	for (auto it=mesh.element_begin(); it!=mesh.element_end(); ++it) {
+		std::vector<DOF_t> dofs;
+		std::vector<size_t> numbers;
+		handler.get_active_dofs_conformal(*it, dofs, numbers);
+		if (dofs.empty()) { mesh.unrefine(*it); }
+	}
+
+	handler.collect_dofs();
+	mesh.process_unrefine();
+	mesh.update_unstructured();
+	for (DOF_t dof : handler.active_dofs) {
+		if(!mesh.is_geometrically_conformal(DofVert_t{dof.key})) {
+			gutil::Logger::error("\tERROR: ", dof, " is not conformal");
+			break;
+		}
+	}
+
+	GUTIL_LOG("dofhandler has ", handler.n_dofs(), " dofs");
+	GUTIL_LOG("mesh has ", mesh.n_elements(), " elements");
+}
+
+/////////////////////////////////////////////////////////////////
+/// Phase: evaluate the field at every mesh vertex and save results to disk.
+/////////////////////////////////////////////////////////////////
+void evaluate_and_save(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_handler,
+					   const Assembly_t& assembly, const TestConfig& cfg) {
 	mesh.collect_vertices();
+
+	std::vector<double> scalar_vals;
+	{
+		gutil::LogTime timer{"evaluating field at mesh vertices"};
+		scalar_vals = coef_handler.evaluate(0, mesh.vertex_begin(), mesh.vertex_end());
+	}
+
+	GUTIL_LOG("saving file");
+	const std::string filename = cfg.test_name + "_dof.vtk";
 	mesh.save_as_binary(filename);
 
-	auto pt_sd_lookup = GV::make_feature_lookup<Vert_t>(
-			[&](Vert_t vtx) {return assembly.signed_distance(mesh.geo_coord(vtx));},
+	auto pt_field_lookup = GV::make_index_lookup<double>(
+			[&](uint64_t idx){ return scalar_vals[idx]; }, "scalar_field");
+
+	auto pt_coef_lookup = GV::make_feature_lookup<MeshVert_t>(
+			[&](MeshVert_t vtx) {
+				auto d_vtx = handler.get_dof_vertex(vtx);
+				return d_vtx.exists() && handler.is_active(DOF_t{d_vtx}) ? coef_handler.coefs[0][handler.global_number(DOF_t{d_vtx})] : -1;
+			}, "scalar_coef");
+
+	auto pt_sd_lookup = GV::make_feature_lookup<MeshVert_t>(
+			[&](MeshVert_t vtx) { return assembly.signed_distance(mesh.geo_coord(vtx)); },
 			"signed_distance");
 
-	auto pt_dof_active_lookup = GV::make_feature_lookup<Vert_t>(
-			[&](Vert_t vtx) {
-				vtx = handler.get_dof_vertex(vtx);
-				return vtx.exists() ? handler.global_number(DOF_t{static_cast<D_KEY>(vtx)}) : -1;
+	auto pt_dof_active_lookup = GV::make_feature_lookup<MeshVert_t>(
+			[&](MeshVert_t vtx) {
+				auto d_vtx = handler.get_dof_vertex(vtx);
+				return d_vtx.exists() && handler.is_active(DOF_t{d_vtx}) ? handler.global_number(DOF_t{d_vtx}) : -1;
 			}, "active_dof_index");
 
-	auto pt_dof_refinable_lookup = GV::make_feature_lookup<Vert_t>(
-			[&](Vert_t vtx) {
-				vtx = handler.get_dof_vertex(vtx);
-				return vtx.exists() ? handler.is_refinable(DOF_t{static_cast<D_KEY>(vtx)}) : -1;
+	auto pt_dof_refinable_lookup = GV::make_feature_lookup<MeshVert_t>(
+			[&](MeshVert_t vtx) {
+				auto d_vtx = handler.get_dof_vertex(vtx);
+				return d_vtx.exists() && handler.is_active(DOF_t{d_vtx}) ? handler.is_refinable(DOF_t{d_vtx}) : -1;
 			}, "dof_refinable");
 
-	auto pt_dof_depth_lookup = GV::make_feature_lookup<Vert_t>(
-			[&](Vert_t vtx) {
-				vtx = handler.get_dof_vertex(vtx);
-				return vtx.exists() ? vtx.depth() : -1;
-			}, "depth");
+	auto pt_dof_key_lookup = GV::make_feature_lookup<MeshVert_t>(
+			[&](MeshVert_t vtx) {
+				auto d_vtx = handler.get_dof_vertex(vtx);
+				return vtx.exists() && handler.is_active(DOF_t{d_vtx}) ? 
+							std::array<int64_t,4>{d_vtx.depth(), d_vtx.i(), d_vtx.j(), d_vtx.k()} :
+							std::array<int64_t,4>{-1,-1,-1,-1};
 
-	auto el_dof_count_lookup = GV::make_feature_lookup<Elem_t>(
-			[&](Elem_t el) {
+			}, "dof_key");
+
+	auto el_dof_count_lookup = GV::make_feature_lookup<MeshElem_t>(
+			[&](MeshElem_t el) {
 				std::vector<DOF_t> dofs;
 				std::vector<size_t> idxs;
-				// handler.get_active_dofs_conformal(el,dofs,idxs);
-				handler.get_active_dofs_full_hierarchical(el,dofs,idxs);
+				handler.get_active_dofs_full_hierarchical(el, dofs, idxs);
 				return dofs.size();
 			}, "n_active_dofs");
 
-	auto el_depth_lookup = GV::make_feature_lookup<Elem_t>(
-			[&](Elem_t el) {
-				return el.depth();
-			}, "depth");
+	auto el_depth_lookup = GV::make_feature_lookup<MeshElem_t>(
+			[](MeshElem_t el) { return el.depth(); }, "depth");
 
-	mesh.append_point_data_field_binary(filename, "point", pt_sd_lookup, pt_dof_active_lookup, pt_dof_refinable_lookup,pt_dof_depth_lookup);
-	mesh.append_cell_data_field_binary(filename, "element", el_dof_count_lookup,el_depth_lookup);
+	mesh.append_point_data_field_binary(filename, "point",
+			pt_sd_lookup, pt_dof_active_lookup, pt_dof_refinable_lookup,
+			pt_dof_key_lookup, pt_field_lookup, pt_coef_lookup);
+	mesh.append_cell_data_field_binary(filename, "element",
+			el_dof_count_lookup, el_depth_lookup);
 }
 
+/////////////////////////////////////////////////////////////////
+/// Top-level test driver
+/////////////////////////////////////////////////////////////////
+void test_dof_handler(const TestConfig& cfg, const Assembly_t& assembly) {
+	GUTIL_LOG("test_dof_handler (start)");
 
+	Mesh_t mesh(domain, cfg.initial_depth);
+	Handler_t handler(mesh);
+	CoefHandler_t coef_handler(handler);
 
+	setup_mesh_and_dofs(mesh, handler, coef_handler);
+	// coef_handler.print_coefs(0);   // pre-refinement snapshot, kept for comparison
 
+	refine_near_boundary(mesh, handler, coef_handler, assembly, cfg);
+	// coef_handler.print_coefs(0);   // post-refinement snapshot
 
+	// unrefine_demo_region(mesh, handler, coef_handler, cfg);
+	// remove_unsupported_elements(mesh, handler);
+	// coef_handler.print_coefs(0);   // post-unrefinement / cleanup snapshot
 
-
-
-
+	evaluate_and_save(mesh, handler, coef_handler, assembly, cfg);
+}
 
 int main(int argc, char* argv[]) {
-	std::vector<std::string> args(argv, argv+argc);
-	size_t seed  = 0;
-	size_t n_spheres = 100;
-	double min_r = 0.01;
-	double max_r = 0.5;
-	size_t initial_depth = MAX_DEPTH/3;
-	std::string test_name = "dofhandler";
-
-	for (size_t i=0; i<args.size(); ++i) {
-		if      (args[i] == "-N") { n_spheres = atoi(args[++i].c_str());}
-		else if (args[i] == "-R0") { min_r = atof(args[++i].c_str());}
-		else if (args[i] == "-R1") { max_r = atof(args[++i].c_str());}
-		else if (args[i] == "-S")  { seed = atoi(args[++i].c_str());}
-		else if (args[i] == "-name") {test_name = args[++i];}
-		else if (args[i] == "-ID") {initial_depth = atoi(args[++i].c_str());}
-	}
-
-
-	Assembly_t assembly = generate_assembly(test_name, n_spheres, seed, min_r, max_r);
-	test_dof_handler(test_name, assembly, initial_depth);
+	TestConfig cfg = parse_args(argc, argv);
+	Assembly_t assembly = generate_assembly(cfg);
+	test_dof_handler(cfg, assembly);
 	return 0;
 }

@@ -20,13 +20,13 @@ int main(int argc, char* argv[]) {
 	//read data and put into a signed distance octree
 	std::vector<Sphere_t> list = gutil::read_spheres_from_file<3,double>(filename);
 
-	Box_t box({0,0,0}, {2,2,2});
+	Box_t box({-1,-1,-1}, {1,1,1});
 	GV::SignedDistanceSpheres<double,7> assembly(box);
 	assembly.push_back_range(std::move(list));
 
 	
 	//create a mesh
-	gutil::Logger::log("make mesh");
+	gutil::Logger::log("make mesh with ", assembly.size(), " spheres");
 	Mesh_t mesh(box);
 	
 	for (int i=0; i<N; ++i) {
@@ -54,6 +54,8 @@ int main(int argc, char* argv[]) {
 				return assembly.collides(Box_t{mesh.geo_coord(el.vertex(0)), mesh.geo_coord(el.vertex(7))});});
 			// mesh.process_refine();
 		}
+
+		gutil::Logger::log("mesh has ", mesh.n_elements(), " elements");
 	}
 
 	gutil::Logger::log("make unstructured mesh");
@@ -115,33 +117,33 @@ int main(int argc, char* argv[]) {
 	
 
 	//get a layer and save its mesh and depth field
-	// for (uint64_t dd=0; dd<=N; ++dd) {
-	// 	gutil::LogTime timer{"saving layer " + std::to_string(dd)};
+	for (uint64_t dd=5; dd<=5; ++dd) {
+		gutil::LogTime timer{"saving layer " + std::to_string(dd)};
 
-	// 	typename Mesh_t::S_Layer_t layer = mesh.get_layer(dd);
-	// 	layer.set_all_active(true);
-	// 	layer.update_unstructured_omp();
-	// 	layer.collect_vertices_omp();
+		typename Mesh_t::S_Layer_t layer = mesh.get_layer(dd);
+		layer.set_all_active(true);
+		layer.update_unstructured_omp();
+		layer.collect_vertices_omp();
 
-	// 	const std::string layer_filename = "mesh_layer_" + std::to_string(layer.depth) + ".vtk";
-	// 	layer.save_as_binary(layer_filename);
+		const std::string layer_filename = "mesh_layer_" + std::to_string(layer.depth) + ".vtk";
+		layer.save_as_binary(layer_filename);
 
-	// 	auto layer_depth_field_lookup = GV::make_feature_lookup<Elem_t>(
-	// 			[&](Elem_t el) {
-	// 				return layer.read_depth(el);
-	// 			},
-	// 			"depth_field"
-	// 		);
+		auto layer_depth_field_lookup = GV::make_feature_lookup<Elem_t>(
+				[&](Elem_t el) {
+					return layer.read_depth(el);
+				},
+				"depth_field"
+			);
 
-	// 	auto layer_active_lookup = GV::make_feature_lookup<Elem_t>(
-	// 			[&](Elem_t el) {
-	// 				return mesh.is_active(el);
-	// 			},
-	// 			"is_active"
-	// 		);
+		auto layer_active_lookup = GV::make_feature_lookup<Elem_t>(
+				[&](Elem_t el) {
+					return mesh.is_active(el);
+				},
+				"is_active"
+			);
 
-	// 	layer.append_cell_data_field_binary(layer_filename, "debug_details", layer_depth_field_lookup, layer_active_lookup);
-	// }
+		layer.append_cell_data_field_binary(layer_filename, "debug_details", layer_depth_field_lookup, layer_active_lookup);
+	}
 
 
 	gutil::Logger::log("done");

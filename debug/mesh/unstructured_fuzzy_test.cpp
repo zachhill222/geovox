@@ -175,12 +175,7 @@ Mesh_t generate_and_refine_mesh(const std::string& test_name, const Assembly_t& 
 		gutil::LogTime t{"(done)"};
 		for (size_t i=0; i<target_depth/2; ++i) {
 			mesh.update_unstructured();
-			mesh.unrefine( [&](Elem_t el){
-				Point_t pt = mesh.geo_coord(el.vertex(0));
-				Point_t diag = mesh.geo_coord(el.vertex(7)) - pt;
-				pt += 0.5*diag;
-				return assembly.heaviside(pt,0.1)==0;}
-				);
+			mesh.unrefine( [&](Elem_t el){ return el.i() < 2;});
 			mesh.process_unrefine();
 		}
 	}
@@ -275,6 +270,9 @@ int main(int argc, char* argv[]) {
 	gutil::LogTime timer{"test: ", test_name, " finished "};
 	Assembly_t assembly = generate_assembly(test_name, n_spheres, seed, min_r, max_r);
 	Mesh_t mesh = generate_and_refine_mesh(test_name, assembly, seed);
+
+	gutil::Logger::log("final mesh has ", mesh.n_elements(), " elements and ", mesh.n_vertices(), " vertices");
+
 }
 
 

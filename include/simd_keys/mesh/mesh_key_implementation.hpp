@@ -14,6 +14,17 @@ namespace GV {
 	///////////////////////////////////////////////////////////////
 	/// A namespace for indexing voxel mesh features.
 	/// Operate on raw uint64_t types for simd compatibility
+	///
+	/// Note that some operations allow for a Period template.
+	/// 
+	/// The Period is a number 0bzyx, where the bit x,y,z sets
+	/// the periodic nature of that axis. For example,
+	/// Period = 6 = 0b110 is periodic in z and y but not x
+	///
+	/// Note that specifying a Period does not change the index of any
+	/// feature, only which indices are feasible. This is to allow
+	/// maximum compatibility between meshes using non-periodic features
+	/// and DOFs using periodic features.
 	///////////////////////////////////////////////////////////////
 	namespace Mesh3D {
 
@@ -220,7 +231,7 @@ namespace GV {
 		[[nodiscard]] inline constexpr uint64_t IndexI_SIMD(uint64_t key) noexcept {
 			GUTIL_ASSERT(Exists(key));
 			GUTIL_ASSERT(IsCartesian(key));
-			return key&IDX_MASK;
+			return (key>>I_SHIFT)&IDX_MASK;
 		}
 
 		[[nodiscard]] inline constexpr uint64_t IndexI(uint64_t key) noexcept {
@@ -378,8 +389,15 @@ namespace GV {
 		}
 
 		GUTIL_DECLARE_SIMD()
+		template<uint8_t Period=0> requires(Period<8)
 		[[nodiscard]] inline constexpr uint64_t MakeVertex(uint64_t dd, uint64_t ii, uint64_t jj, uint64_t kk) {
-			const uint64_t n_el = uint64_t{1} << dd;
+			const uint64_t n_el = uint64_t{1} << dd; //largest non-periodic index
+
+			//handle periodic axes. note the lower index is the cononical representation
+			if constexpr (Period&0b001) { ii%=n_el; }
+			if constexpr (Period&0b010) { jj%=n_el; }
+			if constexpr (Period&0b100) { kk%=n_el; }
+
 			return (dd<=MAX_DEPTH && ii<=n_el && jj<=n_el && kk<=n_el) ?
 					(CHECK_BIT | (VERTEX_FLAG<<FEAT_SHIFT) | (dd<<DEPTH_SHIFT) |
 					 	(kk<<K_SHIFT) | (jj<<J_SHIFT) | (ii<<I_SHIFT)) : 0;
@@ -479,6 +497,7 @@ namespace GV {
 		}
 
 		GUTIL_DECLARE_SIMD()
+		template<uint8_t Period=0> requires(Period<8)
 		[[nodiscard]] inline constexpr uint64_t VertexFromGlobalIndex_SIMD(uint64_t index) {
 			uint64_t dd = 0;
 			for (uint64_t d=0; d<MAX_DEPTH; ++d) {
@@ -491,7 +510,7 @@ namespace GV {
 			const uint64_t ii = index%N; index/=N;
 			const uint64_t jj = index%N; index/=N;
 			// const uint64_t kk = index;
-			return MakeVertex(dd, ii, jj, index); //index too large checked here (k will overflow)
+			return MakeVertex<Period>(dd, ii, jj, index); //index too large checked here (k will overflow)
 		}
 
 		static_assert(VertexFromGlobalIndex_SIMD(0) == MakeVertex(0,0,0,0));
@@ -541,7 +560,7 @@ namespace GV {
 			GUTIL_ASSERT(Exists(key));
 			GUTIL_ASSERT(IsVertex(key));
 			GUTIL_ASSERT(IsCartesian(key));
-			const uint64_t dd = Depth(key);  if (dd==0) {return 0;}
+			const uint64_t dd = Depth(key);  if (dd==0){return 0;}
 			const uint64_t ii = IndexI(key); if (ii&1) {return 0;}
 			const uint64_t jj = IndexJ(key); if (jj&1) {return 0;}
 			const uint64_t kk = IndexK(key); if (kk&1) {return 0;}
@@ -575,6 +594,7 @@ namespace GV {
 			for (uint64_t dd=0; dd<MAX_DEPTH; ++dd) {
 				uint64_t parent = VertexParent(key);
 				if (!Exists(parent)) { return key; }
+				else {key = parent;}
 			}
 			return key;
 		}
@@ -582,6 +602,7 @@ namespace GV {
 		///////////////////////////////////////////////////////////
 		/// Debug methods
 		///////////////////////////////////////////////////////////
+		template<uint8_t Period=0> requires(Period<8)
 		[[nodiscard]] inline constexpr bool IsValid(uint64_t key) noexcept {
 			if (!Exists(key)) { return false; }
 			if (IsElement(key)) {
@@ -592,7 +613,10 @@ namespace GV {
 			else if (IsVertex(key)) {
 				if (!IsCartesian(key)) {GUTIL_ABORT("vertices must be in cartesian coordinates"); return false;}
 				const uint64_t n_el = uint64_t{1}<<Depth(key);
-				return (IndexI(key)<=n_el) && (IndexJ(key)<=n_el) && (IndexK(key)<=n_el);
+				const uint64_t n_x = (Period&0b001) ? n_el-1 : n_el;
+				const uint64_t n_y = (Period&0b010) ? n_el-1 : n_el;
+				const uint64_t n_z = (Period&0b100) ? n_el-1 : n_el;
+				return (IndexI_SIMD(key)<=n_x) && (IndexJ_SIMD(key)<=n_y) && (IndexK_SIMD(key)<=n_z);
 			}
 			GUTIL_ABORT("Only elements and vertices are supported for now");
 			return false;
@@ -642,15 +666,22 @@ namespace GV {
 		/// Adapt the im/p1 values for periodicity as needed.
 		/// Invalid neighbors will overflow and return 0.
 		///////////////////////////////////////////////////////////
-		template<typename T=uint64_t>
+		template<typename T=uint64_t, uint8_t Period=0> requires (Period<8)
 		[[nodiscard]] constexpr std::array<T,26> GetElementNeighbors(uint64_t key) noexcept {
 			GUTIL_ASSERT(Exists(key));
 			GUTIL_ASSERT(IsElement(key));
 			key = DecodeElement(key);
+
 			const uint64_t dd = Depth(key);
-			const uint64_t ii = IndexI_SIMD(key); const uint64_t im1=ii-1; const uint64_t ip1=ii+1;
-			const uint64_t jj = IndexJ_SIMD(key); const uint64_t jm1=jj-1; const uint64_t jp1=jj+1;
-			const uint64_t kk = IndexK_SIMD(key); const uint64_t km1=kk-1; const uint64_t kp1=kk+1;
+			const uint64_t ii = IndexI_SIMD(key); uint64_t im1=ii-1; uint64_t ip1=ii+1;
+			const uint64_t jj = IndexJ_SIMD(key); uint64_t jm1=jj-1; uint64_t jp1=jj+1;
+			const uint64_t kk = IndexK_SIMD(key); uint64_t km1=kk-1; uint64_t kp1=kk+1;
+
+			[[maybe_unused]] const uint64_t N = uint64_t{1} << dd;
+			if constexpr (Period&0b001) {im1%=N; ip1%=N;}
+			if constexpr (Period&0b010) {jm1%=N; jp1%=N;}
+			if constexpr (Period&0b100) {km1%=N; kp1%=N;}
+
 			return {
 				//bottom slice
 				T{MakeElement(dd, im1, jm1, km1)},
@@ -688,47 +719,55 @@ namespace GV {
 		}
 
 		GUTIL_DECLARE_SIMD()
+		template<uint8_t Period=0> requires(Period<8)
 		constexpr void GetElementNeighbors_SIMD(uint64_t key, uint64_t* ptr) noexcept {
 			GUTIL_ASSERT(ptr!=nullptr);
 			GUTIL_ASSERT(Exists(key));
 			GUTIL_ASSERT(IsElement(key));
 			GUTIL_ASSERT(IsCartesian(key));
+
 			const uint64_t dd = Depth(key);
-			const uint64_t ii = IndexI_SIMD(key); const uint64_t im1=ii-1; const uint64_t ip1=ii+1;
-			const uint64_t jj = IndexJ_SIMD(key); const uint64_t jm1=jj-1; const uint64_t jp1=jj+1;
-			const uint64_t kk = IndexK_SIMD(key); const uint64_t km1=kk-1; const uint64_t kp1=kk+1;
-				//bottom slice
-				ptr[0] = MakeElement(dd, im1, jm1, km1);
-				ptr[1] = MakeElement(dd, ii , jm1, km1);
-				ptr[2] = MakeElement(dd, ip1, jm1, km1);
-				ptr[3] = MakeElement(dd, im1, jj , km1);
-				ptr[4] = MakeElement(dd, ii , jj , km1);
-				ptr[5] = MakeElement(dd, ip1, jj , km1);
-				ptr[6] = MakeElement(dd, im1, jp1, km1);
-				ptr[7] = MakeElement(dd, ii , jp1, km1);
-				ptr[8] = MakeElement(dd, ip1, jp1, km1);
+			const uint64_t ii = IndexI_SIMD(key); uint64_t im1=ii-1; uint64_t ip1=ii+1;
+			const uint64_t jj = IndexJ_SIMD(key); uint64_t jm1=jj-1; uint64_t jp1=jj+1;
+			const uint64_t kk = IndexK_SIMD(key); uint64_t km1=kk-1; uint64_t kp1=kk+1;
 
-				//middle slice (remove center)
-				ptr[9] = MakeElement(dd, im1, jm1, kk);
-				ptr[10] = MakeElement(dd, ii , jm1, kk);
-				ptr[11] = MakeElement(dd, ip1, jm1, kk);
-				ptr[12] = MakeElement(dd, im1, jj , kk);
-				// ptr[] = MakeElement(dd, ii , jj , kk);
-				ptr[13] = MakeElement(dd, ip1, jj , kk);
-				ptr[14] = MakeElement(dd, im1, jp1, kk);
-				ptr[15] = MakeElement(dd, ii , jp1, kk);
-				ptr[16] = MakeElement(dd, ip1, jp1, kk);
+			[[maybe_unused]] const uint64_t N = uint64_t{1} << dd;
+			if constexpr (Period&0b001) {im1%=N; ip1%=N;}
+			if constexpr (Period&0b010) {jm1%=N; jp1%=N;}
+			if constexpr (Period&0b100) {km1%=N; kp1%=N;}
 
-				//top slice
-				ptr[17] = MakeElement(dd, im1, jm1, kp1);
-				ptr[18] = MakeElement(dd, ii , jm1, kp1);
-				ptr[19] = MakeElement(dd, ip1, jm1, kp1);
-				ptr[20] = MakeElement(dd, im1, jj , kp1);
-				ptr[21] = MakeElement(dd, ii , jj , kp1);
-				ptr[22] = MakeElement(dd, ip1, jj , kp1);
-				ptr[23] = MakeElement(dd, im1, jp1, kp1);
-				ptr[24] = MakeElement(dd, ii , jp1, kp1);
-				ptr[25] = MakeElement(dd, ip1, jp1, kp1);
+			//bottom slice
+			ptr[0]  = MakeElement(dd, im1, jm1, km1);
+			ptr[1]  = MakeElement(dd, ii , jm1, km1);
+			ptr[2]  = MakeElement(dd, ip1, jm1, km1);
+			ptr[3]  = MakeElement(dd, im1, jj , km1);
+			ptr[4]  = MakeElement(dd, ii , jj , km1);
+			ptr[5]  = MakeElement(dd, ip1, jj , km1);
+			ptr[6]  = MakeElement(dd, im1, jp1, km1);
+			ptr[7]  = MakeElement(dd, ii , jp1, km1);
+			ptr[8]  = MakeElement(dd, ip1, jp1, km1);
+
+			//middle slice (remove center)
+			ptr[9]  = MakeElement(dd, im1, jm1, kk);
+			ptr[10] = MakeElement(dd, ii , jm1, kk);
+			ptr[11] = MakeElement(dd, ip1, jm1, kk);
+			ptr[12] = MakeElement(dd, im1, jj , kk);
+			//ptr[] = MakeElement(dd, ii , jj , kk);
+			ptr[13] = MakeElement(dd, ip1, jj , kk);
+			ptr[14] = MakeElement(dd, im1, jp1, kk);
+			ptr[15] = MakeElement(dd, ii , jp1, kk);
+			ptr[16] = MakeElement(dd, ip1, jp1, kk);
+
+			//top slice
+			ptr[17] = MakeElement(dd, im1, jm1, kp1);
+			ptr[18] = MakeElement(dd, ii , jm1, kp1);
+			ptr[19] = MakeElement(dd, ip1, jm1, kp1);
+			ptr[20] = MakeElement(dd, im1, jj , kp1);
+			ptr[21] = MakeElement(dd, ii , jj , kp1);
+			ptr[22] = MakeElement(dd, ip1, jj , kp1);
+			ptr[23] = MakeElement(dd, im1, jp1, kp1);
+			ptr[24] = MakeElement(dd, ii , jp1, kp1);
+			ptr[25] = MakeElement(dd, ip1, jp1, kp1);
 		}
 
 
@@ -738,93 +777,106 @@ namespace GV {
 		/// Adapt the im/p1 values for periodicity as needed.
 		/// Invalid neighbors will overflow and return 0.
 		///////////////////////////////////////////////////////////
-		template<typename T=uint64_t>
+		template<typename T=uint64_t, uint8_t Period=0> requires(Period<8)
 		[[nodiscard]] constexpr std::array<T,26> GetVertexNeighbors(uint64_t key) noexcept {
 			GUTIL_ASSERT(Exists(key));
 			GUTIL_ASSERT(IsVertex(key));
 			GUTIL_ASSERT(IsCartesian(key));
 			const uint64_t dd = Depth(key);
-			const uint64_t ii = IndexI_SIMD(key); const uint64_t im1=ii-1; const uint64_t ip1=ii+1;
-			const uint64_t jj = IndexJ_SIMD(key); const uint64_t jm1=jj-1; const uint64_t jp1=jj+1;
-			const uint64_t kk = IndexK_SIMD(key); const uint64_t km1=kk-1; const uint64_t kp1=kk+1;
+			const uint64_t ii = IndexI_SIMD(key); uint64_t im1=ii-1; uint64_t ip1=ii+1;
+			const uint64_t jj = IndexJ_SIMD(key); uint64_t jm1=jj-1; uint64_t jp1=jj+1;
+			const uint64_t kk = IndexK_SIMD(key); uint64_t km1=kk-1; uint64_t kp1=kk+1;
+
+			[[maybe_unused]] const uint64_t N = (uint64_t{1} << dd) + 1;
+			if constexpr (Period&0b001) {im1%=N; ip1%=N;}
+			if constexpr (Period&0b010) {jm1%=N; jp1%=N;}
+			if constexpr (Period&0b100) {km1%=N; kp1%=N;}
+
 			return {
 				//bottom slice
-				T{MakeVertex(dd, im1, jm1, km1)},
-				T{MakeVertex(dd, ii , jm1, km1)},
-				T{MakeVertex(dd, ip1, jm1, km1)},
-				T{MakeVertex(dd, im1, jj , km1)},
-				T{MakeVertex(dd, ii , jj , km1)},
-				T{MakeVertex(dd, ip1, jj , km1)},
-				T{MakeVertex(dd, im1, jp1, km1)},
-				T{MakeVertex(dd, ii , jp1, km1)},
-				T{MakeVertex(dd, ip1, jp1, km1)},
+				T{MakeVertex<Period>(dd, im1, jm1, km1)},
+				T{MakeVertex<Period>(dd, ii , jm1, km1)},
+				T{MakeVertex<Period>(dd, ip1, jm1, km1)},
+				T{MakeVertex<Period>(dd, im1, jj , km1)},
+				T{MakeVertex<Period>(dd, ii , jj , km1)},
+				T{MakeVertex<Period>(dd, ip1, jj , km1)},
+				T{MakeVertex<Period>(dd, im1, jp1, km1)},
+				T{MakeVertex<Period>(dd, ii , jp1, km1)},
+				T{MakeVertex<Period>(dd, ip1, jp1, km1)},
 
 				//middle slice (remove center)
-				T{MakeVertex(dd, im1, jm1, kk)},
-				T{MakeVertex(dd, ii , jm1, kk)},
-				T{MakeVertex(dd, ip1, jm1, kk)},
-				T{MakeVertex(dd, im1, jj , kk)},
-				// T{MakeVertex(dd, ii , jj , kk)},
-				T{MakeVertex(dd, ip1, jj , kk)},
-				T{MakeVertex(dd, im1, jp1, kk)},
-				T{MakeVertex(dd, ii , jp1, kk)},
-				T{MakeVertex(dd, ip1, jp1, kk)},
+				T{MakeVertex<Period>(dd, im1, jm1, kk)},
+				T{MakeVertex<Period>(dd, ii , jm1, kk)},
+				T{MakeVertex<Period>(dd, ip1, jm1, kk)},
+				T{MakeVertex<Period>(dd, im1, jj , kk)},
+				// T{MakeVertex<Period>(dd, ii , jj , kk)},
+				T{MakeVertex<Period>(dd, ip1, jj , kk)},
+				T{MakeVertex<Period>(dd, im1, jp1, kk)},
+				T{MakeVertex<Period>(dd, ii , jp1, kk)},
+				T{MakeVertex<Period>(dd, ip1, jp1, kk)},
 
 				//top slice
-				T{MakeVertex(dd, im1, jm1, kp1)},
-				T{MakeVertex(dd, ii , jm1, kp1)},
-				T{MakeVertex(dd, ip1, jm1, kp1)},
-				T{MakeVertex(dd, im1, jj , kp1)},
-				T{MakeVertex(dd, ii , jj , kp1)},
-				T{MakeVertex(dd, ip1, jj , kp1)},
-				T{MakeVertex(dd, im1, jp1, kp1)},
-				T{MakeVertex(dd, ii , jp1, kp1)},
-				T{MakeVertex(dd, ip1, jp1, kp1)}
+				T{MakeVertex<Period>(dd, im1, jm1, kp1)},
+				T{MakeVertex<Period>(dd, ii , jm1, kp1)},
+				T{MakeVertex<Period>(dd, ip1, jm1, kp1)},
+				T{MakeVertex<Period>(dd, im1, jj , kp1)},
+				T{MakeVertex<Period>(dd, ii , jj , kp1)},
+				T{MakeVertex<Period>(dd, ip1, jj , kp1)},
+				T{MakeVertex<Period>(dd, im1, jp1, kp1)},
+				T{MakeVertex<Period>(dd, ii , jp1, kp1)},
+				T{MakeVertex<Period>(dd, ip1, jp1, kp1)}
 			};
 		}
 
 		GUTIL_DECLARE_SIMD()
+		template<uint8_t Period=0> requires(Period<8)
 		constexpr void GetVertexNeighbors_SIMD(uint64_t key, uint64_t* ptr) noexcept {
 			GUTIL_ASSERT(ptr!=nullptr);
 			GUTIL_ASSERT(Exists(key));
 			GUTIL_ASSERT(IsVertex(key));
 			GUTIL_ASSERT(IsCartesian(key));
 			const uint64_t dd = Depth(key);
-			const uint64_t ii = IndexI_SIMD(key); const uint64_t im1=ii-1; const uint64_t ip1=ii+1;
-			const uint64_t jj = IndexJ_SIMD(key); const uint64_t jm1=jj-1; const uint64_t jp1=jj+1;
-			const uint64_t kk = IndexK_SIMD(key); const uint64_t km1=kk-1; const uint64_t kp1=kk+1;
-				//bottom slice
-				ptr[0] = MakeVertex(dd, im1, jm1, km1);
-				ptr[1] = MakeVertex(dd, ii , jm1, km1);
-				ptr[2] = MakeVertex(dd, ip1, jm1, km1);
-				ptr[3] = MakeVertex(dd, im1, jj , km1);
-				ptr[4] = MakeVertex(dd, ii , jj , km1);
-				ptr[5] = MakeVertex(dd, ip1, jj , km1);
-				ptr[6] = MakeVertex(dd, im1, jp1, km1);
-				ptr[7] = MakeVertex(dd, ii , jp1, km1);
-				ptr[8] = MakeVertex(dd, ip1, jp1, km1);
+			const uint64_t ii = IndexI_SIMD(key); uint64_t im1=ii-1; uint64_t ip1=ii+1;
+			const uint64_t jj = IndexJ_SIMD(key); uint64_t jm1=jj-1; uint64_t jp1=jj+1;
+			const uint64_t kk = IndexK_SIMD(key); uint64_t km1=kk-1; uint64_t kp1=kk+1;
 
-				//middle slice (remove center)
-				ptr[9] = MakeVertex(dd, im1, jm1, kk);
-				ptr[10] = MakeVertex(dd, ii , jm1, kk);
-				ptr[11] = MakeVertex(dd, ip1, jm1, kk);
-				ptr[12] = MakeVertex(dd, im1, jj , kk);
-				// ptr[] = MakeVertex(dd, ii , jj , kk);
-				ptr[13] = MakeVertex(dd, ip1, jj , kk);
-				ptr[14] = MakeVertex(dd, im1, jp1, kk);
-				ptr[15] = MakeVertex(dd, ii , jp1, kk);
-				ptr[16] = MakeVertex(dd, ip1, jp1, kk);
+			[[maybe_unused]] const uint64_t N = (uint64_t{1} << dd) + 1;
+			if constexpr (Period&0b001) {im1%=N; ip1%=N;}
+			if constexpr (Period&0b010) {jm1%=N; jp1%=N;}
+			if constexpr (Period&0b100) {km1%=N; kp1%=N;}
 
-				//top slice
-				ptr[17] = MakeVertex(dd, im1, jm1, kp1);
-				ptr[18] = MakeVertex(dd, ii , jm1, kp1);
-				ptr[19] = MakeVertex(dd, ip1, jm1, kp1);
-				ptr[20] = MakeVertex(dd, im1, jj , kp1);
-				ptr[21] = MakeVertex(dd, ii , jj , kp1);
-				ptr[22] = MakeVertex(dd, ip1, jj , kp1);
-				ptr[23] = MakeVertex(dd, im1, jp1, kp1);
-				ptr[24] = MakeVertex(dd, ii , jp1, kp1);
-				ptr[25] = MakeVertex(dd, ip1, jp1, kp1);
+			//bottom slice
+			ptr[0]  = MakeVertex<Period>(dd, im1, jm1, km1);
+			ptr[1]  = MakeVertex<Period>(dd, ii , jm1, km1);
+			ptr[2]  = MakeVertex<Period>(dd, ip1, jm1, km1);
+			ptr[3]  = MakeVertex<Period>(dd, im1, jj , km1);
+			ptr[4]  = MakeVertex<Period>(dd, ii , jj , km1);
+			ptr[5]  = MakeVertex<Period>(dd, ip1, jj , km1);
+			ptr[6]  = MakeVertex<Period>(dd, im1, jp1, km1);
+			ptr[7]  = MakeVertex<Period>(dd, ii , jp1, km1);
+			ptr[8]  = MakeVertex<Period>(dd, ip1, jp1, km1);
+
+			//middle slice (remove center)
+			ptr[9]  = MakeVertex<Period>(dd, im1, jm1, kk);
+			ptr[10] = MakeVertex<Period>(dd, ii , jm1, kk);
+			ptr[11] = MakeVertex<Period>(dd, ip1, jm1, kk);
+			ptr[12] = MakeVertex<Period>(dd, im1, jj , kk);
+			//ptr[] = MakeVertex<Period>(dd, ii , jj , kk);
+			ptr[13] = MakeVertex<Period>(dd, ip1, jj , kk);
+			ptr[14] = MakeVertex<Period>(dd, im1, jp1, kk);
+			ptr[15] = MakeVertex<Period>(dd, ii , jp1, kk);
+			ptr[16] = MakeVertex<Period>(dd, ip1, jp1, kk);
+
+			//top slice
+			ptr[17] = MakeVertex<Period>(dd, im1, jm1, kp1);
+			ptr[18] = MakeVertex<Period>(dd, ii , jm1, kp1);
+			ptr[19] = MakeVertex<Period>(dd, ip1, jm1, kp1);
+			ptr[20] = MakeVertex<Period>(dd, im1, jj , kp1);
+			ptr[21] = MakeVertex<Period>(dd, ii , jj , kp1);
+			ptr[22] = MakeVertex<Period>(dd, ip1, jj , kp1);
+			ptr[23] = MakeVertex<Period>(dd, im1, jp1, kp1);
+			ptr[24] = MakeVertex<Period>(dd, ii , jp1, kp1);
+			ptr[25] = MakeVertex<Period>(dd, ip1, jp1, kp1);
 		}
 
 
@@ -832,93 +884,176 @@ namespace GV {
 		///////////////////////////////////////////////////////////
 		/// Vertex-Element adjacency
 		///////////////////////////////////////////////////////////
-		template<typename T=uint64_t>
+		template<typename T=uint64_t, uint8_t Period=0> requires(Period<8)
 		[[nodiscard]] inline constexpr std::array<T,8> GetElementsOfVertex(uint64_t key) noexcept {
 			GUTIL_ASSERT(Exists(key));
 			GUTIL_ASSERT(IsVertex(key));
 			GUTIL_ASSERT(IsCartesian(key));
 			const uint64_t dd = Depth(key);
-			const uint64_t ii = IndexI(key);
-			const uint64_t jj = IndexJ(key);
-			const uint64_t kk = IndexK(key);
+			
+			const uint64_t ii = IndexI(key); uint64_t im1 = ii-1;
+			const uint64_t jj = IndexJ(key); uint64_t jm1 = jj-1;
+			const uint64_t kk = IndexK(key); uint64_t km1 = kk-1;
+
+			[[maybe_unused]] const uint64_t N = uint64_t{1} << dd;
+			if constexpr (Period&0b001) {im1%=N;}
+			if constexpr (Period&0b010) {jm1%=N;}
+			if constexpr (Period&0b100) {km1%=N;}
+
 			//MakeElement will set any invalid elements to 0
 			return {
-				T{MakeElement(dd, ii-1, jj-1, kk-1)},
-				T{MakeElement(dd, ii  , jj-1, kk-1)},
-				T{MakeElement(dd, ii-1, jj  , kk-1)},
-				T{MakeElement(dd, ii  , jj  , kk-1)},
-				T{MakeElement(dd, ii-1, jj-1, kk  )},
-				T{MakeElement(dd, ii  , jj-1, kk  )},
-				T{MakeElement(dd, ii-1, jj  , kk  )},
-				T{MakeElement(dd, ii  , jj  , kk  )}
-			};
-		}
-
-		template<typename T=uint64_t>
-		[[nodiscard]] inline constexpr std::array<T,8> GetVerticesOfElement(uint64_t key) noexcept {
-			GUTIL_ASSERT(Exists(key));
-			GUTIL_ASSERT(IsElement(key));
-			key = DecodeElement(key);
-			const uint64_t dd = Depth(key);
-			const uint64_t ii = IndexI(key);
-			const uint64_t jj = IndexJ(key);
-			const uint64_t kk = IndexK(key);
-			//MakeVertex will set any invalid elements to 0
-			return {
-				T{MakeVertex(dd ,ii  , jj  , kk  )},
-				T{MakeVertex(dd ,ii+1, jj  , kk  )},
-				T{MakeVertex(dd ,ii  , jj+1, kk  )},
-				T{MakeVertex(dd ,ii+1, jj+1, kk  )},
-				T{MakeVertex(dd ,ii  , jj  , kk+1)},
-				T{MakeVertex(dd ,ii+1, jj  , kk+1)},
-				T{MakeVertex(dd ,ii  , jj+1, kk+1)},
-				T{MakeVertex(dd ,ii+1, jj+1, kk+1)}
+				T{MakeElement(dd, im1, jm1, km1)},
+				T{MakeElement(dd, ii,  jm1, km1)},
+				T{MakeElement(dd, im1, jj,  km1)},
+				T{MakeElement(dd, ii,  jj,  km1)},
+				T{MakeElement(dd, im1, jm1, kk )},
+				T{MakeElement(dd, ii,  jm1, kk )},
+				T{MakeElement(dd, im1, jj,  kk )},
+				T{MakeElement(dd, ii,  jj,  kk )}
 			};
 		}
 
 		GUTIL_DECLARE_SIMD()
+		template<uint8_t Period=0> requires(Period<8)
 		inline constexpr void GetElementsOfVertex_SIMD(uint64_t key, uint64_t* ptr) {
 			//ptr must be a pointer to the start of 8 allocated uint64_t values
 			GUTIL_ASSERT(ptr!=nullptr);
 			GUTIL_ASSERT(Exists(key));
 			GUTIL_ASSERT(IsVertex(key));
 			GUTIL_ASSERT(IsCartesian(key));
+
 			const uint64_t dd = Depth(key);
-			const uint64_t ii = IndexI_SIMD(key);
-			const uint64_t jj = IndexJ_SIMD(key);
-			const uint64_t kk = IndexK_SIMD(key);
+			const uint64_t ii = IndexI_SIMD(key); uint64_t im1 = ii-1;
+			const uint64_t jj = IndexJ_SIMD(key); uint64_t jm1 = jj-1;
+			const uint64_t kk = IndexK_SIMD(key); uint64_t km1 = kk-1;
+
+			[[maybe_unused]] const uint64_t N = uint64_t{1} << dd;
+			if constexpr (Period&0b001) {im1%=N;}
+			if constexpr (Period&0b010) {jm1%=N;}
+			if constexpr (Period&0b100) {km1%=N;}
+
 			//MakeElement will set any invalid elements to 0
-			*(ptr+0) = MakeElement(dd, ii-1, jj-1, kk-1);
-			*(ptr+1) = MakeElement(dd, ii  , jj-1, kk-1);
-			*(ptr+2) = MakeElement(dd, ii-1, jj  , kk-1);
-			*(ptr+3) = MakeElement(dd, ii  , jj  , kk-1);
-			*(ptr+4) = MakeElement(dd, ii-1, jj-1, kk  );
-			*(ptr+5) = MakeElement(dd, ii  , jj-1, kk  );
-			*(ptr+6) = MakeElement(dd, ii-1, jj  , kk  );
-			*(ptr+7) = MakeElement(dd, ii  , jj  , kk  );
+			*(ptr+0) = MakeElement(dd, im1, jm1, km1);
+			*(ptr+1) = MakeElement(dd, ii , jm1, km1);
+			*(ptr+2) = MakeElement(dd, im1, jj , km1);
+			*(ptr+3) = MakeElement(dd, ii , jj , km1);
+			*(ptr+4) = MakeElement(dd, im1, jm1, kk );
+			*(ptr+5) = MakeElement(dd, ii , jm1, kk );
+			*(ptr+6) = MakeElement(dd, im1, jj , kk );
+			*(ptr+7) = MakeElement(dd, ii , jj , kk );
+		}
+
+		template<typename T=uint64_t, uint8_t Period=0> requires(Period<8)
+		[[nodiscard]] inline constexpr std::array<T,8> GetVerticesOfElement(uint64_t key) noexcept {
+			GUTIL_ASSERT(Exists(key));
+			GUTIL_ASSERT(IsElement(key));
+			key = DecodeElement(key);
+
+			const uint64_t dd = Depth(key);
+			const uint64_t ii = IndexI(key); uint64_t ip1=ii+1;
+			const uint64_t jj = IndexJ(key); uint64_t jp1=jj+1;
+			const uint64_t kk = IndexK(key); uint64_t kp1=kk+1;
+
+			[[maybe_unused]] const uint64_t N = (uint64_t{1} << dd) + 1;
+			if constexpr (Period&0b001) {ip1%=N;}
+			if constexpr (Period&0b010) {jp1%=N;}
+			if constexpr (Period&0b100) {kp1%=N;}
+
+			//MakeVertex will set any invalid elements to 0
+			return {
+				T{MakeVertex<Period>(dd, ii , jj , kk )},
+				T{MakeVertex<Period>(dd, ip1, jj , kk )},
+				T{MakeVertex<Period>(dd, ii , jp1, kk )},
+				T{MakeVertex<Period>(dd, ip1, jp1, kk )},
+				T{MakeVertex<Period>(dd, ii , jj , kp1)},
+				T{MakeVertex<Period>(dd, ip1, jj , kp1)},
+				T{MakeVertex<Period>(dd, ii , jp1, kp1)},
+				T{MakeVertex<Period>(dd, ip1, jp1, kp1)}
+			};
 		}
 
 		GUTIL_DECLARE_SIMD()
-		void GetVerticesOfElement_SIMD(uint64_t key, uint64_t* ptr) {
+		template<uint8_t Period=0> requires(Period<8)
+		inline constexpr void GetVerticesOfElement_SIMD(uint64_t key, uint64_t* ptr) noexcept {
 			//ptr must be a pointer to the start of 8 allocated uint64_t values
 			GUTIL_ASSERT(ptr!=nullptr);
 			GUTIL_ASSERT(Exists(key));
 			GUTIL_ASSERT(IsElement(key));
 			GUTIL_ASSERT(IsCartesian(key));
+
 			const uint64_t dd = Depth(key);
-			const uint64_t ii = IndexI_SIMD(key);
-			const uint64_t jj = IndexJ_SIMD(key);
-			const uint64_t kk = IndexK_SIMD(key);
+			const uint64_t ii = IndexI_SIMD(key); uint64_t ip1 = ii+1;
+			const uint64_t jj = IndexJ_SIMD(key); uint64_t jp1 = jj+1;
+			const uint64_t kk = IndexK_SIMD(key); uint64_t kp1 = kk+1;
+
+			[[maybe_unused]] const uint64_t N = (uint64_t{1} << dd) + 1;
+			if constexpr (Period&0b001) {ip1%=N;}
+			if constexpr (Period&0b010) {jp1%=N;}
+			if constexpr (Period&0b100) {kp1%=N;}
+
 			//MakeVertex will set any invalid elements to 0
-			*(ptr+0) = MakeVertex(dd ,ii  , jj  , kk  );
-			*(ptr+1) = MakeVertex(dd ,ii+1, jj  , kk  );
-			*(ptr+2) = MakeVertex(dd ,ii  , jj+1, kk  );
-			*(ptr+3) = MakeVertex(dd ,ii+1, jj+1, kk  );
-			*(ptr+4) = MakeVertex(dd ,ii  , jj  , kk+1);
-			*(ptr+5) = MakeVertex(dd ,ii+1, jj  , kk+1);
-			*(ptr+6) = MakeVertex(dd ,ii  , jj+1, kk+1);
-			*(ptr+7) = MakeVertex(dd ,ii+1, jj+1, kk+1);
+			*(ptr+0) = MakeVertex<Period>(dd, ii , jj , kk );	//local index 0b000
+			*(ptr+1) = MakeVertex<Period>(dd, ip1, jj , kk );	//local index 0b100
+			*(ptr+2) = MakeVertex<Period>(dd, ii , jp1, kk );	//local index 0b010
+			*(ptr+3) = MakeVertex<Period>(dd, ip1, jp1, kk );	//local index 0b110
+			*(ptr+4) = MakeVertex<Period>(dd, ii , jj , kp1);	//local index 0b001
+			*(ptr+5) = MakeVertex<Period>(dd, ip1, jj , kp1);	//local index 0b101
+			*(ptr+6) = MakeVertex<Period>(dd, ii , jp1, kp1);	//local index 0b011
+			*(ptr+7) = MakeVertex<Period>(dd, ip1, jp1, kp1);	//local index 0b111
 		}
+
+		GUTIL_DECLARE_SIMD()
+		template<uint8_t Period=0> requires(Period<8)		
+		[[nodiscard]] inline constexpr uint8_t GetLocalVertexNumberCartesian_SIMD(uint64_t el, uint64_t vtx) noexcept {
+			GUTIL_ASSERT(Exists(el) && IsElement(el) && IsCartesian(el));
+			GUTIL_ASSERT(Exists(vtx) && IsVertex(vtx) && IsCartesian(vtx));
+			GUTIL_ASSERT(Depth(el) == Depth(vtx));
+
+			//use index pairity to determine the vertex number
+			//suppose vtx has last bits of its index V=0bkji, and the last bits of each index of el are E=0bKJI
+			//and the local index I=0bzyx.
+			//Looking at GetVerticesOfElement_SIMD, we see that z=0 when k==K and z=1 when k!=K, so we set z = k xor K
+			//the same follows for the other bits.
+
+			//Note the logic is the same for periodic vertices, just the meaning of WHERE the local vertex is changes
+			//the template is included for debugging only.
+
+			const uint8_t V = ((IndexK_SIMD(vtx)&1) << 2) | ((IndexJ_SIMD(vtx)&1) << 1) | (IndexI_SIMD(vtx)&1);
+			const uint8_t E = ((IndexK_SIMD(el)&1)  << 2) | ((IndexJ_SIMD(el)&1)  << 1) | (IndexI_SIMD(el)&1);
+
+			#ifndef NDEBUG
+				uint64_t check = GetVerticesOfElement<uint64_t,Period>(el)[V^E];
+				GUTIL_ASSERT(check==vtx);
+			#endif
+			return V^E;
+		}
+
+		GUTIL_DECLARE_SIMD()
+		template<uint8_t Period=0> requires(Period<8)
+		[[nodiscard]] inline constexpr uint8_t GetLocalVertexNumberMorton_SIMD(uint64_t el, uint64_t vtx) noexcept {
+			GUTIL_ASSERT(Exists(el) && IsElement(el) && IsMorton(el));
+			GUTIL_ASSERT(Exists(vtx) && IsVertex(vtx) && IsCartesian(vtx));
+			GUTIL_ASSERT(Depth(el) == Depth(vtx));
+
+			//use index pairity to determine the vertex number
+			//suppose vtx has last bits of its index V=0bkji, and the last bits of each index of el are E=0bKJI
+			//and the local index I=0bzyx.
+			//Looking at GetVerticesOfElement_SIMD, we see that z=0 when k==K and z=1 when k!=K, so we set z = k xor K
+			//the same follows for the other bits.
+
+			//Note the logic is the same for periodic vertices, just the meaning of WHERE the local vertex is changes
+			//the template is included for debugging only.
+
+			const uint8_t V = ((IndexK_SIMD(vtx)&1) << 2) | ((IndexJ_SIMD(vtx)&1) << 1) | (IndexI_SIMD(vtx)&1);
+			const uint8_t E = el & 0b111; //note the last index bits are immediately accessible
+
+			#ifndef NDEBUG
+				uint64_t check = GetVerticesOfElement<uint64_t,Period>(el)[V^E];
+				GUTIL_ASSERT(check==vtx);
+			#endif
+			return V^E;
+		}
+		
 	}//Mesh3D
 }//Keys
 }//GV

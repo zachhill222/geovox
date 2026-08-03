@@ -6,7 +6,6 @@
 #include "util/macros.hpp"
 
 #include "simd_keys/mesh/mesh_keys.hpp"
-// #include "mesh/keys/voxel_key.hpp"
 #include "mesh/vtk_file_io.hpp"
 #include "mesh/voxel_mesh_structured.hpp"
 
@@ -61,11 +60,13 @@ namespace GV {
 		using VoxelFace    = typename S_Layer_t::VoxelFace;
 		using GeoPoint_t   = typename S_Layer_t::GeoPoint_t;
 		using Box_t        = typename S_Layer_t::Box_t;
+		using Scalar_t     = typename GeoPoint_t::scalar_type;
 		using Mesh_t       = UnstructuredVoxelMesh<MaxDepth,T>;
+
 
 		static constexpr uint8_t MAX_DEPTH = MaxDepth;	//the maximum depth
 		static_assert(MAX_DEPTH <= S_Layer_t::MAX_DEPTH);
-		static constexpr uint64_t TOTAL_POSSIBLE_ELEMENTS = total_possible<VoxelElement>(MAX_DEPTH);
+		static constexpr uint64_t TOTAL_POSSIBLE_ELEMENTS = VoxelElement::elements_below_depth(MAX_DEPTH+1);
 
 		//random access iterator class to loop through the elements
 		//this wraps the individual vector iterators but wraps to the next depth if possible
@@ -74,11 +75,21 @@ namespace GV {
 		using VertexIterator   = IteratorBase<VoxelVertex,S_Layer_t,MAX_DEPTH,false>;
 		using CVertexIterator  = IteratorBase<VoxelVertex,S_Layer_t,MAX_DEPTH,true>;
 		
+		static_assert(std::random_access_iterator<ElementIterator>);
+		static_assert(std::random_access_iterator<CElementIterator>);
+		static_assert(std::random_access_iterator<VertexIterator>);
+		static_assert(std::random_access_iterator<CVertexIterator>);
+
+		//For some algorithms, it is useful to mark an element as being visited
+		//The top three bits in S_Layer_t::element_mask are free to use
+		static constexpr uint8_t VISITED_BIT = 0b0010000;
 
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Data
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		const Box_t box;
+		const GeoPoint_t diag;
+		const GeoPoint_t inv_diag;
 
 	protected:
 		std::array<S_Layer_t,MAX_DEPTH+1> s_layers{};	//the primary mesh storage
@@ -120,12 +131,24 @@ namespace GV {
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Constructors
 		/////////////////////////////////////////////////////////////////////////////////////////////////
-		UnstructuredVoxelMesh() : box{{0,0,0}, {1,1,1}} { init_depths(); set_depth(0); }
-		UnstructuredVoxelMesh(const Box_t& box, uint64_t depth=0) : box{box} { init_depths(); set_depth(depth); }
+		UnstructuredVoxelMesh() :
+			box{{0,0,0}, {1,1,1}}, 
+			diag{box.sidelength()}, 
+			inv_diag{Scalar_t{1}/diag} 
+			{ init_depths(); set_depth(0); }
+		
+		UnstructuredVoxelMesh(const Box_t& box, uint64_t depth=0) : 
+			box{box}, 
+			diag{box.sidelength()}, 
+			inv_diag{Scalar_t{1}/diag} 
+			{ init_depths(); set_depth(depth); }
 
 		UnstructuredVoxelMesh(const UnstructuredVoxelMesh&) = delete;
+
 		UnstructuredVoxelMesh(UnstructuredVoxelMesh&& other) :
 			box{std::move(other.box)},
+			diag{box.sidelength()}, 
+			inv_diag{Scalar_t{1}/diag},
 			s_layers{std::move(other.s_layers)} {}
 		
 		UnstructuredVoxelMesh& operator=(const UnstructuredVoxelMesh&) = delete;
@@ -137,6 +160,13 @@ namespace GV {
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		[[nodiscard]] bool is_active(VoxelElement el) const noexcept { return s_layers[el.depth()].is_active(el); }
 		[[nodiscard]] uint8_t read_depth(VoxelElement el) const noexcept { return s_layers[el.depth()].read_depth(el);}
+		[[nodiscard]] bool is_visited(VoxelElement el) const noexcept { return s_layers[el.depth()].element_mask[el.linear_index()] & VISITED_BIT; }
+		[[maybe_unused]] bool set_visited(VoxelElement el, bool val) const noexcept { 
+			uint8_t& byte = s_layers[el.depth()].element_mask[el.linear_index()];
+			const bool changed = (byte&VISITED_BIT) == val;
+			if (changed) { val ? byte|=VISITED_BIT : byte&=~VISITED_BIT; }
+			return changed;
+		}
 		[[nodiscard]] const S_Layer_t& get_layer(uint64_t dd) const noexcept {
 			GUTIL_ASSERT(dd<=MAX_DEPTH)
 			return s_layers[dd];
@@ -188,12 +218,55 @@ namespace GV {
 		}
 
 
+		//find the active element that the point belongs to and transform to the reference coordinate in [-1,1]^3
+		GUTIL_DECLARE_SIMD()
+		uint64_t find_element_raw_key(Scalar_t* x, Scalar_t* y, Scalar_t* z) const noexcept {
+			uint64_t result{0};
+
+			//get normalized coordinate at depth 0 as local values
+			Scalar_t lx = Scalar_t{2}*( *x - box.low[0])*inv_diag[0] - Scalar_t{1};
+			Scalar_t ly = Scalar_t{2}*( *y - box.low[1])*inv_diag[1] - Scalar_t{1};
+			Scalar_t lz = Scalar_t{2}*( *z - box.low[2])*inv_diag[2] - Scalar_t{1};
+			GUTIL_ASSERT(Scalar_t{-1} <= x && x <= Scalar_t{1});
+			GUTIL_ASSERT(Scalar_t{-1} <= y && y <= Scalar_t{1});
+			GUTIL_ASSERT(Scalar_t{-1} <= z && z <= Scalar_t{1});
+
+			//get the element at each depth that contains the point
+			//the x,y,z values should not correspond to a vertex for predicable results
+			VoxelElement el{0,0};						//current element
+			for (uint8_t dd=0; dd<=MAX_DEPTH; ++dd) {
+				
+				if (s_layers[dd].is_active(el.linear_index_simd())) {
+					result = el.key;
+					*x     = lx;
+					*y     = ly;
+					*z     = lz;
+				}
+				
+
+				//get the child/octant the point belongs to
+				uint64_t idx = 0;
+				if (lx>Scalar_t{0}) {idx|=0b001;}
+				if (ly>Scalar_t{0}) {idx|=0b010;}
+				if (lz>Scalar_t{0}) {idx|=0b100;}
+
+				//go to new element (get the distance to the new center and re-scale)
+				el = el.children_simd() + idx;
+				lx = Scalar_t{2}*( lx - ((idx&0b001) ? Scalar_t{0.5} : -Scalar_t{0.5}) );
+				ly = Scalar_t{2}*( ly - ((idx&0b010) ? Scalar_t{0.5} : -Scalar_t{0.5}) );
+				lz = Scalar_t{2}*( lz - ((idx&0b100) ? Scalar_t{0.5} : -Scalar_t{0.5}) );
+			}
+			return result;
+		}
+
+
+
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Methods for assigning DOFs to features
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		[[nodiscard]] bool is_conformal(VoxelElement el) const noexcept {
 			//all active elements are trivially conformal as they do not overlap
-			assert(el.exists());
+			GUTIL_ASSERT(el.exists());
 			return is_active(el);
 		}
 
@@ -202,7 +275,7 @@ namespace GV {
 			//a face/vertex is conformal if all of its elements at its depth are active
 			//for assigning dofs, the depth of the vertex is essential, so we do not
 			//check if there is an 'equivalent' conformal vertex at the same geometric location
-			assert(f.is_valid());
+			GUTIL_ASSERT(f.is_valid());
 			const uint64_t dd = f.depth();
 			for (VoxelElement el : f.elements()) {
 				if (el.exists()) {
@@ -210,6 +283,57 @@ namespace GV {
 				}
 			}
 			return true;
+		}
+
+
+		template<uint8_t Period> requires(Period<8)
+		[[nodiscard]] bool is_geometrically_conformal(Keys::VoxelVertex<Period> vtx) const noexcept {
+		    using P_Elem_t = Keys::VoxelElement<Period>;
+		    using P_Vert_t = Keys::VoxelVertex<Period>;
+
+		    P_Vert_t native = vtx.reduced_key();
+		    const uint8_t native_depth = native.depth_u8();
+		    if (native_depth==0) {return true;}
+
+		    const uint64_t par = native.kji_pairity_simd();
+		    const uint64_t bi = (par&0b001) ? 0 : 1;
+		    const uint64_t bj = (par&0b010) ? 0 : 1;
+		    const uint64_t bk = (par&0b100) ? 0 : 1;
+
+		    const uint64_t dd = native_depth-1;
+		    const uint64_t n_el = uint64_t{1} << dd;
+
+		    //el_idx[0]/[2]/[4] = the LOW candidate (q-1 when bi=1, else q); [1]/[3]/[5] = the HIGH (q)
+		    int64_t el_idx[6];
+		    el_idx[0] = static_cast<int64_t>(native.i()/2) - static_cast<int64_t>(bi);
+		    el_idx[2] = static_cast<int64_t>(native.j()/2) - static_cast<int64_t>(bj);
+		    el_idx[4] = static_cast<int64_t>(native.k()/2) - static_cast<int64_t>(bk);
+		    el_idx[1] = el_idx[0] + bi;
+		    el_idx[3] = el_idx[2] + bj;
+		    el_idx[5] = el_idx[4] + bk;
+
+		    //periodic wrap: only relevant when bi=1 (the low candidate was actually computed) and it went negative
+		    if constexpr (Period&0b001) {if (bi==1 && el_idx[0]<0) {el_idx[0]=n_el-1;} }
+		    if constexpr (Period&0b010) {if (bj==1 && el_idx[2]<0) {el_idx[2]=n_el-1;} }
+		    if constexpr (Period&0b100) {if (bk==1 && el_idx[4]<0) {el_idx[4]=n_el-1;} }
+
+		    for (uint64_t di=0; di<=bi; ++di) {
+		        if (el_idx[di]<0) { continue; }
+		        for (uint64_t dj=0; dj<=bj; ++dj) {
+		            if (el_idx[2+dj]<0) { continue; }
+		            for (uint64_t dk=0; dk<=bk; ++dk) {
+		                if (el_idx[4+dk]<0) { continue; }
+		                P_Elem_t elem{dd, static_cast<uint64_t>(el_idx[di]),
+		                                  static_cast<uint64_t>(el_idx[2+dj]),
+		                                  static_cast<uint64_t>(el_idx[4+dk])};
+		                if (!elem.exists()) { continue; }
+		                if (s_layers[dd].is_active(elem.linear_index())) {
+	                		GUTIL_ERROR("\n", vtx, " -> ", native, " ", elem);
+		                	return false; }
+		            }
+		        }
+		    }
+		    return true;
 		}
 
 		[[nodiscard]] VoxelVertex get_conformal(VoxelVertex vtx) const noexcept {
@@ -341,7 +465,7 @@ namespace GV {
 		}
 
 		void synchronize_depth_field() noexcept;
-
+		void propagate_depth_field(VoxelElement el) noexcept;
 		void process_unrefine() noexcept;
 
 		template<typename Predicate = std::nullptr_t>
@@ -455,29 +579,58 @@ namespace GV {
 			}
 			large_pool.wait_idle();
 		}
+		
+		#ifdef _OPENMP
+			const int n_threads = omp_get_max_threads()/2;
+		#else
+			const int n_threads = 1;
+		#endif
+		
+		//we can process in 2 parallel batches due to the 2-1 rule
+		//deactivate specified elements and its siblings at level dd,
+		//then activate its parent at level dd-1
 
+		//In order to update the depth field, track which elements were newely activated/deactivated.
+		std::vector<std::array<std::vector<VoxelElement>,MAX_DEPTH+1>> updated(n_threads);
 		{
-			//we can process in 2 parallel batches due to the 2-1 rule
-			//deactivate specified elements and its siblings at level dd,
-			//then activate its parent at level dd-1
 			auto job = [&](uint64_t dd) {
-				GUTIL_OMP(parallel for num_threads(omp_get_max_threads()/2) if(request_unrefine[dd].size()>4096))
-				for (size_t i=0; i<request_unrefine[dd].size(); ++i) {
-					VoxelElement el = request_unrefine[dd][i];
-					s_layers[dd+1].set_active(el.children(), false);
-					s_layers[dd].set_active(el, true);
+				GUTIL_OMP(parallel num_threads(n_threads))
+				{
+					auto& list = updated[omp_get_thread_num()][dd];
+					GUTIL_OMP(for schedule(guided,512))
+					for (size_t i=0; i<request_unrefine[dd].size(); ++i) {
+						VoxelElement el = request_unrefine[dd][i];
+						auto chi = el.children();
+						s_layers[dd+1].set_active(chi, false);
+						s_layers[dd].set_active(el, true);
+						list.push_back(el);
+						list.insert(list.end(), chi.begin(), chi.end());
+					}
 				}
 				request_unrefine[dd].clear();
 			};
 
-			for (uint64_t dd=0; dd<MAX_DEPTH; dd+=2) {large_pool.submit(job,dd);}
+			for (uint8_t dd=0; dd<MAX_DEPTH; dd+=2) {large_pool.submit(job,dd);}
 			large_pool.wait_idle();
 
-			for (uint64_t dd=1; dd<MAX_DEPTH; dd+=2) {large_pool.submit(job,dd);}
+			for (uint8_t dd=1; dd<MAX_DEPTH; dd+=2) {large_pool.submit(job,dd);}
 			large_pool.wait_idle();
 		}
 
-		synchronize_depth_field();
+		//join per-thread activation results
+		for (uint8_t dd=0; dd<=MAX_DEPTH; ++dd) {
+			for (int tid=1; tid<n_threads; ++tid) {
+				updated[0][dd].insert(updated[0][dd].end(), 
+					std::make_move_iterator(updated[tid][dd].begin()), std::make_move_iterator(updated[tid][dd].end()));
+			}
+		}
+
+		// update depth field
+		for (int8_t dd=MAX_DEPTH; dd>=0; --dd) {
+			for (VoxelElement el : updated[0][dd]) {
+				propagate_depth_field(el);
+			}
+		}
 	}
 
 	template<uint8_t MaxDepth,typename T>
@@ -504,19 +657,37 @@ namespace GV {
 		//we can process in 2 parallel batches due to the 2-1 rule
 		//deactivate specified elements at level dd,
 		//then activate its children that satisfy the predicate at level dd+1
+		//
+		//In order to update the depth field, track which elements were newely activated/deactivated.
+		#ifdef _OPENMP
+			const int n_threads = omp_get_max_threads()/2;
+		#else
+			const int n_threads = 1;
+		#endif
+		std::vector<std::array<std::vector<VoxelElement>,MAX_DEPTH+1>> updated(n_threads);
+
 		auto job = [&](uint8_t dd) {
-			GUTIL_OMP(parallel for num_threads(omp_get_max_threads()/2) if(request_refine[dd].size()>4096) schedule(guided,512))
-			for (size_t i=0; i<request_refine[dd].size(); ++i) {
-				VoxelElement el = request_refine[dd][i];
-				s_layers[dd].set_active(el, false);
-				
-				if constexpr (NULLPTR_T<Predicate>) {
-					s_layers[dd+1].set_active(el.children(), true);
-				}
-				else {
-					for (VoxelElement chi : el.children()) {
-						if (pred(chi)) {
-							s_layers[dd+1].set_active(chi,true);
+			GUTIL_OMP(parallel num_threads(n_threads))
+			{
+				auto& list_d0 = updated[omp_get_thread_num()][dd];
+				auto& list_d1 = updated[omp_get_thread_num()][dd+1];
+				GUTIL_OMP(for schedule(guided,512))
+				for (size_t i=0; i<request_refine[dd].size(); ++i) {
+					VoxelElement el = request_refine[dd][i];
+					s_layers[dd].set_active(el, false);
+					list_d0.push_back(el);
+
+					if constexpr (NULLPTR_T<Predicate>) {
+						auto chi = el.children();
+						s_layers[dd+1].set_active(chi, true);
+						list_d1.insert(list_d1.end(), chi.begin(), chi.end());
+					}
+					else {
+						for (VoxelElement chi : el.children()) {
+							if (pred(chi)) {
+								s_layers[dd+1].set_active(chi,true);
+								list_d1.push_back(chi);
+							}
 						}
 					}
 				}
@@ -530,7 +701,20 @@ namespace GV {
 		for (uint8_t dd=1; dd<MAX_DEPTH; dd+=2) {large_pool.submit(job,dd);}
 		large_pool.wait_idle();
 
-		synchronize_depth_field();
+		//join per-thread activation results
+		for (uint8_t dd=0; dd<=MAX_DEPTH; ++dd) {
+			for (int tid=1; tid<n_threads; ++tid) {
+				updated[0][dd].insert(updated[0][dd].end(), 
+					std::make_move_iterator(updated[tid][dd].begin()), std::make_move_iterator(updated[tid][dd].end()));
+			}
+		}
+
+		// update depth field
+		for (int8_t dd=MAX_DEPTH; dd>=0; --dd) {
+			for (VoxelElement el : updated[0][dd]) {
+				propagate_depth_field(el);
+			}
+		}
 	}
 
 	template<uint8_t MaxDepth,typename T>
@@ -558,6 +742,34 @@ namespace GV {
 		}
 	}
 
+	template<uint8_t MaxDepth,typename T>
+	void UnstructuredVoxelMesh<MaxDepth,T>::propagate_depth_field(VoxelElement el) noexcept {
+		const bool now_active = is_active(el);
+		const uint8_t dd = el.depth_u8();
+		uint8_t new_depth = now_active ? dd : 0;
+		if (!now_active) {
+			for (VoxelElement c : el.children()) {
+				if (c.exists() && c.depth()<=MAX_DEPTH) {
+					new_depth = std::max(new_depth, s_layers[dd+1].read_depth(c));
+				}
+			}
+		}
+		s_layers[dd].set_depth(el, new_depth);
+
+		VoxelElement cur = el;
+		while (cur.depth() > 0) {
+			VoxelElement parent = cur.parent();
+			uint8_t pd = parent.depth_u8();
+			uint8_t old_val = s_layers[pd].read_depth(parent);
+			uint8_t new_val = s_layers[pd].is_active(parent) ? pd : 0;
+			if (!s_layers[pd].is_active(parent)) {
+				for (VoxelElement c : parent.children()) { new_val = std::max(new_val, s_layers[pd+1].read_depth(c)); }
+			}
+			if (new_val == old_val) break;   // nothing above this can change either
+			s_layers[pd].set_depth(parent, new_val);
+			cur = parent;
+		}
+	}
 
 	
 	//////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -569,7 +781,7 @@ namespace GV {
 			requires( std::same_as<Feature_t, typename LayerMesh_t::VoxelElement> || std::same_as<Feature_t, typename LayerMesh_t::VoxelVertex>)
 	struct IteratorBase	{
 		//necessary aliases for the standard library
-		using iterator_category = std::forward_iterator_tag;
+		using iterator_category = std::random_access_iterator_tag;
 		using value_type		= Feature_t;
 		using difference_type	= std::ptrdiff_t;
 		using pointer			= std::conditional_t<CONST_FLAG, Feature_t const*, Feature_t*>;
@@ -603,6 +815,12 @@ namespace GV {
 		uint64_t idx;
 		
 		//constructor
+		IteratorBase() : layers{nullptr}, depth{0}, idx{0} {}
+		IteratorBase(const IteratorBase&) = default;
+		IteratorBase(IteratorBase&&) = default;
+		IteratorBase& operator=(const IteratorBase&) = default;
+		IteratorBase& operator=(IteratorBase&&) = default;
+		
 		IteratorBase(container_ref layers, uint64_t dd, uint64_t ii) : layers(&layers), depth(dd), idx(ii) {advance_to_valid();}
 		IteratorBase(container_ref layers, uint64_t n) : layers(&layers), depth(0), idx(0) {(*this)+=n; advance_to_valid();}
 
@@ -668,10 +886,21 @@ namespace GV {
 			return tmp;
 		}
 
-		IteratorBase& operator+=(uint64_t n) {
+		IteratorBase& operator--() {
+			*this = IteratorBase(*layers, index()-1);
+			return *this;
+		}
+
+		IteratorBase operator--(int) {
+			IteratorBase tmp = *this;
+			--(*this);
+			return tmp;
+		}
+
+		IteratorBase& operator+=(difference_type n) {
 			//move to the correct depth and update the increment
 			while (n>0 && depth<=MAX_DEPTH) {
-				const uint64_t remaining_in_depth = get_list(depth).size() - idx;
+				const difference_type remaining_in_depth = get_list(depth).size() - idx;
 				if (n<remaining_in_depth) {idx += n; n=0;}
 				else {
 					n -= remaining_in_depth;
@@ -683,24 +912,24 @@ namespace GV {
 			return *this;
 		}
 
-		IteratorBase operator+(uint64_t n) const {
+		IteratorBase operator+(difference_type n) const {
 			IteratorBase tmp = *this;
 			tmp+=n;
 			return tmp;
 		}
 
-		friend IteratorBase operator+(uint64_t n, const IteratorBase& it) {
+		friend IteratorBase operator+(difference_type n, const IteratorBase& it) {
 			return it+n;
 		}
 
-		IteratorBase& operator-=(uint64_t n) {
-			uint64_t flat = index();
+		IteratorBase& operator-=(difference_type n) {
+			difference_type flat = index();
 			assert(n<=flat);
 			*this = IteratorBase(*layers, flat-n);
 			return *this;
 		}
 
-		IteratorBase operator-(uint64_t n) const {
+		IteratorBase operator-(difference_type n) const {
 			IteratorBase tmp = *this;
 			tmp-=n;
 			return tmp;

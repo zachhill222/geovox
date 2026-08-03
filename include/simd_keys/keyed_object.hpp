@@ -10,10 +10,14 @@ namespace Keys {
 	////////////////////////////////////////////////////////////
 	template<uint64_t Identifier>
 	struct KeyedObject {
+		//a tag for determining which mesh feature this corresponds to
 		static constexpr uint64_t ID = Identifier;
 		uint64_t key;
-		constexpr explicit KeyedObject(uint64_t k) : key{k} {}
-		constexpr operator uint64_t() const {return key;}
+
+		//treat this type as a uint64_t with a extra features
+		constexpr KeyedObject() noexcept : key{0} {}
+		explicit constexpr KeyedObject(uint64_t k) noexcept : key{k} {}
+		[[nodiscard]] explicit constexpr operator uint64_t() const noexcept {return key;}
 	};
 
 

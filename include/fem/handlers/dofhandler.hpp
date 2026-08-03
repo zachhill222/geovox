@@ -2,12 +2,15 @@
 
 #include "gutil.hpp"
 
+#include "simd_keys/mesh/mesh_keys.hpp"
+
 #include <concepts>
 #include <cstdint>
 #include <vector>
 #include <span>
 #include <type_traits>
 #include <algorithm>
+#include <mutex>
 
 namespace GV {
 
@@ -49,14 +52,6 @@ namespace GV {
 			mesh.vertex_begin(0);  mesh.vertex_end(0);
 		};
 
-	template<VoxelMeshType Mesh_t, typename DOF_t>
-	struct AssignableFeature {
-		using type = std::conditional_t< std::same_as< typename DOF_t::Key_t::NonPeriodicVariant, typename Mesh_t::VoxelVertex>,  typename Mesh_t::VoxelVertex,
-					 std::conditional_t< std::same_as< typename DOF_t::Key_t::NonPeriodicVariant, typename Mesh_t::VoxelElement>, typename Mesh_t::VoxelElement,
-					 std::conditional_t< std::same_as< typename DOF_t::Key_t::NonPeriodicVariant, typename Mesh_t::VoxelFace>,    typename Mesh_t::VoxelFace,
-					 void>>>;
-	};
-
 
 	/////////////////////////////////////////////////////////////////////////////
 	/// DOF handler class.
@@ -69,48 +64,57 @@ namespace GV {
 	/// the mesh key and back. Note that this casting will produce vertex 0 as the output for dof keys at 0 and 4,
 	/// so we then check for equality.
 	/////////////////////////////////////////////////////////////////////////////
-	template<VoxelMeshType MeshType, typename DOFType> requires (!std::same_as<typename AssignableFeature<MeshType,DOFType>::type, void>) 
+	template<VoxelMeshType MeshType, typename DofType>
 	struct DofHandler {
 
 
 		/////////////////////////////////////////////////////////////////////////
 		/// Aliases and constants
 		/////////////////////////////////////////////////////////////////////////
-		using Mesh_t = MeshType;
-		using DOF_t  = DOFType;
-		using Elem_t = typename Mesh_t::VoxelElement;
-		using D_KEY  = typename DOF_t::Key_t;
-		using M_KEY  = typename D_KEY::NonPeriodicVariant;
-		static_assert(std::same_as<M_KEY, typename AssignableFeature<Mesh_t,DOF_t>::type>);
+		static constexpr bool VERTEX_DOF  = DofType::ID == Keys::Mesh3D::VERTEX_FLAG;
+		static constexpr bool ELEMENT_DOF = DofType::ID == Keys::Mesh3D::ELEMENT_FLAG;
+		static constexpr bool FACE_DOF    = DofType::ID == Keys::Mesh3D::FACE_FLAG;
+		
+		//DOF features may be periodic
+		using DOF_t        = DofType;
+		using DofVert_t    = Keys::VoxelVertex<DOF_t::PERIOD>;
+		using DofElem_t    = Keys::VoxelElement<DOF_t::PERIOD>;
+		using DofFeature_t = std::conditional_t<VERTEX_DOF, DofVert_t, std::conditional_t<ELEMENT_DOF, DofElem_t, void>>;
+		static_assert(!std::same_as<DofFeature_t,void>);
 
-		static constexpr uint64_t MAX_DEPTH           = Mesh_t::MAX_DEPTH;
+		//Mesh features are never periodic
+		using Mesh_t        = MeshType;
+		using MeshElem_t    = typename Mesh_t::VoxelElement;
+		using MeshVert_t    = typename Mesh_t::VoxelVertex;
+		using MeshFeature_t = std::conditional_t<VERTEX_DOF, MeshVert_t, std::conditional_t<ELEMENT_DOF, MeshElem_t, void>>;
+		static_assert(!std::same_as<MeshFeature_t,void>);
+
 		static constexpr bool IS_DEPTH_SEPARABLE      = DepthSeparableVoxelMeshType<Mesh_t>;
-		static constexpr uint64_t TOTAL_POSSIBLE_DOFS = total_possible<M_KEY>(MAX_DEPTH);
+		static constexpr uint8_t MAX_DEPTH            = Mesh_t::MAX_DEPTH;
+		static constexpr uint64_t TOTAL_POSSIBLE_DOFS = DOF_t::total_possible(MAX_DEPTH);
 
-		static constexpr bool VERTEX_DOF  = std::same_as<M_KEY, typename Mesh_t::VoxelVertex>;
-		static constexpr bool ELEMENT_DOF = std::same_as<M_KEY, typename Mesh_t::VoxelElement>;
-		static constexpr bool FACE_DOF    = std::same_as<M_KEY, typename Mesh_t::VoxelFace>;
-
-		static constexpr unsigned char ACTIVE_BIT 			  = 1;	//0b00000001
-		static constexpr unsigned char REFINED_BIT 			  = 2;	//0b00000010
-		static constexpr unsigned char EXPLICLY_REFINABLE_BIT = 4;	//0b00000100
-		static constexpr unsigned char FREE_BITS = ~(ACTIVE_BIT | REFINED_BIT | EXPLICLY_REFINABLE_BIT);
+		static constexpr uint8_t ACTIVE_BIT 			= 0b00000001;
+		static constexpr uint8_t REFINED_BIT 			= 0b00000010;
+		static constexpr uint8_t EXPLICLY_REFINABLE_BIT = 0b00000100;
+		static constexpr uint8_t COEF_MARKED_BIT        = 0b00001000;	//one coef handler per dof handler (it can handle multiple fields)
+		static constexpr uint8_t FREE_BITS 	            = 0b11110000;
 
 		/////////////////////////////////////////////////////////////////////////
-		/// Storage. Store a vector<unsigned char> for O(1) active queries.
+		/// Storage. Store a vector<uint8_t> for O(1) active queries.
 		/// Additionally, store a compressed list of active dofs for tracking
 		/// global DOF numbers. It is essential for fast quadrature that we may
 		/// look up all active DOFs whos support OVERLAPS a given active element.
 		///
-		/// Using unsigned char instead of bool guarantees thread safe access of different elements
+		/// Using uint8_t instead of bool guarantees thread safe access of different elements
 		/// and allows one bit to be used for an "is active" flag and another bit for
 		/// "has been refined" flag, which is useful for hierarchical methods. Additionally,
 		/// it gives us 6 more bits that could be used for other purposes.
 		/////////////////////////////////////////////////////////////////////////
-		std::vector<unsigned char> dof_mask;
+		mutable std::vector<uint8_t> dof_mask;	//DO NOT CHANGE FROM OUTSIDE THIS CLASS UNLESS THERE IS AN EXPLICIT REASON
 		std::vector<DOF_t> active_dofs{};
 		gutil::BinSort<DOF_t> active_dof_sorter;
 		mutable gutil::ThreadPool threads{};
+		mutable std::mutex mtx;
 		const Mesh_t& mesh;
 
 		/////////////////////////////////////////////////////////////////////////
@@ -181,22 +185,29 @@ namespace GV {
 			else {assert(false); return 0;}
 		}
 
+		template<typename Elem_t> requires (std::same_as<Elem_t,MeshElem_t> || std::same_as<Elem_t,DofElem_t>)
 		[[nodiscard]] static constexpr auto features(Elem_t el) noexcept {
 			if constexpr (VERTEX_DOF) { return el.vertices(); }
 			else if constexpr (ELEMENT_DOF) { return std::array<Elem_t,1>{el}; }
 			else { return el.faces(); }
 		}
 
-		[[nodiscard]] static constexpr auto elements(M_KEY key) noexcept {
-			if constexpr (VERTEX_DOF) { return key.elements(); }
-			else if constexpr (ELEMENT_DOF) { return std::array<Elem_t,1>{key}; }
-			else { return key.elements(); }
+		template<typename Feature_t> requires (std::same_as<Feature_t,MeshFeature_t> || std::same_as<Feature_t,DofElem_t>)
+		[[nodiscard]] static constexpr auto elements(Feature_t feat) noexcept {
+			if constexpr (ELEMENT_DOF) { return std::array<Feature_t,1>{feat}; }
+			else { return feat.elements(); }
+		}
+
+		[[nodiscard]] static constexpr DofFeature_t feature(DOF_t dof) noexcept {
+			return DofFeature_t{dof.key};
 		}
 
 
 		/////////////////////////////////////////////////////////////////////////
 		/// Utility methods. The set_* methods return true if the status changed.
 		/////////////////////////////////////////////////////////////////////////
+		void wait() const noexcept { threads.wait_idle(); }
+
 		[[nodiscard]] bool is_active(DOF_t dof) const noexcept {
 			GUTIL_ASSERT(dof.is_valid());
 			return ACTIVE_BIT & dof_mask[dof.linear_index()];
@@ -207,21 +218,33 @@ namespace GV {
 			return REFINED_BIT & dof_mask[dof.linear_index()];
 		}
 
+		[[nodiscard]] bool is_coef_marked(DOF_t dof) const noexcept {
+			GUTIL_ASSERT(dof.is_valid());
+			return COEF_MARKED_BIT & dof_mask[dof.linear_index()];
+		}
+
+		GUTIL_DECLARE_SIMD()
 		[[nodiscard]] bool is_active(uint64_t d_idx) const noexcept {
 			GUTIL_ASSERT(d_idx < TOTAL_POSSIBLE_DOFS);
 			return ACTIVE_BIT & dof_mask[d_idx];
 		}
 
+		GUTIL_DECLARE_SIMD()
 		[[nodiscard]] bool is_refined(uint64_t d_idx) const noexcept {
 			GUTIL_ASSERT(d_idx < TOTAL_POSSIBLE_DOFS);
 			return REFINED_BIT & dof_mask[d_idx];
 		}
 
-		void wait() const noexcept { threads.wait_idle(); }
+		GUTIL_DECLARE_SIMD()
+		[[nodiscard]] bool is_coef_marked(uint64_t d_idx) const noexcept {
+			GUTIL_ASSERT(d_idx < TOTAL_POSSIBLE_DOFS);
+			return COEF_MARKED_BIT & dof_mask[d_idx];
+		}
 
 		[[maybe_unused]] bool set_active(DOF_t dof, bool val) noexcept {
 			GUTIL_ASSERT(dof.is_valid())
 			const uint64_t d_idx = dof.linear_index();
+			// std::lock_guard<std::mutex> lock(mtx);
 			const bool old = dof_mask[d_idx]&ACTIVE_BIT;
 			if (old==val) {return false;}
 			val ? dof_mask[d_idx]|=ACTIVE_BIT : dof_mask[d_idx]&=~ACTIVE_BIT;
@@ -237,9 +260,19 @@ namespace GV {
 			return true;
 		}
 
+		[[maybe_unused]] bool set_coef_marked(DOF_t dof, bool val) const noexcept {
+			GUTIL_ASSERT(dof.is_valid());
+			const uint64_t d_idx = dof.linear_index();
+			const bool old = dof_mask[d_idx]&COEF_MARKED_BIT;
+			if (old==val) {return false;}
+			val ? dof_mask[d_idx]|=COEF_MARKED_BIT : dof_mask[d_idx]&=~COEF_MARKED_BIT;
+			return true;
+		}
+
 		GUTIL_DECLARE_SIMD()
 		[[maybe_unused]] bool set_active(uint64_t d_idx, bool val) noexcept {
 			GUTIL_ASSERT(d_idx < TOTAL_POSSIBLE_DOFS)
+			// std::lock_guard<std::mutex> lock(mtx);
 			const bool old = dof_mask[d_idx]&ACTIVE_BIT;
 			if (old==val) {return false;}
 			val ? dof_mask[d_idx]|=ACTIVE_BIT : dof_mask[d_idx]&=~ACTIVE_BIT;
@@ -255,19 +288,28 @@ namespace GV {
 			return true;
 		}
 
+		[[maybe_unused]] bool set_coef_marked(uint64_t d_idx, bool val) const noexcept {
+			GUTIL_ASSERT(d_idx < TOTAL_POSSIBLE_DOFS)
+			const bool old = dof_mask[d_idx]&COEF_MARKED_BIT;
+			if (old==val) {return false;}
+			val ? dof_mask[d_idx]|=COEF_MARKED_BIT : dof_mask[d_idx]&=~COEF_MARKED_BIT;
+			return true;
+		}
+
 		[[nodiscard]] static constexpr int dof_bin(DOF_t dof) noexcept {
 			int bin = 0;
-			const uint64_t dd = dof.key.depth();
+			const uint64_t dd = dof.depth();
 			const uint64_t split = (dd>0) ? (uint64_t{1}<<(dd-1)) : 0;	//split the index space into 8 octants. ties go to lower bin.
 			
-			if (dof.key.i() > split) { bin |= 1;}
-			if (dof.key.j() > split) { bin |= 2;}
-			if (dof.key.k() > split) { bin |= 4;}
+			if (dof.i() > split) { bin |= 1;}
+			if (dof.j() > split) { bin |= 2;}
+			if (dof.k() > split) { bin |= 4;}
 			return bin;
 		}
 
 		[[nodiscard]] static constexpr bool is_dof_odd(DOF_t dof) noexcept requires(VERTEX_DOF){
-			return dof.depth()==0 ? true : !dof.key.parent().exists();
+			DofVert_t vtx = static_cast<DofVert_t>(dof);
+			return vtx.depth()==0 ? true : !vtx.parent().exists();
 		}
 
 		//get a single dof global number
@@ -280,24 +322,26 @@ namespace GV {
 		}
 
 		//query if there is a dof at a mesh feature.
-		[[nodiscard]] bool has_active_dof(M_KEY m_key) const noexcept {
-			D_KEY d_key = static_cast<D_KEY>(m_key);
-			if (m_key != static_cast<M_KEY>(d_key)) {return false;} //not a valid feature for periodic dofs
-			else { return is_active(d_key.linear_index()); }
+		[[nodiscard]] bool has_active_dof(DofFeature_t feat) const noexcept {
+			const DOF_t dof{feat};
+			return dof.exists() ? is_active(dof.linear_index()) : false;
 		}
 
 		//for vertex dofs, sometimes getting the correct depth is awkward.
-		[[nodiscard]] M_KEY get_dof_vertex(M_KEY m_key) const noexcept requires(VERTEX_DOF) {
-			D_KEY d_key = static_cast<D_KEY>(m_key);
-			if (m_key != static_cast<M_KEY>(d_key)) {return M_KEY::None();} //not a valid feature for periodic dofs
+		//determine if any (there is at most one) dof lives at the same geometric location
+		//as the requested vertex
+		template<typename Vert_t> requires(std::same_as<Vert_t,MeshVert_t> || std::same_as<Vert_t,DofVert_t>)
+		[[nodiscard]] DofFeature_t get_dof_vertex(Vert_t vtx_) const noexcept requires(VERTEX_DOF) {
+			DofVert_t vtx = static_cast<DofVert_t>(vtx_);
+			if (!DOF_t{vtx}.exists()) {return DofFeature_t::None();} //not a valid feature for periodic dofs
 			//traverse to shallowest mesh key, then check going down
-			while (d_key.parent().exists()) { d_key = d_key.parent(); }
-			for (uint64_t dd=d_key.depth(); dd<=MAX_DEPTH; ++dd) {
-				if (is_active(d_key.linear_index())) {return static_cast<M_KEY>(d_key);}
-				else if (d_key.child().exists()) {d_key = d_key.child();}
+			while (vtx.parent().exists()) { vtx = vtx.parent(); }
+			for (uint64_t dd=vtx.depth(); dd<=MAX_DEPTH; ++dd) {
+				if (is_active(vtx.linear_index())) {return vtx;}
+				else if (vtx.child().exists()) {vtx = vtx.child();}
 				else {break;}
 			}
-			return M_KEY::None();
+			return DofFeature_t::None();
 		}  
 
 		//sort the dofs by increasing global index and get their global index
@@ -341,14 +385,14 @@ namespace GV {
 				const uint64_t end   = (tid==n_workers-1) ? mesh.n_elements() : start + el_per_thread;
 				auto job = [&](auto it, auto end) {
 					while (it != end) {
-						for (M_KEY m_key : features(*it)) {
-							const D_KEY d_key = static_cast<D_KEY>(m_key);
-							if (m_key == static_cast<M_KEY>(d_key)) {
-								const uint64_t idx = d_key.linear_index();
-								set_active(idx, true); //note dof.linear_index just calls the key.linear_index
+						for (MeshFeature_t feat : features(*it)) {
+							const DOF_t dof{feat}; //constructor handles period transformation if needed
+							if (dof.exists()) {
+								const uint64_t idx = dof.linear_index();
+								set_active(idx, true);
 
 								//mark as explicitly refinable
-								if (d_key.depth() != MAX_DEPTH) {
+								if (dof.depth() != MAX_DEPTH) {
 									dof_mask[idx] |= EXPLICLY_REFINABLE_BIT;
 								}
 							}
@@ -450,11 +494,11 @@ namespace GV {
 			std::vector<std::vector<DOF_t>> thread_dofs(threads.n_threads());
 			auto job = [&](size_t tid){
 				const size_t start = tid*dofs_per_thread;
-				const size_t end = (tid==threads.n_threads()) ? TOTAL_POSSIBLE_DOFS : start + dofs_per_thread;
+				const size_t end = (tid==threads.n_threads()-1) ? TOTAL_POSSIBLE_DOFS : start + dofs_per_thread;
 
 				for (size_t idx=start; idx<end; ++idx) {
-					GUTIL_ASSERT(D_KEY::MakeKeyFromIndex(idx).is_valid());
-					if (is_active(idx)) { thread_dofs[tid].emplace_back(D_KEY::MakeKeyFromIndex(idx)); }
+					GUTIL_ASSERT(DOF_t::MakeFromIndex(idx).is_valid());
+					if (is_active(idx)) { thread_dofs[tid].push_back(DOF_t::MakeFromIndex(idx)); }
 				}
 			};
 
@@ -481,9 +525,13 @@ namespace GV {
 			GUTIL_OMP(parallel for)
 			for (size_t i=0; i<active_dofs.size(); ++i) {
 				bool has_active_support = false;
-				const unsigned char dd = static_cast<unsigned char>(active_dofs[i].depth());
-				for (Elem_t el : active_dofs[i].support()) {
-					if (mesh.read_depth(el) >= dd) { has_active_support=true; break;}
+				const uint8_t dd = active_dofs[i].depth_u8();
+				for (DofElem_t el : active_dofs[i].support()) {
+					//note features being periodic does not change their linear index
+					if (mesh.read_depth(el.linear_index()) >= dd) {
+						has_active_support=true;
+						break;
+					}
 				}
 				if (!has_active_support) {deactivate(i);}
 			}
@@ -494,69 +542,250 @@ namespace GV {
 		/// Queries. Most of these need to be callable from a quadrature loop over
 		/// the mesh elements.
 		/////////////////////////////////////////////////////////////////////////
-		void get_active_dofs_conformal(Elem_t el, std::vector<DOF_t>& dofs, std::vector<uint64_t>& global_idx) const noexcept {
+		template<typename Elem_t> requires(std::same_as<Elem_t,DofElem_t> || std::same_as<Elem_t,MeshElem_t> )
+		void get_active_dofs_conformal(Elem_t el_, std::vector<DOF_t>& dofs, std::vector<uint64_t>& global_idx) const noexcept {
 			GUTIL_ASSERT(is_sorted() && "DofHandler - the dofs must be sorted to get the correct global index");
+			GUTIL_ASSERT(dofs.size()==global_idx.size());
 			//assume that dofs only exist at the features of active elements
 			//and that all such features correspond to a dof
 			//this is the same as getting the "basis_s" dofs in a hierarchical method
-			GUTIL_ASSERT(mesh.is_active(el));
-			for (M_KEY m_key : features(el)) {
-				const D_KEY d_key = static_cast<D_KEY>(m_key);
-				if (m_key == static_cast<M_KEY>(d_key)) {
-					if (is_active(d_key.linear_index())) {
-						dofs.emplace_back(d_key);
-					}
+			
+			DofElem_t el = static_cast<DofElem_t>(el_);
+			size_t start_size = dofs.size();
+
+			for (DofFeature_t feat : features(el)) {
+				const DOF_t dof{feat};
+				if (dof.exists() && is_active(dof)) {
+					dofs.push_back(dof);
 				}
 			}
 
 			global_idx.resize(dofs.size());
-			get_dof_number_local_sort(std::span<DOF_t>{dofs.begin(), dofs.end()}, 
-						std::span<uint64_t>{global_idx.begin(), global_idx.end()});
+			get_dof_number_local_sort(std::span<DOF_t>{dofs.begin()+start_size, dofs.end()}, 
+						std::span<uint64_t>{global_idx.begin()+start_size, global_idx.end()});
 		}
 
-		void get_active_dofs_quasi_hierarchical(Elem_t el, std::vector<DOF_t>& dofs, std::vector<uint64_t>& global_idx) const noexcept {
+		template<typename Elem_t> requires(std::same_as<Elem_t,DofElem_t> || std::same_as<Elem_t,MeshElem_t> )
+		void get_active_dofs_quasi_hierarchical(Elem_t el_, std::vector<DOF_t>& dofs, std::vector<uint64_t>& global_idx) const noexcept {
 			GUTIL_ASSERT(is_sorted() && "DofHandler - the dofs must be sorted to get the correct global index");
+			GUTIL_ASSERT(dofs.size()==global_idx.size());
 			//assume that dofs only exist at the features of active elements or the feature of a parent of an active element
 			//additionally, if a feature at depth d is active, then its parent feature at depth d-1 cannot be active
 			//this is the same as getting "basis_s U basis_a" in a hierarchical method
-			GUTIL_ASSERT(mesh.is_active(el));
+			
+			DofElem_t el = static_cast<DofElem_t>(el_);
+			size_t start_size = dofs.size();
+
 			for (int i=0; i<2 && el.exists(); ++i) {
-				for (M_KEY f : features(el)) {
-					const D_KEY key = static_cast<D_KEY>(f);
-					if (f == static_cast<M_KEY>(key)) {
-						DOF_t dof{key};
-						if (is_active(dof)) {dofs.push_back(dof);}
+				for (DofFeature_t feat : features(el)) {
+					const DOF_t dof{feat};
+					if (dof.exists() && is_active(dof)) {
+						dofs.push_back(dof);
 					}
 				}
 				el = el.parent();
 			}
 
 			global_idx.resize(dofs.size());
-			get_dof_number_local_sort(std::span<DOF_t>{dofs.begin(), dofs.end()}, 
-						std::span<uint64_t>{global_idx.begin(), global_idx.end()});
+			get_dof_number_local_sort(std::span<DOF_t>{dofs.begin()+start_size, dofs.end()}, 
+						std::span<uint64_t>{global_idx.begin()+start_size, global_idx.end()});
 		}
 
-		void get_active_dofs_full_hierarchical(Elem_t el, std::vector<DOF_t>& dofs, std::vector<uint64_t>& global_idx) const noexcept {
+		template<typename Elem_t> requires(std::same_as<Elem_t,DofElem_t> || std::same_as<Elem_t,MeshElem_t> )
+		void get_active_dofs_full_hierarchical(Elem_t el_, std::vector<DOF_t>& dofs, std::vector<uint64_t>& global_idx) const noexcept {
 			GUTIL_ASSERT(is_sorted() && "DofHandler - the dofs must be sorted to get the correct global index");
+			GUTIL_ASSERT(dofs.size()==global_idx.size());
 			//assume that dofs only exist at the features of active elements or the feature of any ancestor of an active element
 			//additionally, if a feature at depth d is active, then its parent feature at depth d-1 cannot be active
 			//this is the same as getting "basis_s U basis_a" in a hierarchical method
-			GUTIL_ASSERT(mesh.is_active(el));
+			
+			DofElem_t el = static_cast<DofElem_t>(el_);
+			size_t start_size = dofs.size();
+
 			while (el.exists()) {
-				for (M_KEY f : features(el)) {
-					const D_KEY key = static_cast<D_KEY>(f);
-					if (f == static_cast<M_KEY>(key)) {
-						DOF_t dof{key};
-						if (is_active(dof)) {dofs.push_back(dof);}
+				for (DofFeature_t feat : features(el)) {
+					const DOF_t dof{feat};
+					if (dof.exists() && is_active(dof)) {
+						dofs.push_back(dof);
 					}
 				}
 				el = el.parent();
 			}
 
 			global_idx.resize(dofs.size());
-			get_dof_number_local_sort(std::span<DOF_t>{dofs.begin(), dofs.end()}, 
-						std::span<uint64_t>{global_idx.begin(), global_idx.end()});
+			get_dof_number_local_sort(std::span<DOF_t>{dofs.begin()+start_size, dofs.end()}, 
+						std::span<uint64_t>{global_idx.begin()+start_size, global_idx.end()});
 		}
+
+		template<typename T=double, typename Action>
+		void gather_hierarchical_dofs(Action&& action, DofElem_t el, T* x, T* y, T* z, uint32_t N) const noexcept {
+			GUTIL_ASSERT(active_dofs.size()>0);
+			GUTIL_ASSERT(x && y && z && N>0);
+			GUTIL_ASSERT(el.is_valid());
+			
+			constexpr bool ACTION_NEEDS_NO_INDEX     = std::is_invocable_r_v<void, Action, DOF_t, uint8_t, T, T, T>;
+			constexpr bool ACTION_NEEDS_GLOBAL_INDEX = std::is_invocable_r_v<void, Action, DOF_t, uint8_t, T, T, T, uint64_t>;
+			
+			static_assert(ACTION_NEEDS_NO_INDEX ^ ACTION_NEEDS_GLOBAL_INDEX, 
+				"the action must have the signature void(DOF_t,uint8_t,T,T,T,uint64_t) or void(DOF_t,uint8_t,T,T,T)");
+
+			//given an element and N reference coordinates in that element,
+			//perform action(dof, local_n, x[i], y[i], z[i]) for i=0:N-1
+			//for each active dof whose support overlaps the specified element at a coarser (lower) depth
+			//to capture all dofs, el should be active in the mesh (cast to DofElem_t first). local_n is the local dof number
+			//on the support element that overlaps the provided el.
+			//if x,y,z corresponds to a vertex, use the vertex method below instead.
+
+			//optionally, the global index of the dof can be supplied as the last argument to the action.
+			//if the local index (i.e. the i in x[i]) is needed, it should be tracked as a captured variable
+			//in the lambda. For example
+			// uint32_t k=0; auto action = [&,N](dof, n, x, y, x) {uint32_t i=(k++)%N; ...}
+
+			while (el.exists()) {
+				//handle current depth
+				std::array<DOF_t, DOF_t::N_DOF_PER_ELEM> basis;
+				DOF_t::dofs_on_elem_simd(el.key, reinterpret_cast<uint64_t*>(&basis[0]));
+				for (DOF_t dof : basis) {
+					if (dof.exists() && is_active(dof)) {
+						[[maybe_unused]] uint64_t global_n;
+						if constexpr (ACTION_NEEDS_GLOBAL_INDEX) {
+							global_n = global_number(dof);
+							GUTIL_ASSERT(global_n<active_dofs.size() && active_dofs[global_n]==dof);
+						}
+
+						const uint8_t local = dof.local_dof_number(el);
+						GUTIL_SIMD()
+						for (uint32_t i=0; i<N; ++i) {
+							if constexpr (ACTION_NEEDS_GLOBAL_INDEX) {
+								action(dof, local, x[i], y[i], z[i], global_n);
+							}
+							else {
+								action(dof, local, x[i], y[i], z[i]);
+							}
+						}
+					}
+				}
+
+				//project up
+				DofElem_t parent = el.parent();
+				if (parent.exists()) {
+					//note the last bits of the i/j/k index encode which child
+					//this element is. low bits are the low side of the axis and high bits are the high side
+					//the pairity bits are arranged as 0bkji.
+					const uint64_t bits = el.kji_pairity_simd();	//also the child number
+					const T sx = (bits&0b001) ? T{0.5} : T{-0.5};
+					const T sy = (bits&0b010) ? T{0.5} : T{-0.5};
+					const T sz = (bits&0b100) ? T{0.5} : T{-0.5};
+					GUTIL_SIMD()
+					for (uint32_t i=0; i<N; ++i) {
+						x[i] = T{0.5}*x[i] + sx;
+						y[i] = T{0.5}*y[i] + sy;
+						z[i] = T{0.5}*z[i] + sz;
+					}
+				}
+				el = parent;
+			}
+		}
+
+
+		template<typename T=double, typename Action, typename Vert_t> requires(std::same_as<Vert_t,MeshVert_t> || std::same_as<Vert_t,DofVert_t>)
+		void gather_hierarchical_dofs_at_vertex(Action&& action, Vert_t vtx) const noexcept {
+			GUTIL_ASSERT(active_dofs.size()>0);
+
+			//this method calls action(dof,local,x,y,z) for each active dof whose
+			//support contains vtx as an interior point (i.e., if the shape function is 0 at vtx, that dof is skipped)
+			//local is the local dof number of the vtx projected into the support element of the dof and
+			//x,y,z are the reference coordinates of vtx in that support element.
+			//optionally, the action signature can accept the global dof number as it's last argument.
+
+			constexpr bool ACTION_NEEDS_NO_INDEX     = std::is_invocable_r_v<void, Action, DOF_t, uint8_t, T, T, T>;
+			constexpr bool ACTION_NEEDS_GLOBAL_INDEX = std::is_invocable_r_v<void, Action, DOF_t, uint8_t, T, T, T, uint64_t>;
+			static_assert(ACTION_NEEDS_NO_INDEX ^ ACTION_NEEDS_GLOBAL_INDEX, 
+				"the action must have the signature void(DOF_t,uint8_t,T,T,T,uint64_t) or void(DOF_t,uint8_t,T,T,T)");
+
+			//project down to the deepest possible representation, so .elements() sees
+			//every element that could possibly be active nearby, regardless of local refinement
+			DofVert_t dv = static_cast<DofVert_t>(vtx);
+			while (dv.depth() < Mesh_t::MAX_DEPTH) { dv = dv.child(); }
+
+			std::array<DofElem_t,8> elems;
+			dv.elements_simd(&elems[0]);
+
+			
+			//traverse back up and search all (up to 8) elements that the vertex
+			//is adjacent to for dofs. Deduplicate the dofs at each depth.
+
+			// per-element bookkeeping, computed once up front (unaffected by depth)
+			std::array<uint64_t,8> eff_i{}, eff_j{}, eff_k{};
+			std::array<bool,8> elem_exists{};
+			for (uint8_t e=0; e<8; ++e) {
+				elem_exists[e] = elems[e].exists();
+				if (!elem_exists[e]) { continue; }
+				const uint8_t local0 = dv.local_vertex_number_simd(elems[e].key);
+				GUTIL_ASSERT(!elems[e].is_encoded());
+				eff_i[e] = elems[e].i_simd() + (local0&1);
+				eff_j[e] = elems[e].j_simd() + ((local0>>1)&1);
+				eff_k[e] = elems[e].k_simd() + ((local0>>2)&1);
+			}
+
+			std::vector<uint64_t> seen;	//running tally of which dofs have been acted on at each depth
+
+			for (uint8_t level=0; level<=Mesh_t::MAX_DEPTH; ++level) {
+				seen.clear();
+				for (uint8_t e=0; e<8; ++e) {
+					if (!elem_exists[e] || !elems[e].exists()) { continue; }
+
+					DofElem_t el = elems[e];
+					GUTIL_ASSERT(!el.is_encoded());
+
+					const uint64_t delta = Mesh_t::MAX_DEPTH - el.depth();
+					const uint64_t span  = uint64_t{1} << delta;
+
+					GUTIL_ASSERT(eff_i[e]>=span*el.i_simd());
+					GUTIL_ASSERT(eff_j[e]>=span*el.j_simd());
+					GUTIL_ASSERT(eff_k[e]>=span*el.k_simd());
+					const T x = T{2}*T(eff_i[e] - el.i_simd()*span)/T(span) - T{1};
+					const T y = T{2}*T(eff_j[e] - el.j_simd()*span)/T(span) - T{1};
+					const T z = T{2}*T(eff_k[e] - el.k_simd()*span)/T(span) - T{1};
+
+					std::array<DOF_t, DOF_t::N_DOF_PER_ELEM> basis;
+					DOF_t::dofs_on_elem_simd(el.key, reinterpret_cast<uint64_t*>(&basis[0]));
+					for (DOF_t dof : basis) {
+						if (!dof.exists() || !is_active(dof)) { continue; }
+						uint64_t key = static_cast<uint64_t>(dof);
+						if (std::find(seen.begin(), seen.end(), key) != seen.end()) { continue; }
+						seen.push_back(key);
+
+						[[maybe_unused]] uint64_t global_n;
+						if constexpr (ACTION_NEEDS_GLOBAL_INDEX) {
+							global_n = global_number(dof);
+							if (active_dofs[global_n]!=dof){
+								
+								GUTIL_ERROR(dof, " is marked as active. global number ", global_n, " was found, but active_dofs[",global_n,"]= ", active_dofs[global_n]);
+
+								auto it = std::find(active_dofs.begin(), active_dofs.end(), dof);
+								if (it!=active_dofs.end()) {
+									global_n = std::distance(active_dofs.begin(), it);
+									GUTIL_ERROR("std::find found index ", global_n);
+								}
+								else {
+									GUTIL_ERROR("std::find did not find the dof");
+								}
+
+							}
+
+							GUTIL_ASSERT(active_dofs[global_n]==dof);
+						}
+						const uint8_t local = dof.local_dof_number(el);
+						if constexpr (ACTION_NEEDS_GLOBAL_INDEX) { action(dof, local, x, y, z, global_n); }
+						else                                     { action(dof, local, x, y, z); }
+					}
+					elems[e] = el.parent();
+				}
+			}
+		}
+
+
 
 
 		/////////////////////////////////////////////////////////////////////////
@@ -565,7 +794,7 @@ namespace GV {
 		[[nodiscard]] bool is_refinable(DOF_t dof) const noexcept {
 			GUTIL_ASSERT(dof.is_valid());
 			GUTIL_ASSERT(is_active(dof));
- 			
+			
 			if (dof.depth() >= MAX_DEPTH || is_refined(dof)) {return false;}
 			if (dof_mask[dof.linear_index()] & EXPLICLY_REFINABLE_BIT) {return true;}
 			for (const DOF_t p : dof.parents()) {
@@ -578,9 +807,8 @@ namespace GV {
 			GUTIL_ASSERT(dof.is_valid());
 			
 			if (dof.depth()==MAX_DEPTH || !is_refined(dof) || is_active(dof)) {return false;}
-			gutil::Logger::log("check unrefine ", dof.depth());
 			for (const DOF_t c : dof.children()) {
-				if (c.exists() && is_active(c) && is_refined(c)) {return false;}
+				if (c.exists() && is_refined(c)) {return false;}
 			}
 			return true;
 		}
@@ -589,12 +817,11 @@ namespace GV {
 			if (!set_active(dof,true)) {return;} //return if the dof was already active
 			//when refining, it is essential to have
 			//the mesh be able to resolve the support
-			const unsigned char depth = static_cast<unsigned char>(dof.depth());
+			const uint8_t depth = dof.depth_u8();
 			if (depth==0) { return; }	//at depth 0, there is nothing to do
-			for (auto spt : dof.support()) {
+			for (DofElem_t spt : dof.support()) {
 				if (!spt.exists()) {continue;}
-				Elem_t el = static_cast<Elem_t>(spt); //convert to the non-periodic variant
-				gutil::Logger::log("dof at depth ", dof.depth(), " has support at depth ", el.depth());
+				MeshElem_t el = static_cast<MeshElem_t>(spt); //convert to the non-periodic variant
 				GUTIL_ASSERT(spt.depth()==el.depth())
 				GUTIL_ASSERT(!el.exists() || el.depth()==dof.depth())
 				if (el.exists() && mesh.get_layer(depth).read_depth(el) < depth) {
@@ -615,6 +842,7 @@ namespace GV {
 		}
 
 		void refine_quasi_hierarchical(DOF_t dof) noexcept {
+			GUTIL_ASSERT(dof.is_valid());
 			GUTIL_ASSERT(is_active(dof));
 			if(!is_refinable(dof)) {return;};
 			deactivate(dof);
@@ -626,13 +854,12 @@ namespace GV {
 		}
 
 		void refine_hierarchical(DOF_t dof) noexcept requires(VERTEX_DOF) {
+			GUTIL_ASSERT(dof.is_valid());
 			GUTIL_ASSERT(is_active(dof));
 			if(!is_refinable(dof)) {return;};
-			const M_KEY p_key = static_cast<M_KEY>(dof.key);
+			const MeshFeature_t p_feat = static_cast<MeshFeature_t>(dof);	//capture dof vertex so it's child doesn't get activated
 			for (DOF_t c : dof.children()) {
-				if (!c.exists()) {continue;}
-				const M_KEY c_key = static_cast<M_KEY>(c.key);
-				if (c_key.parent() != p_key) {
+				if (c.exists() && static_cast<MeshFeature_t>(c).parent() != p_feat) {
 					activate(c);
 				}
 			}
@@ -641,12 +868,13 @@ namespace GV {
 		}
 
 		void unrefine_quasi_hierarchical(DOF_t dof) noexcept {
+			//a dof is unrefinable if all of its children that exist and
+			//are active are not refined.
+			GUTIL_ASSERT(dof.is_valid());
 			if(!is_unrefinable(dof)) {return;};
 			activate(dof);
 			for (DOF_t c : dof.children()) {
-				if (!c.exists()) {continue;}
-				if (is_refined(c)) { unrefine_quasi_hierarchical(c); }
-				else {set_active(c, false);}
+				if (c.exists()) {set_active(c, false);}
 			}
 			set_refined(dof,false);
 			set_active(dof,true);
@@ -656,9 +884,7 @@ namespace GV {
 			GUTIL_ASSERT(is_active(dof));
 			if(!is_unrefinable(dof)) {return;};
 			for (DOF_t c : dof.children()) {
-				if (!c.exists()) {continue;}
-				if (is_refined(c)) { unrefine_hierarchical(c); }
-				else {set_active(c, false);}
+				if (c.exists()) {set_active(c, false);}
 			}
 			set_refined(dof, false);
 		}
@@ -671,13 +897,12 @@ namespace GV {
 					GUTIL_ASSERT(is_active(dof));
 					if constexpr (NULLPTR_T<Predicate>) { refine_quasi_hierarchical(dof); }
 					else {
-						if (pred(dof)) {
-							refine_quasi_hierarchical(dof);
-						}
-					}	
+						if (pred(dof)) { refine_quasi_hierarchical(dof); }
+					}
 				}
 			};
 			dispatch_parallel_active_dof(action);
+			// threads.submit(action, std::span<DOF_t>{active_dofs.begin(), active_dofs.end()});
 			threads.wait_idle();
 			collect_dofs();
 		}

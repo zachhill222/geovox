@@ -28,8 +28,8 @@ namespace GV {
 		//////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Aliases and constants
 		//////////////////////////////////////////////////////////////////////////////////////////////////
-		using VoxelElement = Keys::VoxelElement;
-		using VoxelVertex  = Keys::VoxelVertex;
+		using VoxelElement = Keys::VoxelElement<0>;	//nonperiodic
+		using VoxelVertex  = Keys::VoxelVertex<0>;	//nonperiodic
 		using VoxelFace    = void;
 		using GeoPoint_t   = gutil::Point<3,T>;
 		using Box_t        = gutil::Box<3,T>;
