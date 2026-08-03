@@ -9,7 +9,7 @@ TARGETS = $(SRC:.cpp=)
 INCLUDE = -I../include -I/usr/include/eigen3 -I../external/gutil/include
 
 #default build (debug)
-CXX     = g++ -std=c++23
+CXX     = g++ -std=c++23 -Wall
 
 #explicit defines
 DEFINES = 
@@ -35,12 +35,21 @@ ifdef GV_TEST_DOMAIN_SIZE
 	DEFINES += -DGV_TEST_DOMAIN_SIZE=$(GV_TEST_DOMAIN_SIZE)
 endif
 
+#optimization level
+ifdef OPTIMIZE
+	CXX += -O${OPTIMIZE}
+else ifdef NDEBUG
+	CXX += -O3
+else
+	CXX += -O0
+endif
 #debug vs release mode
 ifdef NDEBUG
-	CXX += -O3 -Wall
+	ifneq ($(NDEBUG),0)
 	DEFINES += -DNDEBUG
+	endif
 else
-	CXX += -O0 -Wall -pg -g
+	CXX += -pg -g
 endif
 
 #link to libraries

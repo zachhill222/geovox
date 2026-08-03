@@ -139,66 +139,77 @@ namespace GV {
 
 		[[nodiscard]] bool is_active(VoxelElement el) const noexcept {
 			GUTIL_ASSERT(element_mask.size() == max_elements());
-			GUTIL_ASSERT(el.depth() == depth);
+			GUTIL_ASSERT(el.depth() == depth && el.depth_linear_index()<element_mask.size());
 			return is_active_impl(el.depth_linear_index(), static_cast<const uint8_t*>(element_mask.data()));
 		}
 
 		[[nodiscard]] uint8_t read_depth(VoxelElement el) const noexcept {
 			GUTIL_ASSERT(element_mask.size() == max_elements());
-			GUTIL_ASSERT(el.depth() == depth);
+			GUTIL_ASSERT(el.depth() == depth && el.depth_linear_index()<element_mask.size());
 			return read_depth_impl(el.depth_linear_index(), static_cast<const uint8_t*>(element_mask.data()));
 		}
 
 		GUTIL_DECLARE_SIMD()
 		[[nodiscard]] bool is_active(uint64_t idx) const noexcept {
 			GUTIL_ASSERT(element_mask.size() == max_elements());
+			GUTIL_ASSERT(idx<element_mask.size());
 			return is_active_impl(idx, static_cast<const uint8_t*>(element_mask.data()));
 		}
 
 		GUTIL_DECLARE_SIMD()
 		[[nodiscard]] uint8_t read_depth(uint64_t idx) const noexcept {
 			GUTIL_ASSERT(element_mask.size() == max_elements());
+			GUTIL_ASSERT(idx<element_mask.size());
 			return (element_mask[idx]&DEPTH_MASK) >> 1;
 		}
 
 		void set_active(VoxelElement el, bool val) noexcept {
 			GUTIL_ASSERT(element_mask.size() == max_elements());
-			GUTIL_ASSERT(el.depth() == depth);
+			GUTIL_ASSERT(el.depth() == depth && el.depth_linear_index()<element_mask.size());
 			set_active_impl(el.depth_linear_index(), static_cast<uint8_t*>(element_mask.data()), val);
 		}
 
 		void set_depth(VoxelElement el, uint8_t val) noexcept {
 			GUTIL_ASSERT(element_mask.size() == max_elements());
-			GUTIL_ASSERT(el.depth() == depth);
+			GUTIL_ASSERT(el.depth() == depth && el.depth_linear_index()<element_mask.size());
 			set_depth_impl(el.depth_linear_index(), static_cast<uint8_t*>(element_mask.data()), val);
 		}
 
 		GUTIL_DECLARE_SIMD()
 		void set_active(uint64_t idx, bool val) noexcept {
 			GUTIL_ASSERT(element_mask.size() == max_elements());
+			GUTIL_ASSERT(idx<element_mask.size());
 			set_active_impl(idx, static_cast<uint8_t*>(element_mask.data()), val);
 		}
 
 		GUTIL_DECLARE_SIMD()
 		void set_depth(uint64_t idx, uint8_t val) noexcept {
 			GUTIL_ASSERT(element_mask.size() == max_elements());
+			GUTIL_ASSERT(idx<element_mask.size());
 			set_depth_impl(idx, static_cast<uint8_t*>(element_mask.data()), val);
 		}
 
 		void set_active(std::span<const VoxelElement> list, bool val) noexcept {
 			GUTIL_ASSERT(element_mask.size() == max_elements());
-			for (auto el : list) set_active_impl(el.depth_linear_index(), static_cast<uint8_t*>(element_mask.data()), val);
+			for (auto el : list) {
+				GUTIL_ASSERT(el.depth() == depth && el.depth_linear_index()<element_mask.size());
+				set_active_impl(el.depth_linear_index(), static_cast<uint8_t*>(element_mask.data()), val);
+			}
 		}
 
 		void set_depth(std::span<const VoxelElement> list, uint8_t val) noexcept {
 			GUTIL_ASSERT(element_mask.size() == max_elements());
-			for (auto el : list) set_depth_impl(el.depth_linear_index(), static_cast<uint8_t*>(element_mask.data()), val);
+			for (auto el : list) {
+				GUTIL_ASSERT(el.depth() == depth && el.depth_linear_index()<element_mask.size());
+				set_depth_impl(el.depth_linear_index(), static_cast<uint8_t*>(element_mask.data()), val);
+			}
 		}
 
 		void set_active(std::span<const uint64_t> list, bool val) noexcept {
 			GUTIL_ASSERT(element_mask.size() == max_elements());
 			GUTIL_SIMD()
 			for (size_t i=0; i<list.size(); ++i) {
+				GUTIL_ASSERT(list[i]<element_mask.size());
 				set_active_impl(list[i], static_cast<uint8_t*>(element_mask.data()), val);
 			}
 		}
@@ -207,6 +218,7 @@ namespace GV {
 			GUTIL_ASSERT(element_mask.size() == max_elements());
 			GUTIL_SIMD()
 			for (size_t i=0; i<list.size(); ++i) {
+				GUTIL_ASSERT(list[i]<element_mask.size());
 				set_depth_impl(list[i], static_cast<uint8_t*>(element_mask.data()), val);
 			}
 		}

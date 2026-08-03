@@ -240,23 +240,25 @@ namespace LagrangeQ1 {
 		GUTIL_ASSERT(Mesh3D::Depth(dof)>0)
 		ASSERT_VALID_VOXELQ1_DOF(dof)
 		GUTIL_ASSERT(Mesh3D::IsValid<Period>(dof))
-
 		const uint64_t ii = Mesh3D::IndexI_SIMD(dof);
 		const uint64_t jj = Mesh3D::IndexJ_SIMD(dof);
 		const uint64_t kk = Mesh3D::IndexK_SIMD(dof);
-		int bi = ii&1, bj = jj&1, bk = kk&1;		//capture pairity of dof index
+		int bi = ii&1, bj = jj&1, bk = kk&1;
 
-		//at parent depth 0, we need to be careful in the periodic axis
-		//otherwise we double count the number of dofs
+		//at parent depth 0, a periodic axis wraps every position onto the same
+		//unique parent, so the dof genuinely shares that feature regardless of
+		//its raw parity -- same override as before, still needed
 		if (Mesh3D::Depth(dof)==1) {
 			if constexpr (Period&0b001) {bi=0;}
 			if constexpr (Period&0b010) {bj=0;}
 			if constexpr (Period&0b100) {bk=0;}
 		}
 
-		//the feature dimension is the sum of the index pairities
-		//there are 2^(bi+bj+bk) parents, so each coef is 2^(-bi-bj-bk)
-		return gutil::ldexp(T{1},-(bi+bj+bk));
+		//only the dof that coincides exactly with the parent's own position
+		//(all axes even) contributes anything -- everything else is a genuinely
+		//different geometric point and must contribute 0, so that refine->unrefine
+		//is lossless for a constant field
+		return (bi==0 && bj==0 && bk==0) ? T{1} : T{0};
 	}
 
 

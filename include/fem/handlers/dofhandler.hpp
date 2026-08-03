@@ -3,6 +3,7 @@
 #include "gutil.hpp"
 
 #include "simd_keys/mesh/mesh_keys.hpp"
+#include "util/byte_print.hpp"
 
 #include <concepts>
 #include <cstdint>
@@ -95,7 +96,7 @@ namespace GV {
 
 		static constexpr uint8_t ACTIVE_BIT 			= 0b00000001;
 		static constexpr uint8_t REFINED_BIT 			= 0b00000010;
-		static constexpr uint8_t EXPLICLY_REFINABLE_BIT = 0b00000100;
+		static constexpr uint8_t INITIAL_DOF_BIT        = 0b00000100;	//these dofs don't check their parents and cannot be unrefined
 		static constexpr uint8_t COEF_MARKED_BIT        = 0b00001000;	//one coef handler per dof handler (it can handle multiple fields)
 		static constexpr uint8_t FREE_BITS 	            = 0b11110000;
 
@@ -110,12 +111,12 @@ namespace GV {
 		/// "has been refined" flag, which is useful for hierarchical methods. Additionally,
 		/// it gives us 6 more bits that could be used for other purposes.
 		/////////////////////////////////////////////////////////////////////////
-		mutable std::vector<uint8_t> dof_mask;	//DO NOT CHANGE FROM OUTSIDE THIS CLASS UNLESS THERE IS AN EXPLICIT REASON
-		std::vector<DOF_t> active_dofs{};
-		gutil::BinSort<DOF_t> active_dof_sorter;
-		mutable gutil::ThreadPool threads{};
-		mutable std::mutex mtx;
-		const Mesh_t& mesh;
+		mutable std::vector<uint8_t> 			dof_mask;			//DO NOT CHANGE FROM OUTSIDE THIS CLASS UNLESS THERE IS AN EXPLICIT REASON
+		std::vector<DOF_t> 						active_dofs{};		//a compressed list of the active dofs
+		gutil::BinSort<DOF_t> 					active_dof_sorter;	//responsible for global dof numbers and lookup
+		mutable gutil::ThreadPool 				threads{};			//max hardware concurency by default
+		mutable std::mutex 						mtx;				//unused for now
+		const Mesh_t& 							mesh;				//link to the mesh, we can request refinement through const methods
 
 		/////////////////////////////////////////////////////////////////////////
 		/// Constructors. The dofhandler must be linked to the mesh at construction
@@ -141,6 +142,7 @@ namespace GV {
 				active_dofs = other.active_dofs;
 				active_dof_sorter = other.active_dof_sorter;
 			}
+			return *this;
 		}
 		[[nodiscard]] DofHandler& operator=(DofHandler&& other) noexcept {
 			GUTIL_ASSERT(&mesh==&other.mesh);
@@ -149,6 +151,7 @@ namespace GV {
 				active_dofs = std::move(other.active_dofs);
 				active_dof_sorter = std::move(other.active_dof_sorter);
 			}
+			return *this;
 		}
 
 
@@ -208,91 +211,120 @@ namespace GV {
 		/////////////////////////////////////////////////////////////////////////
 		void wait() const noexcept { threads.wait_idle(); }
 
+		[[nodiscard]] uint8_t get_mask(DOF_t dof) const noexcept {
+			GUTIL_ASSERT(dof.is_valid() && dof.linear_index()<dof_mask.size());
+			return dof_mask[dof.linear_index()];
+		}
+
+		[[nodiscard]] uint8_t& get_mask_ref(DOF_t dof) const noexcept {
+			GUTIL_ASSERT(dof.is_valid() && dof.linear_index()<dof_mask.size());
+			return dof_mask[dof.linear_index()];
+		}
+
+		GUTIL_DECLARE_SIMD()
+		[[nodiscard]] uint8_t get_mask(uint64_t idx) const noexcept {
+			GUTIL_ASSERT(idx<dof_mask.size());
+			return dof_mask[idx];
+		}
+
+		GUTIL_DECLARE_SIMD()
+		[[nodiscard]] uint8_t& get_mask_ref(uint64_t idx) const noexcept {
+			GUTIL_ASSERT(idx<dof_mask.size());
+			return dof_mask[idx];
+		}
+
 		[[nodiscard]] bool is_active(DOF_t dof) const noexcept {
 			GUTIL_ASSERT(dof.is_valid());
-			return ACTIVE_BIT & dof_mask[dof.linear_index()];
+			return ACTIVE_BIT & get_mask(dof);
 		}
 
 		[[nodiscard]] bool is_refined(DOF_t dof) const noexcept {
 			GUTIL_ASSERT(dof.is_valid());
-			return REFINED_BIT & dof_mask[dof.linear_index()];
+			return REFINED_BIT & get_mask(dof);
 		}
 
 		[[nodiscard]] bool is_coef_marked(DOF_t dof) const noexcept {
 			GUTIL_ASSERT(dof.is_valid());
-			return COEF_MARKED_BIT & dof_mask[dof.linear_index()];
+			return COEF_MARKED_BIT & get_mask(dof);
 		}
 
 		GUTIL_DECLARE_SIMD()
 		[[nodiscard]] bool is_active(uint64_t d_idx) const noexcept {
 			GUTIL_ASSERT(d_idx < TOTAL_POSSIBLE_DOFS);
-			return ACTIVE_BIT & dof_mask[d_idx];
+			return ACTIVE_BIT & get_mask(d_idx);
 		}
 
 		GUTIL_DECLARE_SIMD()
 		[[nodiscard]] bool is_refined(uint64_t d_idx) const noexcept {
 			GUTIL_ASSERT(d_idx < TOTAL_POSSIBLE_DOFS);
-			return REFINED_BIT & dof_mask[d_idx];
+			return REFINED_BIT & get_mask(d_idx);
 		}
 
 		GUTIL_DECLARE_SIMD()
 		[[nodiscard]] bool is_coef_marked(uint64_t d_idx) const noexcept {
 			GUTIL_ASSERT(d_idx < TOTAL_POSSIBLE_DOFS);
-			return COEF_MARKED_BIT & dof_mask[d_idx];
+			return COEF_MARKED_BIT & get_mask(d_idx);
 		}
 
 		[[maybe_unused]] bool set_active(DOF_t dof, bool val) noexcept {
-			GUTIL_ASSERT(dof.is_valid())
-			const uint64_t d_idx = dof.linear_index();
-			// std::lock_guard<std::mutex> lock(mtx);
-			const bool old = dof_mask[d_idx]&ACTIVE_BIT;
-			if (old==val) {return false;}
-			val ? dof_mask[d_idx]|=ACTIVE_BIT : dof_mask[d_idx]&=~ACTIVE_BIT;
-			return true;
-		}
-
-		[[maybe_unused]] bool set_refined(DOF_t dof, bool val) noexcept {
-			GUTIL_ASSERT(dof.is_valid())
-			const uint64_t d_idx = dof.linear_index();
-			const bool old = dof_mask[d_idx]&REFINED_BIT;
-			if (old==val) {return false;}
-			val ? dof_mask[d_idx]|=REFINED_BIT : dof_mask[d_idx]&=~REFINED_BIT;
-			return true;
-		}
-
-		[[maybe_unused]] bool set_coef_marked(DOF_t dof, bool val) const noexcept {
 			GUTIL_ASSERT(dof.is_valid());
-			const uint64_t d_idx = dof.linear_index();
-			const bool old = dof_mask[d_idx]&COEF_MARKED_BIT;
+			uint8_t& byte  = get_mask_ref(dof);
+			const bool old = byte&ACTIVE_BIT;
 			if (old==val) {return false;}
-			val ? dof_mask[d_idx]|=COEF_MARKED_BIT : dof_mask[d_idx]&=~COEF_MARKED_BIT;
+			val ? byte|=ACTIVE_BIT : byte&=~ACTIVE_BIT;
 			return true;
 		}
 
 		GUTIL_DECLARE_SIMD()
 		[[maybe_unused]] bool set_active(uint64_t d_idx, bool val) noexcept {
-			GUTIL_ASSERT(d_idx < TOTAL_POSSIBLE_DOFS)
-			// std::lock_guard<std::mutex> lock(mtx);
-			const bool old = dof_mask[d_idx]&ACTIVE_BIT;
+			GUTIL_ASSERT(d_idx < TOTAL_POSSIBLE_DOFS);
+			uint8_t& byte  = get_mask_ref(d_idx);
+			const bool old = byte&ACTIVE_BIT;
 			if (old==val) {return false;}
-			val ? dof_mask[d_idx]|=ACTIVE_BIT : dof_mask[d_idx]&=~ACTIVE_BIT;
+			val ? byte|=ACTIVE_BIT : byte&=~ACTIVE_BIT;
+			return true;
+		}
+
+		[[maybe_unused]] bool set_refined(DOF_t dof, bool val) noexcept {
+			GUTIL_ASSERT(dof.is_valid())
+			uint8_t& byte  = get_mask_ref(dof);
+			const bool old = byte&REFINED_BIT;
+			if (old==val) {return false;}
+			val ? byte|=REFINED_BIT : byte&=~REFINED_BIT;
+			#ifndef NDEBUG
+				if (!val) GUTIL_ASSERT(!(bool)(byte&INITIAL_DOF_BIT)); //the initial dofs should never be unrefined
+			#endif
 			return true;
 		}
 
 		GUTIL_DECLARE_SIMD()
 		[[maybe_unused]] bool set_refined(uint64_t d_idx, bool val) noexcept {
-			GUTIL_ASSERT(d_idx < TOTAL_POSSIBLE_DOFS)
-			const bool old = dof_mask[d_idx]&REFINED_BIT;
+			GUTIL_ASSERT(d_idx < TOTAL_POSSIBLE_DOFS);
+			uint8_t& byte  = get_mask_ref(d_idx);
+			const bool old = byte&REFINED_BIT;
 			if (old==val) {return false;}
-			val ? dof_mask[d_idx]|=REFINED_BIT : dof_mask[d_idx]&=~REFINED_BIT;
+			val ? byte|=REFINED_BIT : byte&=~REFINED_BIT;
+			#ifndef NDEBUG
+				if (!val) GUTIL_ASSERT(!(bool)(byte&INITIAL_DOF_BIT)); //the initial dofs should never be unrefined
+			#endif
+			return true;
+		}
+
+		[[maybe_unused]] bool set_coef_marked(DOF_t dof, bool val) const noexcept {
+			GUTIL_ASSERT(dof.is_valid());
+			uint8_t& byte  = get_mask_ref(dof);
+			const bool old = byte&COEF_MARKED_BIT;
+			if (old==val) {return false;}
+			val ? byte|=COEF_MARKED_BIT : byte&=~COEF_MARKED_BIT;
 			return true;
 		}
 
 		[[maybe_unused]] bool set_coef_marked(uint64_t d_idx, bool val) const noexcept {
 			GUTIL_ASSERT(d_idx < TOTAL_POSSIBLE_DOFS)
-			const bool old = dof_mask[d_idx]&COEF_MARKED_BIT;
+			uint8_t& byte  = get_mask_ref(d_idx);
+			const bool old = byte&COEF_MARKED_BIT;
 			if (old==val) {return false;}
-			val ? dof_mask[d_idx]|=COEF_MARKED_BIT : dof_mask[d_idx]&=~COEF_MARKED_BIT;
+			val ? byte|=COEF_MARKED_BIT : byte&=~COEF_MARKED_BIT;
 			return true;
 		}
 
@@ -307,10 +339,10 @@ namespace GV {
 			return bin;
 		}
 
-		[[nodiscard]] static constexpr bool is_dof_odd(DOF_t dof) noexcept requires(VERTEX_DOF){
-			DofVert_t vtx = static_cast<DofVert_t>(dof);
-			return vtx.depth()==0 ? true : !vtx.parent().exists();
-		}
+		// [[nodiscard]] static constexpr bool is_dof_odd(DOF_t dof) noexcept requires(VERTEX_DOF){
+		// 	DofVert_t vtx = static_cast<DofVert_t>(dof);
+		// 	return vtx.depth()==0 ? true : !vtx.parent().exists();
+		// }
 
 		//get a single dof global number
 		[[nodiscard]] uint64_t global_number(DOF_t dof) const noexcept {
@@ -322,10 +354,10 @@ namespace GV {
 		}
 
 		//query if there is a dof at a mesh feature.
-		[[nodiscard]] bool has_active_dof(DofFeature_t feat) const noexcept {
-			const DOF_t dof{feat};
-			return dof.exists() ? is_active(dof.linear_index()) : false;
-		}
+		// [[nodiscard]] bool has_active_dof(DofFeature_t feat) const noexcept {
+		// 	const DOF_t dof{feat};
+		// 	return dof.exists() ? is_active(dof.linear_index()) : false;
+		// }
 
 		//for vertex dofs, sometimes getting the correct depth is awkward.
 		//determine if any (there is at most one) dof lives at the same geometric location
@@ -387,13 +419,21 @@ namespace GV {
 					while (it != end) {
 						for (MeshFeature_t feat : features(*it)) {
 							const DOF_t dof{feat}; //constructor handles period transformation if needed
+							#ifndef NDEBUG
+							DofFeature_t d_feat{feat};
+							if (d_feat.exists() && !mesh.is_geometrically_conformal(d_feat)) {
+								GUTIL_ASSERT(dof==DOF_t{d_feat});
+								GUTIL_ERROR("dof_feature ", d_feat, " is not conformal in the mesh");
+								std::terminate();
+							}
+							#endif
 							if (dof.exists()) {
 								const uint64_t idx = dof.linear_index();
 								set_active(idx, true);
 
 								//mark as explicitly refinable
 								if (dof.depth() != MAX_DEPTH) {
-									dof_mask[idx] |= EXPLICLY_REFINABLE_BIT;
+									dof_mask[idx] |= INITIAL_DOF_BIT;
 								}
 							}
 						}
@@ -482,7 +522,8 @@ namespace GV {
 		}
 
 		[[nodiscard]] bool is_sorted() const noexcept {
-			GUTIL_ASSERT(active_dofs.size()>0 && "DofHandler - did you forget dofhandler.collect_dofs()?")
+			//TODO: make a bool to track the status of sorting. similar for the mesh being up to date.
+			GUTIL_ASSERT(active_dofs.size()>0 && "DofHandler - did you forget dofhandler.collect_dofs()?");
 			return active_dof_sorter.bin_end(7) == active_dofs.size();
 		}
 
@@ -515,27 +556,27 @@ namespace GV {
 			sort_dofs();
 		}
 
-		void deactivate_stranded_dofs() noexcept {
-			//if the mesh does not honor some element activation request,
-			//it is possible that some active dofs have no active element.
-			//this will cause any global stiffness matrix to be non-invertible
-			//so these dofs should be de-activated
-			//this can happen when the mesh only activates elements that fall within
-			//some specified geometry.
-			GUTIL_OMP(parallel for)
-			for (size_t i=0; i<active_dofs.size(); ++i) {
-				bool has_active_support = false;
-				const uint8_t dd = active_dofs[i].depth_u8();
-				for (DofElem_t el : active_dofs[i].support()) {
-					//note features being periodic does not change their linear index
-					if (mesh.read_depth(el.linear_index()) >= dd) {
-						has_active_support=true;
-						break;
-					}
-				}
-				if (!has_active_support) {deactivate(i);}
-			}
-		}
+		// void deactivate_stranded_dofs() noexcept {
+		// 	//if the mesh does not honor some element activation request,
+		// 	//it is possible that some active dofs have no active element.
+		// 	//this will cause any global stiffness matrix to be non-invertible
+		// 	//so these dofs should be de-activated
+		// 	//this can happen when the mesh only activates elements that fall within
+		// 	//some specified geometry.
+		// 	GUTIL_OMP(parallel for)
+		// 	for (size_t i=0; i<active_dofs.size(); ++i) {
+		// 		bool has_active_support = false;
+		// 		const uint8_t dd = active_dofs[i].depth_u8();
+		// 		for (DofElem_t el : active_dofs[i].support()) {
+		// 			//note features being periodic does not change their linear index
+		// 			if (mesh.read_depth(el) >= dd) {
+		// 				has_active_support=true;
+		// 				break;
+		// 			}
+		// 		}
+		// 		if (!has_active_support) {deactivate(i);}
+		// 	}
+		// }
 
 
 		/////////////////////////////////////////////////////////////////////////
@@ -639,7 +680,7 @@ namespace GV {
 			//optionally, the global index of the dof can be supplied as the last argument to the action.
 			//if the local index (i.e. the i in x[i]) is needed, it should be tracked as a captured variable
 			//in the lambda. For example
-			// uint32_t k=0; auto action = [&,N](dof, n, x, y, x) {uint32_t i=(k++)%N; ...}
+			// uint32_t k=0; auto action = [&,N](dof, n, x, y, z) {uint32_t i=(k++)%N; ...}
 
 			while (el.exists()) {
 				//handle current depth
@@ -791,14 +832,62 @@ namespace GV {
 		/////////////////////////////////////////////////////////////////////////
 		/// Refinement queries and operations
 		/////////////////////////////////////////////////////////////////////////
+		[[nodiscard]] bool mesh_can_support_any(DOF_t dof) const noexcept {
+			GUTIL_ASSERT(dof.is_valid());
+
+			//true if ANY support element of the dof has an intersection with an active mesh element
+			//the mesh depth field marks the deepest level of refinement at or below the given element
+			const uint8_t depth = dof.depth_u8();
+			for (DofElem_t d_el : dof.support()) {
+				if (!d_el.exists()) {continue;}
+				MeshElem_t m_el = static_cast<MeshElem_t>(d_el);
+				if (m_el.exists() && mesh.read_depth(m_el)>=depth) {return true;}
+			}
+			return false;
+		}
+
+		[[nodiscard]] bool mesh_can_support_all(DOF_t dof) const noexcept {
+			GUTIL_ASSERT(dof.is_valid());
+
+			//true if ALL support element of the dof has an intersection with an active mesh element
+			//the mesh depth field marks the deepest level of refinement at or below the given element
+			const uint8_t depth = dof.depth_u8();
+			for (DofElem_t d_el : dof.support()) {
+				if (!d_el.exists()) {continue;}
+				MeshElem_t m_el = static_cast<MeshElem_t>(d_el);
+				if (m_el.exists() && mesh.read_depth(m_el)<depth) {return false;}
+			}
+			return true;
+		}
+
+
 		[[nodiscard]] bool is_refinable(DOF_t dof) const noexcept {
+			//	From 'Natural hierarchical refinement for finite element methods'
+			//	in International J. for Numerical Methods in Engineering (2003, DOI 10.1002/nme.601)
+			//
+			// 	There are 3 rules to guide refinement:
+			//
+			//	1) The refining/unrefining of a dof at depth dd may activate or deactivate that dof
+			//			or any of its children at depth dd+1.
+			//	2) A dof on level dd+1>0 may be refined only when all its parents on level dd have
+			//			been refined. (We track this by the INITIAL_DOF_BIT. here dd=0 is the root element)
+			//	3) A dof on level dd may be unrefined only if a) it was previously refined and
+			//			b) all its children on level dd+1 are not refined.
+
+
 			GUTIL_ASSERT(dof.is_valid());
 			GUTIL_ASSERT(is_active(dof));
+
+			if (dof.depth() >= MAX_DEPTH) {return false;}		//we can't refine past max depth
 			
-			if (dof.depth() >= MAX_DEPTH || is_refined(dof)) {return false;}
-			if (dof_mask[dof.linear_index()] & EXPLICLY_REFINABLE_BIT) {return true;}
+			uint8_t byte = get_mask(dof);
+			if (byte&REFINED_BIT) {return false;}				//we can't refine a dof twice
+			if (byte&INITIAL_DOF_BIT) {return true;}			//an unrefined initial dof not at max depth can be refined
+			
 			for (const DOF_t p : dof.parents()) {
-				if (p.exists() && is_active(p) && !is_refined(p)) {return false;}
+				if (p.exists() && mesh_can_support_any(p)) {	//if the mesh does not capture the entire [0,1]^3 space, don't consider irrelevant parents
+					if (!is_refined(p)) {return false;}			//a dof can't be refined until ALL of its parents are refined
+				}
 			}
 			return true;
 		}
@@ -806,44 +895,70 @@ namespace GV {
 		[[nodiscard]] bool is_unrefinable(DOF_t dof) const noexcept {
 			GUTIL_ASSERT(dof.is_valid());
 			
-			if (dof.depth()==MAX_DEPTH || !is_refined(dof) || is_active(dof)) {return false;}
-			for (const DOF_t c : dof.children()) {
-				if (c.exists() && is_refined(c)) {return false;}
+			if (dof.depth()>=MAX_DEPTH) {return false;}			//we call unrefine on the parent. at max depth it can't be a parent.
+			const uint8_t byte = get_mask(dof);
+			if (byte&INITIAL_DOF_BIT) {return false;}			//we can't unrefine to be coarser than the initial dofs
+			if (!(bool)(byte&REFINED_BIT)) {return false;}		//we can't unrefine a dof that hasn't been previously refined
+
+			for (const DOF_t c : dof.children()) {				//we can't unrefine a dof if it has valid children that have been refined
+				if (c.exists() && mesh_can_support_any(c)) {
+					if (is_refined(c)) {return false;}
+				}
 			}
+
 			return true;
 		}
 
+		[[nodiscard]] bool is_deactivatable(DOF_t query, DOF_t caller) const noexcept {
+																//rather than making a recursive unrefine, we check if child dofs can be deactivated
+			
+		}
+
+
 		void activate(DOF_t dof) noexcept {
-			if (!set_active(dof,true)) {return;} //return if the dof was already active
-			//when refining, it is essential to have
-			//the mesh be able to resolve the support
+			if (!set_active(dof,true)) {						//return if the dof was already active
+				return;
+			}
+																//when refining, it is essential to have the mesh be able to resolve the support
 			const uint8_t depth = dof.depth_u8();
-			if (depth==0) { return; }	//at depth 0, there is nothing to do
-			for (DofElem_t spt : dof.support()) {
+			if (depth==0) { return; }							//at depth 0, there is nothing to do
+			
+			//	Request the mesh to resolve the support. Note that
+			//	the mesh may deny the request of any support element,
+			//	but it should never deny the request for all elements.
+			//	If this is the case, there is probably a bad predicate
+			//	in the mesh refinement. The mesh depth field marks 
+			//	the deepest level of refinement at or below the given element
+			//	so that we do not have to traverse the entire mesh hierarchy
+			for (DofElem_t spt : dof.support()) {			
 				if (!spt.exists()) {continue;}
-				MeshElem_t el = static_cast<MeshElem_t>(spt); //convert to the non-periodic variant
-				GUTIL_ASSERT(spt.depth()==el.depth())
-				GUTIL_ASSERT(!el.exists() || el.depth()==dof.depth())
-				if (el.exists() && mesh.get_layer(depth).read_depth(el) < depth) {
-					//if the mesh is more than one refinement away from the support being
-					//active, then something went wrong
-					GUTIL_ASSERT(mesh.is_active(el.parent()))
-					mesh.refine(el.parent());
+				MeshElem_t el = static_cast<MeshElem_t>(spt);
+				if (el.exists() && mesh.read_depth(el) < depth) {
+					GUTIL_ASSERT(mesh.is_active(el.parent()))		//the mesh should be respecting a 2-1 refinement rule
+					mesh.refine(el.parent());						//this is a request. pushes the element to a mutable list. it is protected by a mutex.
 				}
+				
+				#ifndef NDEBUG
+				else{												//if no elements were requested to be active, then the dof must already
+					DofFeature_t d_feat{dof.key};					//be at a geometrically conformal feature
+					if (!mesh.is_geometrically_conformal(d_feat)) {	//the request takes into account any periodic axes
+						GUTIL_ERROR(d_feat, " is not conformal in the mesh. ", DOF_t{d_feat}, " should have requested mesh refinement");
+						std::terminate();
+					}
+				}
+				#endif
 			}
 		}
 
-		void deactivate(DOF_t dof) noexcept {
-			set_active(dof,false);
-			//when un-refining, it is not essential to have
-			//the mesh un-refine as well. mesh unrefinement 
-			//should be done in some cleanup pass so that
-			//multiple dofhandlers can be organized
-		}
+		void deactivate(DOF_t dof) noexcept {						//when un-refining, it is not essential to have the mesh un-refine as well.
+			set_active(dof,false); 									//mesh unrefinement should be done in some cleanup pass so that
+		}															//multiple dofhandlers can be organized
+																	
 
 		void refine_quasi_hierarchical(DOF_t dof) noexcept {
 			GUTIL_ASSERT(dof.is_valid());
 			GUTIL_ASSERT(is_active(dof));
+			
 			if(!is_refinable(dof)) {return;};
 			deactivate(dof);
 			for (DOF_t c : dof.children()) {
@@ -851,13 +966,14 @@ namespace GV {
 			}
 			set_refined(dof,true);
 			GUTIL_ASSERT(is_refined(dof));
+			GUTIL_ASSERT(is_unrefinable(dof) || (get_mask(dof)&INITIAL_DOF_BIT));
 		}
 
 		void refine_hierarchical(DOF_t dof) noexcept requires(VERTEX_DOF) {
 			GUTIL_ASSERT(dof.is_valid());
 			GUTIL_ASSERT(is_active(dof));
 			if(!is_refinable(dof)) {return;};
-			const MeshFeature_t p_feat = static_cast<MeshFeature_t>(dof);	//capture dof vertex so it's child doesn't get activated
+			const MeshFeature_t p_feat = static_cast<MeshFeature_t>(dof);
 			for (DOF_t c : dof.children()) {
 				if (c.exists() && static_cast<MeshFeature_t>(c).parent() != p_feat) {
 					activate(c);
@@ -865,28 +981,54 @@ namespace GV {
 			}
 			set_refined(dof,true);
 			GUTIL_ASSERT(is_refined(dof));
+			GUTIL_ASSERT(is_unrefinable(dof) || (get_mask(dof)&INITIAL_DOF_BIT));
 		}
 
 		void unrefine_quasi_hierarchical(DOF_t dof) noexcept {
-			//a dof is unrefinable if all of its children that exist and
-			//are active are not refined.
 			GUTIL_ASSERT(dof.is_valid());
+			uint8_t& byte = get_mask_ref(dof);
+
+			if (byte&ACTIVE_BIT) { return; }								//in a Q-H scheme, the parent dof must not be active
 			if(!is_unrefinable(dof)) {return;};
-			activate(dof);
+			
+			activate(dof);													//processes mesh refinement request
 			for (DOF_t c : dof.children()) {
-				if (c.exists()) {set_active(c, false);}
+				if (c.exists()) {
+					GUTIL_ASSERT(!is_refined(c));
+					set_active(c, false);
+				}
 			}
-			set_refined(dof,false);
-			set_active(dof,true);
+
+			byte|=ACTIVE_BIT;	//mark as active
+			byte&=~REFINED_BIT;	//mark as not refined
+
+			#ifndef NDEBUG
+				bool success  = true;
+				if (!is_active(dof)) {
+					success = false;
+					GUTIL_ERROR(dof, " should have been activated");
+				}
+				if (is_refined(dof)) {
+					success = false;
+					GUTIL_ERROR(dof, " should have been unrefined");
+				}
+				if (!success) {
+					GUTIL_ERROR(dof, " has mask ", print_bytes(byte));
+				}
+				GUTIL_ASSERT(success);
+			#endif
 		}
 
 		void unrefine_hierarchical(DOF_t dof) noexcept {
 			GUTIL_ASSERT(is_active(dof));
-			if(!is_unrefinable(dof)) {return;};
+			//in a quasi-hierarchical scheme, the parent dof (this) stays active
+			if(!is_active(dof) || !is_unrefinable(dof)) {return;};
 			for (DOF_t c : dof.children()) {
 				if (c.exists()) {set_active(c, false);}
 			}
 			set_refined(dof, false);
+			GUTIL_ASSERT(is_refined(dof));
+			GUTIL_ASSERT(is_unrefinable(dof));
 		}
 
 		template<typename Predicate = std::nullptr_t>

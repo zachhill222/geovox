@@ -48,11 +48,11 @@ namespace Keys{
 		/////////////////////////////////////////////////////////////
 		/// Convert between period types
 		/////////////////////////////////////////////////////////////
-		template<uint8_t OtherPeriod> requires(OtherPeriod<8)
-		[[nodiscard]] explicit constexpr operator VoxelVertex<OtherPeriod>() const noexcept {
+		template<uint8_t P> requires(P<8)
+		[[nodiscard]] explicit constexpr operator VoxelVertex<P>() const noexcept {
 			//note that vertices being periodic affects which indices are allowed,
 			//so we must reconstruct the key
-			return VoxelVertex<OtherPeriod>{Mesh3D::Depth(key),
+			return VoxelVertex<P>{Mesh3D::Depth(key),
 					Mesh3D::IndexI_SIMD(key), Mesh3D::IndexJ_SIMD(key), Mesh3D::IndexK_SIMD(key)};
 		}
 

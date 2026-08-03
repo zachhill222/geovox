@@ -158,11 +158,11 @@ namespace GV {
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Simple queries and commands
 		/////////////////////////////////////////////////////////////////////////////////////////////////
-		[[nodiscard]] bool is_active(VoxelElement el) const noexcept { return s_layers[el.depth()].is_active(el); }
-		[[nodiscard]] uint8_t read_depth(VoxelElement el) const noexcept { return s_layers[el.depth()].read_depth(el);}
-		[[nodiscard]] bool is_visited(VoxelElement el) const noexcept { return s_layers[el.depth()].element_mask[el.linear_index()] & VISITED_BIT; }
+		[[nodiscard]] bool is_active(VoxelElement el) const noexcept { return s_layers[el.depth()].is_active(el.depth_linear_index()); }
+		[[nodiscard]] uint8_t read_depth(VoxelElement el) const noexcept { return s_layers[el.depth()].read_depth(el.depth_linear_index());}
+		[[nodiscard]] bool is_visited(VoxelElement el) const noexcept { return s_layers[el.depth()].element_mask[el.depth_linear_index()] & VISITED_BIT; }
 		[[maybe_unused]] bool set_visited(VoxelElement el, bool val) const noexcept { 
-			uint8_t& byte = s_layers[el.depth()].element_mask[el.linear_index()];
+			uint8_t& byte = s_layers[el.depth()].element_mask[el.depth_linear_index()];
 			const bool changed = (byte&VISITED_BIT) == val;
 			if (changed) { val ? byte|=VISITED_BIT : byte&=~VISITED_BIT; }
 			return changed;
@@ -236,7 +236,7 @@ namespace GV {
 			VoxelElement el{0,0};						//current element
 			for (uint8_t dd=0; dd<=MAX_DEPTH; ++dd) {
 				
-				if (s_layers[dd].is_active(el.linear_index_simd())) {
+				if (is_active(el)) {
 					result = el.key;
 					*x     = lx;
 					*y     = ly;
@@ -276,10 +276,9 @@ namespace GV {
 			//for assigning dofs, the depth of the vertex is essential, so we do not
 			//check if there is an 'equivalent' conformal vertex at the same geometric location
 			GUTIL_ASSERT(f.is_valid());
-			const uint64_t dd = f.depth();
 			for (VoxelElement el : f.elements()) {
 				if (el.exists()) {
-					if (!s_layers[dd].is_active(el)) {return false;}
+					if (!is_active(el)) {return false;}
 				}
 			}
 			return true;
@@ -327,9 +326,7 @@ namespace GV {
 		                                  static_cast<uint64_t>(el_idx[2+dj]),
 		                                  static_cast<uint64_t>(el_idx[4+dk])};
 		                if (!elem.exists()) { continue; }
-		                if (s_layers[dd].is_active(elem.linear_index())) {
-	                		GUTIL_ERROR("\n", vtx, " -> ", native, " ", elem);
-		                	return false; }
+		                if (is_active(VoxelElement{elem})) {return false; }
 		            }
 		        }
 		    }

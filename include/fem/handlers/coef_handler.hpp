@@ -126,7 +126,7 @@ namespace GV {
 		void update_coefs() noexcept {
 			//get new coefficients
 			{
-				GUTIL_TIMER("computing new coefficients (", dofs.size(), " -> ", dh_curr_dofs.size());
+				GUTIL_TIMER("computing new coefficients (", dofs.size(), " -> ", dh_curr_dofs.size(), ")");
 				std::array<std::vector<Scalar_t>,N> new_coefs;
 				auto job = [&](uint8_t i) { update_coefs(i,new_coefs[i]); };
 				for (uint8_t i=0; i<N; ++i) {
@@ -155,7 +155,8 @@ namespace GV {
 			GUTIL_OMP(parallel)
 			{
 				//make space for the fast parent/child operations
-				DOF_t* pc_dofs = new DOF_t[std::max(DOF_t::N_CHILDREN, DOF_t::N_PARENTS)];
+				constexpr uint64_t H_SIZE = DOF_t::N_CHILDREN > DOF_t::N_PARENTS ? DOF_t::N_CHILDREN : DOF_t::N_PARENTS;
+				DOF_t pc_dofs[H_SIZE];
 				
 				GUTIL_OMP(for)
 				for (size_t idx=0; idx<old_size; ++idx) {
@@ -181,25 +182,30 @@ namespace GV {
 							n_idx = dofhandler.global_number(pc_dofs[c]);
 							if (n_idx<new_size) {
 								GUTIL_OMP(atomic)
-								new_coefs[n_idx] += dof.template child_coef<Scalar_t>(c)*coefs[i][idx];
+								new_coefs[n_idx] += coefs[i][idx] * dof.template child_coef<Scalar_t>(c);
 							}
 						}
 						continue;
 					}
 
 					//check if any parent is newly created (it doesn't have a coef yet)
+					//the coefficient of the parent is the sum of coefficients of the children dofs
+					//such that the parent of the child dof feature is the feature of the parent dof
+					//for vertices, there is only one such child, for faces, there are 4 and for elements there are 8.
 					dof.parents_simd(pc_dofs);
+					// DofFeature_t p_feat = DofFeature_t{dof.key}.parent();
 					for (uint8_t p=0; p<DOF_t::N_PARENTS; ++p) {
 						if (!pc_dofs[p].exists()) {continue;}
+						// if (p_feat != DofFeature_t{pc_dofs[p].key}) {continue;}
+
 						n_idx = dofhandler.global_number(pc_dofs[p]);
 						if (n_idx<new_size && !dofhandler.is_coef_marked(pc_dofs[p])) {
 							GUTIL_OMP(atomic)
-							new_coefs[n_idx] += dof.template parent_coef<Scalar_t>(p)*coefs[i][idx];
+							new_coefs[n_idx] += coefs[i][idx] * dof.template parent_coef<Scalar_t>(p);
+							// new_coefs[n_idx] += coefs[i][idx];
 						}
 					}//parent check
 				}//for dofs
-
-				delete[] pc_dofs;
 			}//omp parallel
 		}//update coefs
 
@@ -238,8 +244,15 @@ namespace GV {
 				const uint64_t n_per_thread = n_verts/n_threads;
 				const uint64_t start        = tid*n_per_thread;
 				const uint64_t end          = (tid==n_threads-1) ? n_verts : start+n_per_thread;
+				
 
 				size_t idx = start; I it_end = v_begin+end;
+				auto action = [&](DOF_t dof, uint8_t local_n, Scalar_t x, Scalar_t y, Scalar_t z, uint64_t global_n) {
+					Scalar_t val{0};
+					dof.evaluate_simd(local_n,&val,&x,&y,&z,1);
+					vals[idx] += coefs[i][global_n] * val;
+				};
+
 				GUTIL_ASSERT(tid!=n_threads-1 || it_end==v_end);
 				for (I it = v_begin+start; it!=it_end; ++it, ++idx) {
 					GUTIL_ASSERT(it!=v_end);
@@ -248,12 +261,7 @@ namespace GV {
 					//dof gather gets all dofs
 					DofVert_t dv = static_cast<DofVert_t>(*it);
 					
-					auto action = [&](DOF_t dof, uint8_t local_n, Scalar_t x, Scalar_t y, Scalar_t z, uint64_t global_n) {
-						Scalar_t val{0};
-						dof.evaluate_simd(local_n,&val,&x,&y,&z,1);
-						vals[idx] += coefs[i][global_n] * val;
-					};
-					dofhandler.gather_hierarchical_dofs_at_vertex(std::move(action), dv);
+					dofhandler.gather_hierarchical_dofs_at_vertex(action, dv);
 				}
 			}
 

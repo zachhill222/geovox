@@ -53,12 +53,20 @@ namespace DOFS {
 
 		
 		/////////////////////////////////////////////////////////////
-		/// Convert to/from the mesh non-periodic vertex type
+		/// Convert to/from the mesh vertex type
+		/// We always assume that using static cast produces a valid result.
+		/// Otherwise use the raw constructor VoxelVertex<P> vtx{dof.key}
 		/////////////////////////////////////////////////////////////
-		[[nodiscard]] explicit constexpr operator VoxelVertex<0>() const noexcept {
+		[[nodiscard]] explicit constexpr operator MeshVert_t() const noexcept {
 			//note that vertices being periodic affects which indices are allowed
 			//for the dof. the mesh feature has a larger space.
-			return VoxelVertex<0>{key};
+			return MeshVert_t{key};
+		}
+		
+		[[nodiscard]] explicit constexpr operator DofVert_t() const noexcept requires (!std::same_as<DofVert_t,MeshVert_t>) {
+			//note that vertices being periodic affects which indices are allowed
+			//for the dof. the mesh feature has a larger space.
+			return DofVert_t{key};
 		}
 
 		explicit constexpr VoxelQ1(MeshVert_t vtx) requires(Period!=0)
