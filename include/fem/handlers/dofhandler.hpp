@@ -2,6 +2,7 @@
 
 #include "gutil.hpp"
 
+#include "simd_keys/containers.hpp"
 #include "simd_keys/mesh/mesh_keys.hpp"
 #include "util/byte_print.hpp"
 
@@ -11,7 +12,6 @@
 #include <span>
 #include <type_traits>
 #include <algorithm>
-#include <mutex>
 
 namespace GV {
 
@@ -66,8 +66,8 @@ namespace GV {
 	/// so we then check for equality.
 	/////////////////////////////////////////////////////////////////////////////
 	template<VoxelMeshType MeshType, typename DofType>
-	struct DofHandler {
-
+	struct DofHandler : public Keys::HybridKeyTracker {
+		using BASE = Keys::HybridKeyTracker;
 
 		/////////////////////////////////////////////////////////////////////////
 		/// Aliases and constants
@@ -90,15 +90,17 @@ namespace GV {
 		using MeshFeature_t = std::conditional_t<VERTEX_DOF, MeshVert_t, std::conditional_t<ELEMENT_DOF, MeshElem_t, void>>;
 		static_assert(!std::same_as<MeshFeature_t,void>);
 
-		static constexpr bool IS_DEPTH_SEPARABLE      = DepthSeparableVoxelMeshType<Mesh_t>;
-		static constexpr uint8_t MAX_DEPTH            = Mesh_t::MAX_DEPTH;
+		static constexpr bool     IS_DEPTH_SEPARABLE  = DepthSeparableVoxelMeshType<Mesh_t>;
+		static constexpr uint8_t  MAX_DEPTH           = Mesh_t::MAX_DEPTH;
 		static constexpr uint64_t TOTAL_POSSIBLE_DOFS = DOF_t::total_possible(MAX_DEPTH);
 
-		static constexpr uint8_t ACTIVE_BIT 			= 0b00000001;
+		using BASE::ACTIVE_BIT; 						//0b00000001;	
 		static constexpr uint8_t REFINED_BIT 			= 0b00000010;
 		static constexpr uint8_t INITIAL_DOF_BIT        = 0b00000100;	//these dofs don't check their parents and cannot be unrefined
 		static constexpr uint8_t COEF_MARKED_BIT        = 0b00001000;	//one coef handler per dof handler (it can handle multiple fields)
-		static constexpr uint8_t FREE_BITS 	            = 0b11110000;
+		static constexpr uint8_t BATCH_PROCESS_BIT      = 0b00010000;	//mark all active dofs at the start of a batch process for synchronization
+		static constexpr uint8_t FREE_BITS 	            = 0b11100000;
+
 
 		/////////////////////////////////////////////////////////////////////////
 		/// Storage. Store a vector<uint8_t> for O(1) active queries.
@@ -111,34 +113,30 @@ namespace GV {
 		/// "has been refined" flag, which is useful for hierarchical methods. Additionally,
 		/// it gives us 6 more bits that could be used for other purposes.
 		/////////////////////////////////////////////////////////////////////////
-		mutable std::vector<uint8_t> 			dof_mask;			//DO NOT CHANGE FROM OUTSIDE THIS CLASS UNLESS THERE IS AN EXPLICIT REASON
-		std::vector<DOF_t> 						active_dofs{};		//a compressed list of the active dofs
+		protected:
+		using BASE::key_mask;
+		using BASE::threads;										//max hardware concurency by default
+		public:
+		// std::vector<DOF_t> 						active_dofs{};		//a compressed list of the active dofs
+		std::span<DOF_t>						active_dofs;
 		gutil::BinSort<DOF_t> 					active_dof_sorter;	//responsible for global dof numbers and lookup
-		mutable gutil::ThreadPool 				threads{};			//max hardware concurency by default
-		mutable std::mutex 						mtx;				//unused for now
 		const Mesh_t& 							mesh;				//link to the mesh, we can request refinement through const methods
+		mutable bool 							batch_is_set{false};//check if the batch start bit has been set.
 
 		/////////////////////////////////////////////////////////////////////////
 		/// Constructors. The dofhandler must be linked to the mesh at construction
 		/// and the mesh must outlive the dofhandler.
 		/////////////////////////////////////////////////////////////////////////
 		DofHandler() = delete;
-		DofHandler(const Mesh_t& m) : dof_mask(TOTAL_POSSIBLE_DOFS), mesh(m) {}
-		DofHandler(const Mesh_t& m, int n_threads) : dof_mask(TOTAL_POSSIBLE_DOFS), threads{n_threads}, mesh{m} {}
-		DofHandler(const DofHandler& other) : 
-			dof_mask{other.dof_mask.begin(), other.dof_mask.end()},
-			active_dofs{other.active_dofs},
-			threads{other.threads.n_threads()},
-			mesh(other.mesh) {}
-		DofHandler(DofHandler&& other) :
-			dof_mask{std::move(other.dof_mask)},
-			active_dofs{std::move(other.active_dofs)},
-			threads{other.threads.n_threads()},
-			mesh{other.mesh} {}
+		DofHandler(const Mesh_t& m) : BASE(TOTAL_POSSIBLE_DOFS), mesh(m) {}
+		DofHandler(const Mesh_t& m, int n_threads) : BASE(TOTAL_POSSIBLE_DOFS,n_threads), mesh{m} {}
+		DofHandler(const DofHandler& other) : BASE(other), mesh(other.mesh) {}
+		DofHandler(DofHandler&& other) : BASE(other), mesh(other.mesh) {}
+		
 		[[nodiscard]] DofHandler& operator=(const DofHandler& other) noexcept {
 			GUTIL_ASSERT(&mesh==&other.mesh);
 			if (this != &other) {
-				dof_mask = other.dof_mask;
+				key_mask = other.key_mask;
 				active_dofs = other.active_dofs;
 				active_dof_sorter = other.active_dof_sorter;
 			}
@@ -147,7 +145,7 @@ namespace GV {
 		[[nodiscard]] DofHandler& operator=(DofHandler&& other) noexcept {
 			GUTIL_ASSERT(&mesh==&other.mesh);
 			if (this != &other) {
-				dof_mask = std::move(other.dof_mask);
+				key_mask = std::move(other.key_mask);
 				active_dofs = std::move(other.active_dofs);
 				active_dof_sorter = std::move(other.active_dof_sorter);
 			}
@@ -209,28 +207,26 @@ namespace GV {
 		/////////////////////////////////////////////////////////////////////////
 		/// Utility methods. The set_* methods return true if the status changed.
 		/////////////////////////////////////////////////////////////////////////
-		void wait() const noexcept { threads.wait_idle(); }
-
 		[[nodiscard]] uint8_t get_mask(DOF_t dof) const noexcept {
-			GUTIL_ASSERT(dof.is_valid() && dof.linear_index()<dof_mask.size());
-			return dof_mask[dof.linear_index()];
+			GUTIL_ASSERT(dof.is_valid() && dof.linear_index()<key_mask.size());
+			return key_mask[dof.linear_index()];
 		}
 
 		[[nodiscard]] uint8_t& get_mask_ref(DOF_t dof) const noexcept {
-			GUTIL_ASSERT(dof.is_valid() && dof.linear_index()<dof_mask.size());
-			return dof_mask[dof.linear_index()];
+			GUTIL_ASSERT(dof.is_valid() && dof.linear_index()<key_mask.size());
+			return key_mask[dof.linear_index()];
 		}
 
 		GUTIL_DECLARE_SIMD()
 		[[nodiscard]] uint8_t get_mask(uint64_t idx) const noexcept {
-			GUTIL_ASSERT(idx<dof_mask.size());
-			return dof_mask[idx];
+			GUTIL_ASSERT(idx<key_mask.size());
+			return key_mask[idx];
 		}
 
 		GUTIL_DECLARE_SIMD()
 		[[nodiscard]] uint8_t& get_mask_ref(uint64_t idx) const noexcept {
-			GUTIL_ASSERT(idx<dof_mask.size());
-			return dof_mask[idx];
+			GUTIL_ASSERT(idx<key_mask.size());
+			return key_mask[idx];
 		}
 
 		[[nodiscard]] bool is_active(DOF_t dof) const noexcept {
@@ -339,11 +335,6 @@ namespace GV {
 			return bin;
 		}
 
-		// [[nodiscard]] static constexpr bool is_dof_odd(DOF_t dof) noexcept requires(VERTEX_DOF){
-		// 	DofVert_t vtx = static_cast<DofVert_t>(dof);
-		// 	return vtx.depth()==0 ? true : !vtx.parent().exists();
-		// }
-
 		//get a single dof global number
 		[[nodiscard]] uint64_t global_number(DOF_t dof) const noexcept {
 			GUTIL_ASSERT(is_sorted() && "DofHandler - the dofs must be sorted to get the correct global index");
@@ -352,12 +343,6 @@ namespace GV {
 			auto it = std::lower_bound(list.begin(), list.end(), dof); 
 			return (it==list.end() || *it!=dof) ? uint64_t(-1) : active_dof_sorter.bin_start(bin) + std::distance(list.begin(), it);
 		}
-
-		//query if there is a dof at a mesh feature.
-		// [[nodiscard]] bool has_active_dof(DofFeature_t feat) const noexcept {
-		// 	const DOF_t dof{feat};
-		// 	return dof.exists() ? is_active(dof.linear_index()) : false;
-		// }
 
 		//for vertex dofs, sometimes getting the correct depth is awkward.
 		//determine if any (there is at most one) dof lives at the same geometric location
@@ -397,11 +382,16 @@ namespace GV {
 			}
 		}
 		
+		
+
+
+
+
+
 		/////////////////////////////////////////////////////////////////////////
 		/// Initialization. The mesh must be in a conformal state.
-		/// TODO: support non-conformal initial state with affine constraints
 		/////////////////////////////////////////////////////////////////////////
-		void init_dofs() noexcept { dispatch_init_dofs(); wait();}
+		void init_dofs() noexcept { dispatch_init_dofs(); wait_idle();}
 		void dispatch_init_dofs() noexcept {
 			if (mesh.element_begin()==mesh.element_end()) {
 				GUTIL_ABORT("ERROR: no elements found.")
@@ -433,7 +423,7 @@ namespace GV {
 
 								//mark as explicitly refinable
 								if (dof.depth() != MAX_DEPTH) {
-									dof_mask[idx] |= INITIAL_DOF_BIT;
+									key_mask[idx] |= INITIAL_DOF_BIT;
 								}
 							}
 						}
@@ -446,63 +436,23 @@ namespace GV {
 		}
 
 
-		template<typename Action, typename...Args>
-		void dispatch_parallel_active_dof(Action&& action, Args&&... args) noexcept {
-			GUTIL_ASSERT(active_dofs.size()>0 && "DofHandler - no dofs found. Did you forget dofhandler.collect_dofs()?")
-			GUTIL_ASSERT(threads.n_threads() > 0);
-
-			//the first argument of action must be a span of DOFs
-			//if the thread number is a required argument, it must be the second argument.
-			const uint64_t n_dofs = active_dofs.size();
-			const uint64_t n_workers = threads.n_threads();
-			const uint64_t dof_per_thread = n_dofs/n_workers;
-
-			for (uint64_t tid=0; tid<n_workers; ++tid) {
-				const uint64_t start = tid * dof_per_thread;
-				const uint64_t end = (tid==n_workers-1) ? n_dofs : start + dof_per_thread;
-
-				if constexpr (std::is_invocable_v<Action, std::span<DOF_t>, int, Args...>) {
-					std::span<DOF_t> list(active_dofs.begin()+start, active_dofs.begin()+end);
-					threads.submit(action, list, tid, std::forward<Args>(args)...);
-				}
-				else if constexpr (std::is_invocable_v<Action, std::span<const DOF_t>, int, Args...>) {
-					std::span<const DOF_t> list(active_dofs.begin()+start, active_dofs.begin()+end);
-					threads.submit(action, list, tid, std::forward<Args>(args)...);
-				}
-				else if constexpr (std::is_invocable_v<Action, std::span<DOF_t>, Args...>) {
-					std::span<DOF_t> list(active_dofs.begin()+start, active_dofs.begin()+end);
-					threads.submit(action, list, std::forward<Args>(args)...);
-				}
-				else if constexpr (std::is_invocable_v<Action, std::span<const DOF_t>, Args...>) {
-					std::span<const DOF_t> list(active_dofs.begin()+start, active_dofs.begin()+end);
-					threads.submit(action, list, std::forward<Args>(args)...);
-				}
-				else {
-					threads.submit(std::forward<Action>(action), std::forward<Args>(args)...);
-				}
-			}
-		}
-
-
 		/////////////////////////////////////////////////////////////////////////
 		/// Book keeping methods
 		/////////////////////////////////////////////////////////////////////////
 		[[nodiscard]] size_t n_dofs() const noexcept { return active_dofs.size(); }
 
-		void clear() noexcept {
-			std::fill(dof_mask.begin(), dof_mask.end(), 0);
-			active_dofs.clear();
-		}
-
+		
 		void sort_dofs() noexcept {
+			// BASE::sort_keys(8, &DofHandler::dof_bin);
 			active_dof_sorter = (active_dofs.size() > 1024) ? 
 					sort_dofs_multithread(active_dofs) : sort_dofs_singlethread(active_dofs);
 		}
 
 		[[nodiscard]] gutil::BinSort<DOF_t> sort_dofs_multithread(std::span<DOF_t> dofs) const noexcept {
 			gutil::BinSort<DOF_t> local_sorter(dofs, 8);
-			local_sorter.sort([&](DOF_t dof){ return dof_bin(dof); });
-			
+			local_sorter.dispatch_sort([&](DOF_t dof){ return dof_bin(dof); }, &threads);
+			threads.wait_idle();
+
 			for (int i=0; i<8; ++i) {
 				threads.submit( [](std::span<DOF_t> list){ std::sort(list.begin(), list.end()); }, local_sorter.get_bin(i));
 			}
@@ -529,31 +479,52 @@ namespace GV {
 
 
 		void collect_dofs() noexcept {
-			const size_t n_threads = threads.n_threads();
-			const size_t dofs_per_thread = n_threads==0 ? TOTAL_POSSIBLE_DOFS : TOTAL_POSSIBLE_DOFS/n_threads;
+			BASE::collect_active_keys<DOF_t>();
+			active_dofs = std::span<DOF_t>{reinterpret_cast<DOF_t*>(BASE::active_keys.data()), BASE::active_keys.size()};
+			GUTIL_LOG("BASE ", BASE::active_keys.size());
+			GUTIL_LOG("DOF ", active_dofs.size());
+			// const size_t n_threads = threads.n_threads();
+			// const size_t dofs_per_thread = n_threads==0 ? TOTAL_POSSIBLE_DOFS : TOTAL_POSSIBLE_DOFS/n_threads;
 			
-			std::vector<std::vector<DOF_t>> thread_dofs(threads.n_threads());
-			auto job = [&](size_t tid){
-				const size_t start = tid*dofs_per_thread;
-				const size_t end = (tid==threads.n_threads()-1) ? TOTAL_POSSIBLE_DOFS : start + dofs_per_thread;
+			// std::vector<std::vector<DOF_t>> thread_dofs(threads.n_threads());
+			// auto job = [&](size_t tid){
+			// 	const size_t start = tid*dofs_per_thread;
+			// 	const size_t end = (tid==threads.n_threads()-1) ? TOTAL_POSSIBLE_DOFS : start + dofs_per_thread;
 
-				for (size_t idx=start; idx<end; ++idx) {
-					GUTIL_ASSERT(DOF_t::MakeFromIndex(idx).is_valid());
-					if (is_active(idx)) { thread_dofs[tid].push_back(DOF_t::MakeFromIndex(idx)); }
-				}
-			};
+			// 	for (size_t idx=start; idx<end; ++idx) {
+			// 		GUTIL_ASSERT(DOF_t::MakeFromIndex(idx).is_valid());
+			// 		if (is_active(idx)) { thread_dofs[tid].push_back(DOF_t::MakeFromIndex(idx)); }
+			// 	}
+			// };
 
-			for (size_t tid=0; tid<threads.n_threads(); ++tid) {
-				threads.submit(job, tid);
-			}
-			threads.wait_idle();
+			// for (size_t tid=0; tid<threads.n_threads(); ++tid) {
+			// 	threads.submit(job, tid);
+			// }
+			// threads.wait_idle();
 
-			active_dofs.clear();
-			for (auto& list : thread_dofs) {
-				active_dofs.insert(active_dofs.end(), std::make_move_iterator(list.begin()), std::make_move_iterator(list.end()));
-			}
+			// active_dofs.clear();
+			// for (auto& list : thread_dofs) {
+			// 	active_dofs.insert(active_dofs.end(), std::make_move_iterator(list.begin()), std::make_move_iterator(list.end()));
+			// }
 
 			sort_dofs();
+		}
+
+
+		/// mark the start of a wide (look at lots of dofs) process
+		/// set_batch_start() sets the BATCH_PROCESS_BIT to true on all active dof masks
+		void set_batch_start() const noexcept {
+			GUTIL_TIMER("set_batch_start");
+			BASE::conditional_bitwise_or_all_masks(ACTIVE_BIT,BATCH_PROCESS_BIT);
+			batch_is_set = true;
+		}
+
+		/// mark the end of a wide (look at lots of dofs) process
+		/// set_batch_end() sets the BATCH_PROCESS_BIT to false on all dof masks
+		void set_batch_end() const noexcept {
+			GUTIL_TIMER("set_batch_end");
+			BASE::unconditional_bitwise_and_all_masks(~BATCH_PROCESS_BIT);
+			batch_is_set = false;
 		}
 
 		// void deactivate_stranded_dofs() noexcept {
@@ -909,11 +880,12 @@ namespace GV {
 			return true;
 		}
 
-		[[nodiscard]] bool is_deactivatable(DOF_t query, DOF_t caller) const noexcept {
-																//rather than making a recursive unrefine, we check if child dofs can be deactivated
-			
+		[[nodiscard]] bool can_deactivate(DOF_t dof) const noexcept {
+			for (DOF_t p : dof.parents()) {						//rather than making a recursive unrefine, we check if child dofs can be deactivated
+				if (p.exists() && is_refined(p)) {return false;}
+			}
+			return true;
 		}
-
 
 		void activate(DOF_t dof) noexcept {
 			if (!set_active(dof,true)) {						//return if the dof was already active
@@ -939,11 +911,11 @@ namespace GV {
 				}
 				
 				#ifndef NDEBUG
-				else{												//if no elements were requested to be active, then the dof must already
-					DofFeature_t d_feat{dof.key};					//be at a geometrically conformal feature
+				else if (!batch_is_set) {							//if no elements were requested to be active, then the dof must already
+					DofFeature_t d_feat{dof.key};					//be at a geometrically conformal feature.
 					if (!mesh.is_geometrically_conformal(d_feat)) {	//the request takes into account any periodic axes
 						GUTIL_ERROR(d_feat, " is not conformal in the mesh. ", DOF_t{d_feat}, " should have requested mesh refinement");
-						std::terminate();
+						// std::terminate();
 					}
 				}
 				#endif
@@ -953,7 +925,6 @@ namespace GV {
 		void deactivate(DOF_t dof) noexcept {						//when un-refining, it is not essential to have the mesh un-refine as well.
 			set_active(dof,false); 									//mesh unrefinement should be done in some cleanup pass so that
 		}															//multiple dofhandlers can be organized
-																	
 
 		void refine_quasi_hierarchical(DOF_t dof) noexcept {
 			GUTIL_ASSERT(dof.is_valid());
@@ -964,7 +935,10 @@ namespace GV {
 			for (DOF_t c : dof.children()) {
 				if (c.exists()) { activate(c); }
 			}
-			set_refined(dof,true);
+
+			uint8_t& byte = get_mask_ref(dof);
+			byte|=(ACTIVE_BIT|REFINED_BIT);							//set active and refined
+			byte&=~BATCH_PROCESS_BIT;								//remove from current batch
 			GUTIL_ASSERT(is_refined(dof));
 			GUTIL_ASSERT(is_unrefinable(dof) || (get_mask(dof)&INITIAL_DOF_BIT));
 		}
@@ -979,7 +953,10 @@ namespace GV {
 					activate(c);
 				}
 			}
-			set_refined(dof,true);
+
+			uint8_t& byte = get_mask_ref(dof);
+			byte|=REFINED_BIT;										//set refined
+			byte&=~BATCH_PROCESS_BIT;								//remove from current batch
 			GUTIL_ASSERT(is_refined(dof));
 			GUTIL_ASSERT(is_unrefinable(dof) || (get_mask(dof)&INITIAL_DOF_BIT));
 		}
@@ -988,19 +965,22 @@ namespace GV {
 			GUTIL_ASSERT(dof.is_valid());
 			uint8_t& byte = get_mask_ref(dof);
 
-			if (byte&ACTIVE_BIT) { return; }								//in a Q-H scheme, the parent dof must not be active
+			if (byte&ACTIVE_BIT) { return; }						//in a Q-H scheme, the parent dof must not be active
 			if(!is_unrefinable(dof)) {return;};
 			
-			activate(dof);													//processes mesh refinement request
+			activate(dof);											//processes mesh refinement request
 			for (DOF_t c : dof.children()) {
 				if (c.exists()) {
 					GUTIL_ASSERT(!is_refined(c));
-					set_active(c, false);
+					if (can_deactivate(c)) {
+						set_active(c, false);
+					}
 				}
 			}
 
-			byte|=ACTIVE_BIT;	//mark as active
-			byte&=~REFINED_BIT;	//mark as not refined
+			byte|=ACTIVE_BIT;										//mark as active
+			byte&=~REFINED_BIT;										//mark as not refined
+			byte&=~BATCH_PROCESS_BIT;								//remove from current batch
 
 			#ifndef NDEBUG
 				bool success  = true;
@@ -1026,48 +1006,59 @@ namespace GV {
 			for (DOF_t c : dof.children()) {
 				if (c.exists()) {set_active(c, false);}
 			}
-			set_refined(dof, false);
-			GUTIL_ASSERT(is_refined(dof));
+
+			uint8_t& byte = get_mask_ref(dof);
+			byte&=~REFINED_BIT;										//mark as not refined
+			byte&=~BATCH_PROCESS_BIT;								//remove from current batch
 			GUTIL_ASSERT(is_unrefinable(dof));
 		}
 
-		template<typename Predicate = std::nullptr_t>
-		void refine_all_quasi_hierarchical(Predicate&& pred = nullptr) noexcept {
-			auto action = [&](std::span<DOF_t> dofs) {
-				for (DOF_t dof : dofs) {
-					GUTIL_ASSERT(dof.is_valid());
-					GUTIL_ASSERT(is_active(dof));
-					if constexpr (NULLPTR_T<Predicate>) { refine_quasi_hierarchical(dof); }
-					else {
-						if (pred(dof)) { refine_quasi_hierarchical(dof); }
-					}
-				}
-			};
-			dispatch_parallel_active_dof(action);
-			// threads.submit(action, std::span<DOF_t>{active_dofs.begin(), active_dofs.end()});
-			threads.wait_idle();
-			collect_dofs();
+
+		//////////////////////////////////////////////////////////////////////////////////////
+		/// Utility refine/unrefine commands
+		//////////////////////////////////////////////////////////////////////////////////////
+		void refine_hierarchical(DofElem_t el) noexcept {
+			GUTIL_ASSERT(batch_is_set && "call set_batch_start() for synchronization");
+			std::vector<DOF_t> dofs;
+			std::vector<uint64_t> ids;
+			get_active_dofs_full_hierarchical(el, dofs, ids);
+
+			for (DOF_t dof : dofs) {
+				if(dof.exists() && (get_mask(dof)&BATCH_PROCESS_BIT)) {refine_hierarchical(dof);}
+			}
 		}
 
-		template<typename Predicate = std::nullptr_t>
-		void refine_all_hierarchical(Predicate&& pred = nullptr) noexcept {
-			auto action = [&](std::span<DOF_t> dofs) {
-				for (DOF_t dof : dofs) {
-					GUTIL_ASSERT(dof.is_valid());
-					GUTIL_ASSERT(is_active(dof));
-					if constexpr (NULLPTR_T<Predicate>) { refine_hierarchical(dof); }
-					else {
-						if (pred(dof)) {
-							refine_hierarchical(dof);
-						}
-					}	
-				}
-			};
-			dispatch_parallel_active_dof(action);
-			threads.wait_idle();
-			collect_dofs();
+		void refine_quasi_hierarchical(DofElem_t el) noexcept {
+			GUTIL_ASSERT(batch_is_set && "call set_batch_start() for synchronization");
+			std::vector<DOF_t> dofs;
+			std::vector<uint64_t> ids;
+			get_active_dofs_quasi_hierarchical(el, dofs, ids);
+
+			for (DOF_t dof : dofs) {
+				if(dof.exists() && (get_mask(dof)&BATCH_PROCESS_BIT)) {refine_quasi_hierarchical(dof);}
+			}
 		}
 
+		void unrefine_hierarchical(DofElem_t el) noexcept {
+			GUTIL_ASSERT(batch_is_set && "call set_batch_start() for synchronization");
+			std::vector<DOF_t> dofs;
+			std::vector<uint64_t> ids;
+			get_active_dofs_full_hierarchical(el, dofs, ids);
+
+			for (DOF_t dof : dofs) {
+				if(dof.exists() && (get_mask(dof)&BATCH_PROCESS_BIT)) {unrefine_hierarchical(dof);}
+			}
+		}
+
+		void unrefine_quasi_hierarchical(DofElem_t el) noexcept {
+			GUTIL_ASSERT(batch_is_set && "call set_batch_start() for synchronization");
+			std::vector<DOF_t> dofs;
+			std::vector<uint64_t> ids;
+			get_active_dofs_quasi_hierarchical(el, dofs, ids);
+			for (DOF_t dof : dofs) {
+				if(dof.exists() && (get_mask(dof)&BATCH_PROCESS_BIT)) {unrefine_quasi_hierarchical(dof);}
+			}
+		}
 
 	};
 

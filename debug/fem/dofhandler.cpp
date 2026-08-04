@@ -155,19 +155,32 @@ void refine_near_boundary(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_
 		for (DOF_t dof : dofs) {
 			GUTIL_ASSERT(dof.is_valid());
 			MeshVert_t vtx = static_cast<MeshVert_t>(dof);
-			if (true or std::abs(assembly.signed_distance(mesh.geo_coord(vtx))) < tol) {
+			if (std::abs(assembly.signed_distance(mesh.geo_coord(vtx))) < tol) {
 				handler.refine_quasi_hierarchical(dof);
 			}
 		}
 	};
 
 	for (size_t depth=cfg.initial_depth; depth<MAX_DEPTH; ++depth) {
-		handler.dispatch_parallel_active_dof(refine_action, cfg.refine_tol);
+		handler.set_batch_start();
+		for (auto it=mesh.element_begin(); it!=mesh.element_end(); ++it) {
+			auto geo_point = mesh.geo_center(*it);
+			if (std::abs(assembly.signed_distance(geo_point)) < cfg.refine_tol) {
+				handler.refine_quasi_hierarchical(DofElem_t{it->key});
+			}
+		}
+		handler.set_batch_end();
+
+
+		// handler.dispatch_parallel_active_dof(refine_action, cfg.refine_tol);
 		// handler.threads.submit(refine_action, std::span<DOF_t>{handler.active_dofs.begin(), handler.active_dofs.end()}, cfg.refine_tol);
 		// handler.refine_all_quasi_hierarchical();
-		handler.wait();
+		handler.wait_idle();
 
 		handler.collect_dofs();
+		// mesh.process_refine([&](MeshElem_t el) {
+		// 	return assembly.signed_distance(mesh.geo_center(el)) < 2*cfg.refine_tol;
+		// });
 		mesh.process_refine();
 		mesh.update_unstructured();
 		coef_handler.update_coefs();
@@ -177,7 +190,9 @@ void refine_near_boundary(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_
 	// below their current depth -- if it can refine multiple levels in one call,
 	// the single update_coefs() below needs to become one call per level instead.
 	// handler.refine_all_quasi_hierarchical();
-	mesh.process_refine();
+	mesh.process_refine([&](MeshElem_t el) {
+		return assembly.signed_distance(mesh.geo_center(el)) < 2*cfg.refine_tol;
+	});
 	mesh.update_unstructured();
 	coef_handler.update_coefs();
 
@@ -212,7 +227,7 @@ void unrefine_demo_region(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_
 		}
 	}
 
-	handler.wait();
+	handler.wait_idle();
 	handler.collect_dofs();
 	coef_handler.update_coefs();
 
@@ -276,7 +291,7 @@ void evaluate_and_save(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_han
 	auto pt_coef_lookup = GV::make_feature_lookup<MeshVert_t>(
 			[&](MeshVert_t vtx) {
 				auto d_vtx = handler.get_dof_vertex(vtx);
-				return d_vtx.exists() && handler.is_active(DOF_t{d_vtx}) ? coef_handler.coefs[0][handler.global_number(DOF_t{d_vtx})] : -1;
+				return d_vtx.exists() && handler.is_active(DOF_t{d_vtx}) ? (int64_t)coef_handler.coefs[0][handler.global_number(DOF_t{d_vtx})] : -1;
 			}, "scalar_coef");
 
 	auto pt_sd_lookup = GV::make_feature_lookup<MeshVert_t>(
@@ -286,7 +301,7 @@ void evaluate_and_save(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_han
 	auto pt_dof_active_lookup = GV::make_feature_lookup<MeshVert_t>(
 			[&](MeshVert_t vtx) {
 				auto d_vtx = handler.get_dof_vertex(vtx);
-				return d_vtx.exists() && handler.is_active(DOF_t{d_vtx}) ? handler.global_number(DOF_t{d_vtx}) : -1;
+				return d_vtx.exists() && handler.is_active(DOF_t{d_vtx}) ? (int64_t)handler.global_number(DOF_t{d_vtx}) : -1;
 			}, "active_dof_index");
 
 	auto pt_dof_refinable_lookup = GV::make_feature_lookup<MeshVert_t>(
@@ -363,10 +378,10 @@ void test_dof_handler(const TestConfig& cfg, const Assembly_t& assembly) {
 	refine_near_boundary(mesh, handler, coef_handler, assembly, cfg);
 	// coef_handler.print_coefs(0);   // post-refinement snapshot
 
-	unrefine_demo_region(mesh, handler, coef_handler, cfg);
 	// unrefine_demo_region(mesh, handler, coef_handler, cfg);
 	// unrefine_demo_region(mesh, handler, coef_handler, cfg);
-	remove_unsupported_elements(mesh, handler);
+	// unrefine_demo_region(mesh, handler, coef_handler, cfg);
+	// remove_unsupported_elements(mesh, handler);
 	// coef_handler.print_coefs(0);   // post-unrefinement / cleanup snapshot
 
 	evaluate_and_save(mesh, handler, coef_handler, assembly, cfg);

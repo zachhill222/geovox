@@ -70,13 +70,13 @@ namespace GV {
 
 		//random access iterator class to loop through the elements
 		//this wraps the individual vector iterators but wraps to the next depth if possible
-		using ElementIterator  = IteratorBase<VoxelElement,S_Layer_t,MAX_DEPTH,false>;
-		using CElementIterator = IteratorBase<VoxelElement,S_Layer_t,MAX_DEPTH,true>;
+		// using ElementIterator  = IteratorBase<VoxelElement,S_Layer_t,MAX_DEPTH,false>;
+		// using CElementIterator = IteratorBase<VoxelElement,S_Layer_t,MAX_DEPTH,true>;
 		using VertexIterator   = IteratorBase<VoxelVertex,S_Layer_t,MAX_DEPTH,false>;
 		using CVertexIterator  = IteratorBase<VoxelVertex,S_Layer_t,MAX_DEPTH,true>;
 		
-		static_assert(std::random_access_iterator<ElementIterator>);
-		static_assert(std::random_access_iterator<CElementIterator>);
+		// static_assert(std::random_access_iterator<ElementIterator>);
+		// static_assert(std::random_access_iterator<CElementIterator>);
 		static_assert(std::random_access_iterator<VertexIterator>);
 		static_assert(std::random_access_iterator<CVertexIterator>);
 
@@ -92,10 +92,13 @@ namespace GV {
 		const GeoPoint_t inv_diag;
 
 	protected:
-		std::array<S_Layer_t,MAX_DEPTH+1> s_layers{};	//the primary mesh storage
+		std::array<S_Layer_t,MAX_DEPTH+1> 	s_layers{};			//s_layers get views into element_mask{}
+		std::vector<uint8_t> 				element_mask{};		//the primary mesh storage
+		std::vector<VoxelElement> 			active_elements{};	//the active elements
+		std::vector<VoxelVertex> 			tracked_vertices{};	//the most reduced vertex is stored. these vertices may not have any active element (get parents)
 
-		mutable gutil::ThreadPool large_pool{};			//thread pool with the number of available threads equal to the physical cores
-		mutable gutil::ThreadPool small_pool{2};		//smaller thread pool to allow openmp parallelism within the dispatched tasks
+		mutable gutil::ThreadPool large_pool{};					//thread pool with the number of available threads equal to the physical cores
+		mutable gutil::ThreadPool small_pool{2};				//smaller thread pool to allow openmp parallelism within the dispatched tasks
 		mutable std::mutex mtx;
 
 
@@ -108,14 +111,23 @@ namespace GV {
 		/// A few utility methods
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		void init_depths() noexcept {
-			for (uint64_t dd=0; dd<=MAX_DEPTH; ++dd) {
+			element_mask.resize(TOTAL_POSSIBLE_ELEMENTS,0);
+
+			for (uint8_t dd=0; dd<=MAX_DEPTH; ++dd) {
 				s_layers[dd].depth = dd;
 				s_layers[dd].box = box;
-				s_layers[dd].init_element_mask();
+				uint64_t depth_start = VoxelElement::elements_below_depth(dd);
+				uint64_t depth_end   = VoxelElement::elements_below_depth(dd+1);
+				// s_layers[dd].init_element_mask(std::span<uint8_t>{element_mask.begin()+depth_start, element_mask.begin()+depth_end});
+				s_layers[dd].element_mask_view = std::span<uint8_t>{element_mask.begin()+depth_start, element_mask.begin()+depth_end};
 				#ifdef _OPENMP
 					s_layers[dd].max_omp_threads = omp_get_max_threads()/small_pool.n_threads();
 				#endif
+				GUTIL_ASSERT(s_layers[dd].element_mask_view.size() == s_layers[dd].max_elements());
 			}
+
+			update_unstructured();
+			collect_vertices();
 		}
 
 		template<typename U>
@@ -149,7 +161,9 @@ namespace GV {
 			box{std::move(other.box)},
 			diag{box.sidelength()}, 
 			inv_diag{Scalar_t{1}/diag},
-			s_layers{std::move(other.s_layers)} {}
+			s_layers{std::move(other.s_layers)},
+			active_elements{std::move(other.active_elements)},
+			tracked_vertices{std::move(other.tracked_vertices)} {}
 		
 		UnstructuredVoxelMesh& operator=(const UnstructuredVoxelMesh&) = delete;
 		UnstructuredVoxelMesh& operator=(UnstructuredVoxelMesh&&) = delete;
@@ -187,13 +201,41 @@ namespace GV {
 		}
 
 		void update_unstructured() noexcept {
+			GUTIL_TIMER("collecting active elements");
+
 			for (S_Layer_t& layer : s_layers) {
 				small_pool.submit( [&](){ layer.update_unstructured_omp(); });
 			}
 			small_pool.wait_idle();
+
+			//take ownership of the active lists for better memory access
+			//give a span back to the layers. track what the offsets of the span
+			//will be and how much memory to reserve
+			std::array<size_t,MAX_DEPTH+2> offsets{0};
+			for (uint8_t dd=0; dd<=MAX_DEPTH; ++dd) {
+				offsets[dd+1] = offsets[dd] + s_layers[dd].compressed_elements.size();
+			}
+
+			active_elements.clear();
+			active_elements.reserve(offsets[MAX_DEPTH+1]);
+			
+			for (uint8_t dd=0; dd<=MAX_DEPTH; ++dd) {
+				active_elements.insert(active_elements.end(),
+					std::make_move_iterator(s_layers[dd].compressed_elements.begin()),
+					std::make_move_iterator(s_layers[dd].compressed_elements.end()));
+
+				s_layers[dd].compressed_elements.clear();
+			}
+
+			//reserving ahead of time SHOULD make spans stable, but provide spans here to be safe
+			for (uint8_t dd=0; dd<=MAX_DEPTH; ++dd) {
+				s_layers[dd].active_element_view = std::span<VoxelElement>{
+					active_elements.begin()+offsets[dd], active_elements.begin()+offsets[dd+1]};
+			}
 		}
 
 		void collect_vertices() noexcept {
+			GUTIL_TIMER("collecting vertices");
 			for (S_Layer_t& layer : s_layers) {
 				small_pool.submit( [&](){ layer.collect_vertices_omp(); });
 			}
@@ -214,6 +256,29 @@ namespace GV {
 
 				//clean up the current list (already sorted, just delete the bad vertices)
 				std::erase_if( s_layers[dd].compressed_vertices, [dd](VoxelVertex vtx){ return vtx.depth() < dd; });
+			}
+
+			//move vertices from layers to this mesh. give back a span.
+			std::array<size_t,MAX_DEPTH+2> offsets{0};
+			for (uint8_t dd=0; dd<=MAX_DEPTH; ++dd) {
+				offsets[dd+1] = offsets[dd] + s_layers[dd].compressed_vertices.size();
+			}
+
+			tracked_vertices.clear();
+			tracked_vertices.reserve(offsets[MAX_DEPTH+1]);
+			
+			for (uint8_t dd=0; dd<=MAX_DEPTH; ++dd) {
+				tracked_vertices.insert(tracked_vertices.end(),
+					std::make_move_iterator(s_layers[dd].compressed_vertices.begin()),
+					std::make_move_iterator(s_layers[dd].compressed_vertices.end()));
+
+				s_layers[dd].compressed_vertices.clear();
+			}
+
+			//reserving ahead of time SHOULD make spans stable, but provide spans here to be safe
+			for (uint8_t dd=0; dd<=MAX_DEPTH; ++dd) {
+				s_layers[dd].tracked_vertices_view = std::span<VoxelVertex>{
+					tracked_vertices.begin()+offsets[dd], tracked_vertices.begin()+offsets[dd+1]};
 			}
 		}
 
@@ -353,11 +418,13 @@ namespace GV {
 		/// Methods primarily for writing to vtk files
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		[[nodiscard]] GeoPoint_t geo_coord(const VoxelVertex vtx) const noexcept {return box.low + (box.high-box.low)*vtx.normalized_coordinate();}
+		[[nodiscard]] GeoPoint_t geo_center(const VoxelElement el) const noexcept {return box.low + (box.high-box.low)*el.normalized_center();}
 		
 		[[nodiscard]] uint64_t n_elements() const noexcept {
 			//the unstructured layers must be up to date
 			uint64_t n=0;
 			for (const S_Layer_t& layer : s_layers) { n+=layer.n_elements(); }
+			GUTIL_ASSERT(n==active_elements.size());
 			return n;
 		}
 
@@ -365,6 +432,7 @@ namespace GV {
 			//the unstructured layers must be up to date and the vertices collected
 			uint64_t n=0;
 			for (const S_Layer_t& layer : s_layers) { n+=layer.n_vertices(); }
+				GUTIL_ASSERT(n==tracked_vertices.size());
 			return n;
 		}
 
@@ -471,25 +539,25 @@ namespace GV {
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Iterators for a standardized interface: TODO add a face iterator
 		/////////////////////////////////////////////////////////////////////////////////////////////////
-		CElementIterator element_begin() const {return CElementIterator::begin(s_layers);}
-		CElementIterator element_end()   const {return CElementIterator::end(s_layers);}
+		auto element_begin() 			 const {return active_elements.cbegin();}
+		auto element_end()   			 const {return active_elements.cend();}
 		auto element_begin(uint64_t dd)  const {return s_layers[dd].begin_elements();}
 		auto element_end(uint64_t dd)    const {return s_layers[dd].end_elements();}
 
-		ElementIterator element_begin() {return ElementIterator::begin(s_layers);}
-		ElementIterator element_end()   {return ElementIterator::end(s_layers);}
+		auto element_begin() 			{return active_elements.begin();}
+		auto element_end()   			{return active_elements.end();}
 		auto element_begin(uint64_t dd) {return s_layers[dd].begin_elements();}
 		auto element_end(uint64_t dd)   {return s_layers[dd].end_elements();}
 		
-		CVertexIterator vertex_begin() const {return CVertexIterator::begin(s_layers);}
-		CVertexIterator vertex_end()   const {return CVertexIterator::end(s_layers);}
-		auto vertex_begin(uint64_t dd) const {return s_layers[dd].vertex_begin();}
-		auto vertex_end(uint64_t dd)   const {return s_layers[dd].vertex_end();}
+		auto vertex_begin() 			const {return tracked_vertices.cbegin();}
+		auto vertex_end()   			const {return tracked_vertices.cend();}
+		auto vertex_begin(uint64_t dd) 	const {return s_layers[dd].vertex_begin();}
+		auto vertex_end(uint64_t dd)   	const {return s_layers[dd].vertex_end();}
 
-		VertexIterator vertex_begin()  {return VertexIterator::begin(s_layers);}
-		VertexIterator vertex_end()    {return VertexIterator::end(s_layers);}
-		auto vertex_begin(uint64_t dd) {return s_layers[dd].vertex_begin();}
-		auto vertex_end(uint64_t dd)   {return s_layers[dd].vertex_end();}
+		auto vertex_begin()  			{return tracked_vertices.begin();}
+		auto vertex_end()    			{return tracked_vertices.end();}
+		auto vertex_begin(uint64_t dd) 	{return s_layers[dd].vertex_begin();}
+		auto vertex_end(uint64_t dd)   	{return s_layers[dd].vertex_end();}
 
 
 		/////////////////////////////////////////////////////////////////////////////////////////////////
@@ -766,9 +834,139 @@ namespace GV {
 			s_layers[pd].set_depth(parent, new_val);
 			cur = parent;
 		}
+
+
+
+
+
+
+
+
+
+
+
+		////////////////////////////////////////////////////////////////////////////////
+		/// Methods for 
 	}
 
 	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 	//////////////////////////////////////////////////////////////////////////////////////////////////////
 	// Implement the Iterator class over all elements or vertices.
 	// Element iterators are only valid from when update_unstructured() is called to the next time the mesh is altered.
@@ -792,17 +990,17 @@ namespace GV {
 		using container_ref		= std::conditional_t<CONST_FLAG, const container_type&, container_type&>;
 		using container_ptr 	= std::conditional_t<CONST_FLAG, const container_type*, container_type*>;
 
-		using list_type         = std::vector<Feature_t>;
+		using list_type         = std::span<Feature_t>;
 		using list_ref          = std::conditional_t<CONST_FLAG, const list_type&, list_type&>;
 		using list_ptr          = std::conditional_t<CONST_FLAG, const list_type*, list_type*>;
 
 		//get reference to the feature list
 		[[nodiscard]] list_ref get_list(uint64_t depth) const { 
 			if constexpr (std::same_as<Feature_t, typename LayerMesh_t::VoxelElement>) {
-				return (*layers)[depth].compressed_elements;
+				return (*layers)[depth].active_element_view;
 			}
 			else {
-				return (*layers)[depth].compressed_vertices;
+				return (*layers)[depth].tracked_vertices_view;
 			}
 		}
 

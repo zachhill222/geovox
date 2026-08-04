@@ -45,7 +45,7 @@ namespace Keys{
 
 		constexpr VoxelElement(uint64_t depth, uint64_t ii, uint64_t jj, uint64_t kk) noexcept :
 			BASE{Mesh3D::MakeElement(depth,ii,jj,kk)} {}
-
+			
 
 		/////////////////////////////////////////////////////////////
 		/// Convert between period types
@@ -236,8 +236,8 @@ namespace Keys{
 		/////////////////////////////////////////////////////////////
 		/// Coordinates
 		/////////////////////////////////////////////////////////////
-		template<typename T>
-		[[nodiscard]] constexpr gutil::Point<3,T> center_normalized_coordinate() const noexcept {
+		template<typename T=double>
+		[[nodiscard]] constexpr gutil::Point<3,T> normalized_center() const noexcept {
 			GUTIL_ASSERT(is_valid())
 			return Mesh3D::NormalizedCenter<T>(key);
 		}

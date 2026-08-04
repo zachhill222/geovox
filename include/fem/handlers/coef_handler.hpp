@@ -46,7 +46,7 @@ namespace GV {
 		//////////////////////////////////////////////////////////////////
 		std::vector<DOF_t> dofs{};
 		const DofHandler_t& dofhandler;
-		const std::vector<DOF_t>& dh_curr_dofs;
+		std::span<const DOF_t> dh_curr_dofs;
 		const Mesh_t& mesh;
 		
 		mutable gutil::ThreadPool threads{N};
@@ -94,6 +94,9 @@ namespace GV {
 		///////////////////////////////////////////////////////////////////
 		template<typename DofEval>
 		void init_coefs(uint8_t i, DofEval&& eval) noexcept {
+			dh_curr_dofs = dofhandler.active_dofs;
+			dofs.clear();
+			dofs.insert(dofs.end(), dh_curr_dofs.begin(),dh_curr_dofs.end());
 			GUTIL_ASSERT(i<N);
 			reset_dofs();
 			GUTIL_ASSERT(dofs.size()>0);
@@ -124,6 +127,9 @@ namespace GV {
 		/// Note that we can only do one layer of refinement at a time
 		///////////////////////////////////////////////////////////////////
 		void update_coefs() noexcept {
+			//relink the span
+			dh_curr_dofs = dofhandler.active_dofs;
+
 			//get new coefficients
 			{
 				GUTIL_TIMER("computing new coefficients (", dofs.size(), " -> ", dh_curr_dofs.size(), ")");

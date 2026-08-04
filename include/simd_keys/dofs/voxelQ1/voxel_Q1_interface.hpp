@@ -143,7 +143,7 @@ namespace DOFS {
 		[[maybe_unused]] static std::array<VoxelQ1,N_DOF_PER_ELEM> dofs_on_elem(DofElem_t s) noexcept {
 			std::array<uint64_t,N_DOF_PER_ELEM> keys{};
 			std::array<VoxelQ1,N_DOF_PER_ELEM> dofs{};
-			LagrangeQ1::GetDofsOnElement_SIMD<Period>(s, &keys[0]);
+			LagrangeQ1::GetDofsOnElement_SIMD<Period>(s.key, &keys[0]);
 			for (uint64_t i=0; i<N_DOF_PER_ELEM; ++i) {dofs[i] = VoxelQ1{keys[i]};}
 			return dofs;
 		}
