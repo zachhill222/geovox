@@ -65,6 +65,7 @@ namespace GV {
 
 
 		static constexpr uint8_t MAX_DEPTH = MaxDepth;	//the maximum depth
+		const uint8_t max_depth = MAX_DEPTH;
 		static_assert(MAX_DEPTH <= S_Layer_t::MAX_DEPTH);
 		static constexpr uint64_t TOTAL_POSSIBLE_ELEMENTS = VoxelElement::elements_below_depth(MAX_DEPTH+1);
 

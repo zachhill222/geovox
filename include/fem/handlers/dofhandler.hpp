@@ -12,6 +12,11 @@
 #include <span>
 #include <type_traits>
 #include <algorithm>
+#include <thread>
+
+#ifndef GV_MAX_RUNTIME_KEY_DEPTH
+	#define GV_MAX_RUNTIME_KEY_DEPTH uint8_t{10}
+#endif
 
 namespace GV {
 
@@ -91,8 +96,14 @@ namespace GV {
 		static_assert(!std::same_as<MeshFeature_t,void>);
 
 		static constexpr bool     IS_DEPTH_SEPARABLE  = DepthSeparableVoxelMeshType<Mesh_t>;
-		static constexpr uint8_t  MAX_DEPTH           = Mesh_t::MAX_DEPTH;
-		static constexpr uint64_t TOTAL_POSSIBLE_DOFS = DOF_t::total_possible(MAX_DEPTH);
+		
+		//The maximum depth of a given mesh is specified at runtime. However, to avoid accidentally
+		//requesting say depth 12 (2^(3*12) elements at depth 12, (2^33 -1)/7 ~ 10^10.3 total elements)
+		//we set a maximum depth at compile time.
+		static constexpr uint8_t  MAX_DEPTH           = GV_MAX_RUNTIME_KEY_DEPTH;
+		static constexpr uint64_t MAX_POSSIBLE_DOFS   = DOF_t::total_possible(MAX_DEPTH);
+		const  			 uint8_t  max_depth 		  = MAX_DEPTH;
+		const 			 uint64_t max_possible_dofs   = DOF_t::total_possible(MAX_DEPTH);
 
 		using BASE::ACTIVE_BIT; 						//0b00000001;	
 		static constexpr uint8_t REFINED_BIT 			= 0b00000010;
@@ -128,8 +139,24 @@ namespace GV {
 		/// and the mesh must outlive the dofhandler.
 		/////////////////////////////////////////////////////////////////////////
 		DofHandler() = delete;
-		DofHandler(const Mesh_t& m) : BASE(TOTAL_POSSIBLE_DOFS), mesh(m) {}
-		DofHandler(const Mesh_t& m, int n_threads) : BASE(TOTAL_POSSIBLE_DOFS,n_threads), mesh{m} {}
+		DofHandler(const Mesh_t& m, uint8_t max_depth_ =GV_MAX_RUNTIME_KEY_DEPTH, size_t n_threads = std::thread::hardware_concurrency()) : 
+				BASE(DOF_t::total_possible(gutil::min(max_depth_, GV_MAX_RUNTIME_KEY_DEPTH, m.max_depth)), n_threads),
+				max_depth(gutil::min(max_depth_, GV_MAX_RUNTIME_KEY_DEPTH, m.max_depth)),
+				max_possible_dofs{DOF_t::total_possible(max_depth)},
+				mesh(m) {
+					if (max_depth_ > GV_MAX_RUNTIME_KEY_DEPTH) {
+						GUTIL_LOG("Requested depth (", max_depth_, ") exceeds allowed depth (", GV_MAX_RUNTIME_KEY_DEPTH,"). ",
+							"Compile with -DGV_MAX_RUNTIME_KEY_DEPTH=", max_depth_, " to allow this. Proceeding with max_depth=", 
+								max_depth);
+					}
+
+					if (n_threads > std::thread::hardware_concurrency()) {
+						GUTIL_LOG("Requested pool size (", n_threads, ") exceeds what is seen by std::thread::hardware_concurrency() (",
+								std::thread::hardware_concurrency(), ")");
+					}
+				}
+				
+		
 		DofHandler(const DofHandler& other) : BASE(other), mesh(other.mesh) {}
 		DofHandler(DofHandler&& other) : BASE(other), mesh(other.mesh) {}
 		
@@ -246,19 +273,19 @@ namespace GV {
 
 		GUTIL_DECLARE_SIMD()
 		[[nodiscard]] bool is_active(uint64_t d_idx) const noexcept {
-			GUTIL_ASSERT(d_idx < TOTAL_POSSIBLE_DOFS);
+			GUTIL_ASSERT(d_idx < MAX_POSSIBLE_DOFS);
 			return ACTIVE_BIT & get_mask(d_idx);
 		}
 
 		GUTIL_DECLARE_SIMD()
 		[[nodiscard]] bool is_refined(uint64_t d_idx) const noexcept {
-			GUTIL_ASSERT(d_idx < TOTAL_POSSIBLE_DOFS);
+			GUTIL_ASSERT(d_idx < MAX_POSSIBLE_DOFS);
 			return REFINED_BIT & get_mask(d_idx);
 		}
 
 		GUTIL_DECLARE_SIMD()
 		[[nodiscard]] bool is_coef_marked(uint64_t d_idx) const noexcept {
-			GUTIL_ASSERT(d_idx < TOTAL_POSSIBLE_DOFS);
+			GUTIL_ASSERT(d_idx < MAX_POSSIBLE_DOFS);
 			return COEF_MARKED_BIT & get_mask(d_idx);
 		}
 
@@ -273,7 +300,7 @@ namespace GV {
 
 		GUTIL_DECLARE_SIMD()
 		[[maybe_unused]] bool set_active(uint64_t d_idx, bool val) noexcept {
-			GUTIL_ASSERT(d_idx < TOTAL_POSSIBLE_DOFS);
+			GUTIL_ASSERT(d_idx < MAX_POSSIBLE_DOFS);
 			uint8_t& byte  = get_mask_ref(d_idx);
 			const bool old = byte&ACTIVE_BIT;
 			if (old==val) {return false;}
@@ -295,7 +322,7 @@ namespace GV {
 
 		GUTIL_DECLARE_SIMD()
 		[[maybe_unused]] bool set_refined(uint64_t d_idx, bool val) noexcept {
-			GUTIL_ASSERT(d_idx < TOTAL_POSSIBLE_DOFS);
+			GUTIL_ASSERT(d_idx < MAX_POSSIBLE_DOFS);
 			uint8_t& byte  = get_mask_ref(d_idx);
 			const bool old = byte&REFINED_BIT;
 			if (old==val) {return false;}
@@ -316,7 +343,7 @@ namespace GV {
 		}
 
 		[[maybe_unused]] bool set_coef_marked(uint64_t d_idx, bool val) const noexcept {
-			GUTIL_ASSERT(d_idx < TOTAL_POSSIBLE_DOFS)
+			GUTIL_ASSERT(d_idx < MAX_POSSIBLE_DOFS)
 			uint8_t& byte  = get_mask_ref(d_idx);
 			const bool old = byte&COEF_MARKED_BIT;
 			if (old==val) {return false;}
@@ -324,8 +351,21 @@ namespace GV {
 			return true;
 		}
 
-		[[nodiscard]] static constexpr int dof_bin(DOF_t dof) noexcept {
-			int bin = 0;
+		GUTIL_DECLARE_SIMD()
+		[[nodiscard]] static constexpr int8_t dof_key_bin(uint64_t dof_key) noexcept {
+			int8_t bin = 0;
+			DOF_t dof{dof_key};
+			const uint64_t dd = dof.depth();
+			const uint64_t split = (dd>0) ? (uint64_t{1}<<(dd-1)) : 0;	//split the index space into 8 octants. ties go to lower bin.
+			
+			if (dof.i() > split) { bin |= 1;}
+			if (dof.j() > split) { bin |= 2;}
+			if (dof.k() > split) { bin |= 4;}
+			return bin;
+		}
+
+		[[nodiscard]] static constexpr int8_t dof_bin(DOF_t dof) noexcept {
+			int8_t bin = 0;
 			const uint64_t dd = dof.depth();
 			const uint64_t split = (dd>0) ? (uint64_t{1}<<(dd-1)) : 0;	//split the index space into 8 octants. ties go to lower bin.
 			
@@ -443,9 +483,11 @@ namespace GV {
 
 		
 		void sort_dofs() noexcept {
-			// BASE::sort_keys(8, &DofHandler::dof_bin);
-			active_dof_sorter = (active_dofs.size() > 1024) ? 
-					sort_dofs_multithread(active_dofs) : sort_dofs_singlethread(active_dofs);
+			GUTIL_LOG(active_dofs.size());
+			GUTIL_LOG(key_mask.size());
+			BASE::sort_keys(8, &DofHandler::dof_key_bin);
+			// active_dof_sorter = (active_dofs.size() > 1024) ? 
+			// 		sort_dofs_multithread(active_dofs) : sort_dofs_singlethread(active_dofs);
 		}
 
 		[[nodiscard]] gutil::BinSort<DOF_t> sort_dofs_multithread(std::span<DOF_t> dofs) const noexcept {
@@ -484,12 +526,12 @@ namespace GV {
 			GUTIL_LOG("BASE ", BASE::active_keys.size());
 			GUTIL_LOG("DOF ", active_dofs.size());
 			// const size_t n_threads = threads.n_threads();
-			// const size_t dofs_per_thread = n_threads==0 ? TOTAL_POSSIBLE_DOFS : TOTAL_POSSIBLE_DOFS/n_threads;
+			// const size_t dofs_per_thread = n_threads==0 ? MAX_POSSIBLE_DOFS : MAX_POSSIBLE_DOFS/n_threads;
 			
 			// std::vector<std::vector<DOF_t>> thread_dofs(threads.n_threads());
 			// auto job = [&](size_t tid){
 			// 	const size_t start = tid*dofs_per_thread;
-			// 	const size_t end = (tid==threads.n_threads()-1) ? TOTAL_POSSIBLE_DOFS : start + dofs_per_thread;
+			// 	const size_t end = (tid==threads.n_threads()-1) ? MAX_POSSIBLE_DOFS : start + dofs_per_thread;
 
 			// 	for (size_t idx=start; idx<end; ++idx) {
 			// 		GUTIL_ASSERT(DOF_t::MakeFromIndex(idx).is_valid());

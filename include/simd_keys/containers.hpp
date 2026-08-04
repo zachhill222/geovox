@@ -104,7 +104,6 @@ namespace Keys {
 			return *this;
 		}
 
-
 		/////////////////////////////////////////////////////////////////////////
 		/// A few methods for initialziation and working with multithreading
 		/////////////////////////////////////////////////////////////////////////
@@ -120,6 +119,14 @@ namespace Keys {
 			active_keys.clear();
 		}
 
+		void init_key_mask(size_t total_possible_keys) noexcept {
+			key_mask.clear();
+			key_mask.resize(total_possible_keys,0);
+			key_mask.shrink_to_fit();
+
+			active_keys.clear();
+			sorter.clear();
+		}
 
 		/////////////////////////////////////////////////////////////////////////
 		/// A few methods read and write to the masks.
@@ -376,13 +383,15 @@ namespace Keys {
 		/// Note that the bin type needs to be unsigned.
 		/////////////////////////////////////////////////////////////////////////
 		GUTIL_DECLARE_SIMD()
-		[[nodiscard]] uint8_t static constexpr default_key_bin(uint64_t key) noexcept {
-			return Mesh3D::IsMorton(key) ? key&0b111 : 
-						((Mesh3D::IndexK_SIMD(key)&1)<<2) | ((Mesh3D::IndexJ_SIMD(key)&1)<<1) | (Mesh3D::IndexI_SIMD(key)&1);
+		[[nodiscard]] int8_t static constexpr default_key_bin(uint64_t key) noexcept {
+			return Mesh3D::IsMorton(key) ? static_cast<int8_t>(key&0b111) : 
+						static_cast<int8_t>( 	  ((Mesh3D::IndexK_SIMD(key)&1)<<2) 
+												| ((Mesh3D::IndexJ_SIMD(key)&1)<<1) 
+												| (Mesh3D::IndexI_SIMD(key)&1)      );
 		}
 
 		template<typename BinFun = decltype(&HybridKeyTracker::default_key_bin)>
-		void sort_keys(size_t N=8, BinFun&& fun = &HybridKeyTracker::default_key_bin) noexcept {
+		void sort_keys(int8_t N=8, BinFun&& fun = &HybridKeyTracker::default_key_bin) noexcept {
 			
 			//link the current active keys to the sorter
 			sorter = gutil::BinSort<uint64_t>{active_keys, N};
