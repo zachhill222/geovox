@@ -9,7 +9,7 @@ TARGETS = $(SRC:.cpp=)
 INCLUDE = -I../include -I/usr/include/eigen3 -I../external/gutil/include
 
 #default build (debug)
-CXX     = g++ -std=c++23 -Wall
+CXX     = g++ -std=c++23 -Wall -fsanitize=address
 
 #explicit defines
 DEFINES = 

@@ -67,7 +67,8 @@ namespace GV {
 
 		static constexpr uint8_t 	MAX_DEPTH 				= MaxDepth;
 		static constexpr uint64_t 	TOTAL_POSSIBLE_ELEMENTS = VoxelElement::elements_below_depth(MAX_DEPTH+1);
-
+		const uint8_t				max_depth				= MaxDepth;
+		static_assert(MAX_DEPTH<=Keys::Mesh3D::MAX_DEPTH);
 		
 		//For some algorithms, it is useful to mark an element as being visited
 		//The top three bits in S_Layer_t::element_mask are free to use

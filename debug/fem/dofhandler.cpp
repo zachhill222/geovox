@@ -32,7 +32,7 @@ using Point_t       = gutil::Point<3,double>;
 using Box_t         = gutil::Box<3,double>;
 using Sphere_t      = gutil::Sphere<3,double>;
 
-using Mesh_t        = GV::UnstructuredVoxelMesh<10>;
+using Mesh_t        = GV::UnstructuredVoxelMesh<6>;
 using MeshVert_t    = typename Mesh_t::VoxelVertex;
 using MeshElem_t    = typename Mesh_t::VoxelElement;
 using Assembly_t    = GV::SignedDistanceSpheres<double,GV_TEST_DOMAIN_PERIOD>;

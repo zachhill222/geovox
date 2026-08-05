@@ -153,7 +153,8 @@ namespace Keys {
 		/////////////////////////////////////////////////////////////////////////
 		/// A few methods to help with viewing the active list as a particular type
 		/////////////////////////////////////////////////////////////////////////
-		template<typename KeyTypeOut, typename KeyTypeIn> requires(sizeof(KeyTypeIn)==8 && sizeof(KeyTypeOut)==8)
+		template<typename KeyTypeOut, typename KeyTypeIn> 
+			requires(sizeof(KeyTypeIn)==8 && sizeof(KeyTypeOut)==8 && alignof(KeyTypeOut)==alignof(KeyTypeIn))
 		[[nodiscard]] static std::span<KeyTypeOut> reinterpret_key_span(std::span<KeyTypeIn> list) noexcept {
 			if constexpr (std::same_as<KeyTypeIn, KeyTypeOut>) {return list;}
 			else {

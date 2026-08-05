@@ -653,11 +653,14 @@ namespace GV {
 					[](DofElem_t el) {return !el.exists();});
 
 				scratch.resize(dof_elems.size() * DOF_t::N_DOF_PER_ELEM);	//ensure the scratch is perfectly sized (only shrinks)
+				std::fill(scratch.begin(), scratch.end(), DOF_t{~Keys::Mesh3D::CHECK_BIT});
 				GUTIL_SIMD()
 				for (size_t i=0; i<dof_elems.size(); ++i) {					//each element fills its buffer of potential dofs
 					DOF_t::dofs_on_elem_simd(dof_elems[i].key, 
-									&scratch[i*DOF_t::N_DOF_PER_ELEM]);
+									&scratch[i*DOF_t::N_DOF_PER_ELEM]);		//IS THIS WRITE OK?
 				}
+				GUTIL_ASSERT(std::find(scratch.begin(), 
+					scratch.end(), DOF_t{uint64_t(-1)}) == scratch.end());
 
 				std::sort(scratch.begin(), scratch.end(),					//clean up this depth
 							[](DOF_t a, DOF_t b) {return b<a;});			//note that DOF_t{0} (the does not exist flag) will be the last element

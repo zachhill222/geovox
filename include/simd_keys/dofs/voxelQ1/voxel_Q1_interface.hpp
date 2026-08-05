@@ -117,9 +117,18 @@ namespace DOFS {
 		/// Support interactions
 		/////////////////////////////////////////////////////////////
 		GUTIL_DECLARE_SIMD()
-		[[maybe_unused]] uint64_t* support_simd(uint64_t* s) const noexcept {
+		[[maybe_unused]] DofElem_t* support_simd(DofElem_t* s) const noexcept {
 			GUTIL_ASSERT(s);
+			#ifndef NDEBUG
+				std::fill(s, s+N_SUPPORT_ELEM, DofElem_t{uint64_t(-1)});
+			#endif
+
 			LagrangeQ1::GetDofSupport_SIMD<Period>(s, key);
+
+			#ifndef NDEBUG
+				GUTIL_ASSERT(std::find(s, s+N_SUPPORT_ELEM, DofElem_t{uint64_t(-1)})==s+N_SUPPORT_ELEM);
+			#endif
+
 			return s;
 		}
 
@@ -136,7 +145,17 @@ namespace DOFS {
 		[[maybe_unused]] static VoxelQ1* dofs_on_elem_simd(uint64_t s, VoxelQ1* dof) noexcept {
 			GUTIL_ASSERT(dof);
 			GUTIL_ASSERT(DofElem_t{s}.is_valid())
+			
+			#ifndef NDEBUG
+				std::fill(dof, dof+N_DOF_PER_ELEM, VoxelQ1{uint64_t(-1)});
+			#endif
+
 			LagrangeQ1::GetDofsOnElement_SIMD<Period>(s, reinterpret_cast<uint64_t*>(dof));
+
+			#ifndef NDEBUG
+			GUTIL_ASSERT(std::find(dof, dof+N_DOF_PER_ELEM, VoxelQ1{uint64_t(-1)})==dof+N_DOF_PER_ELEM);
+			#endif
+
 			return dof;
 		}
 
@@ -201,7 +220,16 @@ namespace DOFS {
 		GUTIL_DECLARE_SIMD()
 		[[maybe_unused]] VoxelQ1* children_simd(VoxelQ1* c) const noexcept {
 			GUTIL_ASSERT(c);
+			#ifndef NDEBUG
+				std::fill(c, c+N_CHILDREN, VoxelQ1{uint64_t(-1)});
+			#endif
+
 			LagrangeQ1::GetDofChildren_SIMD<Period>(key, reinterpret_cast<uint64_t*>(c));
+
+			#ifndef NDEBUG
+			GUTIL_ASSERT(std::find(c, c+N_CHILDREN, VoxelQ1{uint64_t(-1)})==c+N_CHILDREN);
+			#endif
+
 			return c;
 		}
 
@@ -223,7 +251,17 @@ namespace DOFS {
 		GUTIL_DECLARE_SIMD()
 		[[maybe_unused]] VoxelQ1* parents_simd(VoxelQ1* p) const noexcept {
 			GUTIL_ASSERT(p);
+			
+			#ifndef NDEBUG
+				std::fill(p, p+N_PARENTS, VoxelQ1{uint64_t(-1)});
+			#endif
+
 			LagrangeQ1::GetDofParents_SIMD<Period>(key, reinterpret_cast<uint64_t*>(p));
+
+			#ifndef NDEBUG
+			GUTIL_ASSERT(std::find(p, p+N_PARENTS, VoxelQ1{uint64_t(-1)})==p+N_PARENTS);
+			#endif
+
 			return p;
 		}
 

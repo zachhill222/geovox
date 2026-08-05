@@ -29,7 +29,16 @@ namespace Keys {
 	template<uint8_t Period> requires(Period<8)
 	[[maybe_unused]] VoxelVertex<Period>* VoxelElement<Period>::vertices_simd(VoxelVertex<Period>* ptr) const noexcept {
 		GUTIL_ASSERT(ptr);
+
+		#ifndef NDEBUG
+			std::fill(ptr, ptr+8, VoxelVertex<Period>{uint64_t(-1)});
+		#endif
+
 		Mesh3D::GetVerticesOfElement_SIMD<Period>(key, reinterpret_cast<uint64_t*>(ptr));
+
+		#ifndef NDEBUG
+			GUTIL_ASSERT(std::find(ptr, ptr+8, VoxelVertex<Period>{uint64_t(-1)})==ptr+8);
+		#endif
 		return ptr;
 	}
 
@@ -51,7 +60,17 @@ namespace Keys {
 	template<uint8_t Period> requires(Period<8)
 	[[maybe_unused]] VoxelElement<Period>* VoxelVertex<Period>::elements_simd(VoxelElement<Period>* ptr) const noexcept {
 		GUTIL_ASSERT(ptr);
+
+		#ifndef NDEBUG
+			std::fill(ptr, ptr+8, VoxelElement<Period>{uint64_t(-1)});
+		#endif
+
 		Mesh3D::GetElementsOfVertex_SIMD<Period>(key, reinterpret_cast<uint64_t*>(ptr));
+
+		#ifndef NDEBUG
+			GUTIL_ASSERT(std::find(ptr, ptr+8, VoxelElement<Period>{uint64_t(-1)})==ptr+8);
+		#endif
+
 		return ptr;
 	}
 

@@ -162,7 +162,17 @@ namespace Keys{
 		GUTIL_DECLARE_SIMD()
 		[[maybe_unused]] VoxelVertex* neighbors_simd(VoxelVertex* ptr) const noexcept {
 			GUTIL_ASSERT(ptr);
+
+			#ifndef NDEBUG
+				std::fill(ptr, ptr+26, VoxelVertex{uint64_t(-1)});
+			#endif
+
 			Mesh3D::GetVertexNeighbors_SIMD<Period>(key, reinterpret_cast<uint64_t*>(ptr));
+
+			#ifndef NDEBUG
+				GUTIL_ASSERT(std::find(ptr, ptr+26, VoxelVertex{uint64_t(-1)})==ptr+26);
+			#endif
+
 			return ptr;
 		}
 

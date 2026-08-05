@@ -230,7 +230,7 @@ namespace LagrangeQ1 {
 		children[26] = Mesh3D::MakeVertex<Period>(dd, ip1, jp1, kp1);
 	}
 
-	//the coefficeint of the parent is 1 if the feature of the parent is the
+	//the coefficient of the parent is 1 if the feature of the parent is the
 	//parent of the feature of the dof and 0 otherwise. For a vertex DOF,
 	//this only happens if all of its indices are 0.
 	GUTIL_DECLARE_SIMD()
@@ -240,7 +240,16 @@ namespace LagrangeQ1 {
 		ASSERT_VALID_VOXELQ1_DOF(dof)
 		GUTIL_ASSERT(Mesh3D::IsValid<Period>(dof))
 		
-		return static_cast<T>(Mesh3D::VertexIndexPairity_SIMD(dof) == 0);
+		uint64_t par = Mesh3D::CartesianIndexPairity_SIMD(dof);
+		if constexpr (Period!=0) {
+			if (Mesh3D::Depth(dof)==1) {
+				if constexpr (Period&0b001) {par&=0b110;}
+				if constexpr (Period&0b010) {par&=0b101;}
+				if constexpr (Period&0b100) {par&=0b011;}
+			}
+
+		}
+		return static_cast<T>(par==0);
 	}
 
 
