@@ -8,8 +8,10 @@ TARGETS = $(SRC:.cpp=)
 #header files
 INCLUDE = -I../include -I/usr/include/eigen3 -I../external/gutil/include
 
-#default build (debug)
-CXX     = g++ -std=c++23 -Wall -fsanitize=address
+#default build
+CXX     = g++ -std=c++23 -Wall -march=native
+# CXX    += -fsanitize=address
+CXX    += -fsanitize=thread
 
 #explicit defines
 DEFINES = 

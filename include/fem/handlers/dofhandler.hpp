@@ -127,10 +127,25 @@ namespace GV {
 		protected:
 		using BASE::key_mask;
 		using BASE::threads;										//max hardware concurency by default
+		
 		public:
-		std::span<DOF_t>						active_dofs;
-		const Mesh_t& 							mesh;				//link to the mesh, we can request refinement through const methods
-		mutable bool 							batch_is_set{false};//check if the batch start bit has been set.
+		using BASE::is_key_mask_unstable;
+		using BASE::is_key_mask_stable;
+		using BASE::start_key_mask_stable;
+		using BASE::end_key_mask_stable;
+		using BASE::start_key_mask_unstable;
+		using BASE::end_key_mask_unstable;
+		
+		using BASE::is_active_keys_unstable;
+		using BASE::is_active_keys_stable;
+		using BASE::start_active_keys_stable;
+		using BASE::end_active_keys_stable;
+		using BASE::start_active_keys_unstable;
+		using BASE::end_active_keys_unstable;
+
+		std::span<DOF_t>					active_dofs;
+		const Mesh_t& 						mesh;				//link to the mesh, we can request refinement through const methods
+		mutable std::atomic<bool> 			batch_is_set{false};//check if the batch start bit has been set.
 
 		/////////////////////////////////////////////////////////////////////////
 		/// Constructors. The dofhandler must be linked to the mesh at construction
@@ -228,133 +243,146 @@ namespace GV {
 			return DofFeature_t{dof.key};
 		}
 
+		//for vertex dofs, sometimes getting the correct depth is awkward.
+		//determine if any (there is at most one) dof lives at the same geometric location
+		//as the requested vertex
+		template<typename Vert_t> requires(std::same_as<Vert_t,MeshVert_t> || std::same_as<Vert_t,DofVert_t>)
+		[[nodiscard]] constexpr DofFeature_t get_dof_vertex(Vert_t vtx_) noexcept requires(VERTEX_DOF) {
+			GV_ASSERT_KEY_MASK_STABLE_STATE
+			DofVert_t vtx = static_cast<DofVert_t>(vtx_);
+			if (!DOF_t{vtx}.exists()) {return DofFeature_t::None();} //not a valid feature for periodic dofs
+			//traverse to shallowest mesh key, then check going down
+			while (vtx.parent().exists()) { vtx = vtx.parent(); }
+			for (uint64_t dd=vtx.depth(); dd<=Mesh_t::MAX_DEPTH; ++dd) {
+				//note that the linear index of any feature is determined by its non-periodic location
+				//for periodic features, the cononical choice is the feature with smallest indices.
+				if (BASE::is_active_stable(vtx.linear_index())) {return vtx;}
+				else if (vtx.child().exists()) {vtx = vtx.child();}
+				else {break;}
+			}
+			return DofFeature_t::None();
+		}
+
 
 		/////////////////////////////////////////////////////////////////////////
-		/// Utility methods. The set_* methods return true if the status changed.
+		/// Adapt masking function to DOFs and this classes's masks
 		/////////////////////////////////////////////////////////////////////////
 		[[nodiscard]] uint8_t get_mask(DOF_t dof) const noexcept {
-			GUTIL_ASSERT(dof.is_valid() && dof.linear_index()<key_mask.size());
-			return key_mask[dof.linear_index()];
+			GUTIL_ASSERT(dof.is_valid()); return BASE::get_mask(dof.linear_index());
+		}
+		[[nodiscard]] uint8_t& get_mask_ref(DOF_t dof) noexcept {
+			GUTIL_ASSERT(dof.is_valid()); return BASE::get_mask_ref(dof.linear_index());
+		}
+		[[nodiscard]] uint8_t get_mask_stable(DOF_t dof) const noexcept {
+			GUTIL_ASSERT(dof.is_valid()); return BASE::get_mask_stable(dof.linear_index());
+		}
+		[[nodiscard]] uint8_t get_mask_unstable(DOF_t dof) const noexcept {
+			GUTIL_ASSERT(dof.is_valid()); return BASE::get_mask_unstable(dof.linear_index());
+		}
+		[[nodiscard]] uint8_t& get_mask_ref_pseudo_const(DOF_t dof) const noexcept {
+			GUTIL_ASSERT(dof.is_valid()); return BASE::get_mask_ref_pseudo_const(dof.linear_index());
 		}
 
-		[[nodiscard]] uint8_t& get_mask_ref(DOF_t dof) const noexcept {
-			GUTIL_ASSERT(dof.is_valid() && dof.linear_index()<key_mask.size());
-			return key_mask[dof.linear_index()];
-		}
-
-		GUTIL_DECLARE_SIMD()
-		[[nodiscard]] uint8_t get_mask(uint64_t idx) const noexcept {
-			GUTIL_ASSERT(idx<key_mask.size());
-			return key_mask[idx];
-		}
-
-		GUTIL_DECLARE_SIMD()
-		[[nodiscard]] uint8_t& get_mask_ref(uint64_t idx) const noexcept {
-			GUTIL_ASSERT(idx<key_mask.size());
-			return key_mask[idx];
-		}
 
 		[[nodiscard]] bool is_active(DOF_t dof) const noexcept {
-			GUTIL_ASSERT(dof.is_valid());
-			return ACTIVE_BIT & get_mask(dof);
+			GUTIL_ASSERT(dof.is_valid()); return BASE::is_active(dof.linear_index());
+		}
+		[[nodiscard]] bool is_active_no_check(DOF_t dof) const noexcept {
+			GUTIL_ASSERT(dof.is_valid()); return BASE::is_active_no_check(dof.linear_index());
+		}
+		[[nodiscard]] bool is_active_stable(DOF_t dof) const noexcept {
+			GUTIL_ASSERT(dof.is_valid()); return BASE::is_active_stable(dof.linear_index());
+		}
+		[[nodiscard]] bool is_active_unstable(DOF_t dof) const noexcept {
+			GUTIL_ASSERT(dof.is_valid()); return BASE::is_active_unstable(dof.linear_index());
+		}
+		[[nodiscard]] bool set_active_compare_exchange(DOF_t dof, bool val) noexcept {
+			GUTIL_ASSERT(dof.is_valid()); return BASE::set_active_compare_exchange(dof.linear_index(), val);
+		}
+		void set_active(DOF_t dof, bool val) noexcept {
+			GUTIL_ASSERT(dof.is_valid()); BASE::set_active(dof.linear_index(), val);
 		}
 
+		
 		[[nodiscard]] bool is_refined(DOF_t dof) const noexcept {
-			GUTIL_ASSERT(dof.is_valid());
-			return REFINED_BIT & get_mask(dof);
+			GUTIL_ASSERT(dof.is_valid()); return BASE::check_bit<REFINED_BIT>(dof.linear_index());
 		}
+		[[nodiscard]] bool is_refined_stable(DOF_t dof) const noexcept {
+			GUTIL_ASSERT(dof.is_valid()); return BASE::check_bit_stable<REFINED_BIT>(dof.linear_index());
+		}
+		[[nodiscard]] bool is_refined_unstable(DOF_t dof) const noexcept {
+			GUTIL_ASSERT(dof.is_valid()); return BASE::check_bit_unstable<REFINED_BIT>(dof.linear_index());
+		}
+		[[nodiscard]] bool set_refined_compare_exchange(DOF_t dof, bool val) noexcept {
+			GUTIL_ASSERT(dof.is_valid()); return BASE::set_bit_compare_exchange<REFINED_BIT>(dof.linear_index(), val);
+		}
+		void set_refined(DOF_t dof, bool val) noexcept {
+			GUTIL_ASSERT(dof.is_valid()); BASE::set_bit<REFINED_BIT>(dof.linear_index(), val);
+		}
+
 
 		[[nodiscard]] bool is_coef_marked(DOF_t dof) const noexcept {
-			GUTIL_ASSERT(dof.is_valid());
-			return COEF_MARKED_BIT & get_mask(dof);
+			GUTIL_ASSERT(dof.is_valid()); return BASE::check_bit<COEF_MARKED_BIT>(dof.linear_index());
+		}
+		[[nodiscard]] bool is_coef_marked_stable(DOF_t dof) const noexcept {
+			GUTIL_ASSERT(dof.is_valid()); return BASE::check_bit_stable<COEF_MARKED_BIT>(dof.linear_index());
+		}
+		[[nodiscard]] bool is_coef_marked_unstable(DOF_t dof) const noexcept {
+			GUTIL_ASSERT(dof.is_valid()); return BASE::check_bit_unstable<COEF_MARKED_BIT>(dof.linear_index());
+		}
+		//called via const ref, the mask is mutable
+		[[nodiscard]] bool set_coef_marked_compare_exchange(DOF_t dof, bool val) const noexcept {
+			GUTIL_ASSERT(dof.is_valid()); return BASE::set_bit_compare_exchange<COEF_MARKED_BIT>(dof.linear_index(), val);
+		}
+		//called via const ref, the mask is mutable
+		void set_coef_marked(DOF_t dof, bool val) const noexcept {
+			GUTIL_ASSERT(dof.is_valid()); BASE::set_bit<COEF_MARKED_BIT>(dof.linear_index(), val);
 		}
 
-		GUTIL_DECLARE_SIMD()
-		[[nodiscard]] bool is_active(uint64_t d_idx) const noexcept {
-			GUTIL_ASSERT(d_idx < max_possible_dofs);
-			return ACTIVE_BIT & get_mask(d_idx);
+
+		[[nodiscard]] bool is_initial_marked(DOF_t dof) const noexcept {
+			GUTIL_ASSERT(dof.is_valid()); return BASE::check_bit<INITIAL_DOF_BIT>(dof.linear_index());
+		}
+		[[nodiscard]] bool is_initial_marked_stable(DOF_t dof) const noexcept {
+			GUTIL_ASSERT(dof.is_valid()); return BASE::check_bit_stable<INITIAL_DOF_BIT>(dof.linear_index());
+		}
+		[[nodiscard]] bool is_initial_marked_unstable(DOF_t dof) const noexcept {
+			GUTIL_ASSERT(dof.is_valid()); return BASE::check_bit_unstable<INITIAL_DOF_BIT>(dof.linear_index());
+		}
+		[[nodiscard]] bool set_initial_marked_compare_exchange(DOF_t dof, bool val) noexcept {
+			GUTIL_ASSERT(dof.is_valid()); return BASE::set_bit_compare_exchange<INITIAL_DOF_BIT>(dof.linear_index(), val);
+		}
+		void set_initial_marked(DOF_t dof, bool val) noexcept {
+			GUTIL_ASSERT(dof.is_valid()); BASE::set_bit<INITIAL_DOF_BIT>(dof.linear_index(), val);
 		}
 
-		GUTIL_DECLARE_SIMD()
-		[[nodiscard]] bool is_refined(uint64_t d_idx) const noexcept {
-			GUTIL_ASSERT(d_idx < max_possible_dofs);
-			return REFINED_BIT & get_mask(d_idx);
+
+		[[nodiscard]] bool is_batch_marked(DOF_t dof) const noexcept {
+			GUTIL_ASSERT(dof.is_valid()); return BASE::check_bit<BATCH_PROCESS_BIT>(dof.linear_index());
+		}
+		[[nodiscard]] bool is_batch_marked_stable(DOF_t dof) const noexcept {
+			GUTIL_ASSERT(dof.is_valid()); return BASE::check_bit_stable<BATCH_PROCESS_BIT>(dof.linear_index());
+		}
+		[[nodiscard]] bool is_batch_marked_unstable(DOF_t dof) const noexcept {
+			GUTIL_ASSERT(dof.is_valid()); return BASE::check_bit_unstable<BATCH_PROCESS_BIT>(dof.linear_index());
+		}
+		[[nodiscard]] bool set_batch_marked_compare_exchange(DOF_t dof, bool val) noexcept {
+			GUTIL_ASSERT(dof.is_valid()); return BASE::set_bit_compare_exchange<BATCH_PROCESS_BIT>(dof.linear_index(), val);
+		}
+		void set_batch_marked(DOF_t dof, bool val) noexcept {
+			GUTIL_ASSERT(dof.is_valid()); BASE::set_bit<BATCH_PROCESS_BIT>(dof.linear_index(), val);
 		}
 
-		GUTIL_DECLARE_SIMD()
-		[[nodiscard]] bool is_coef_marked(uint64_t d_idx) const noexcept {
-			GUTIL_ASSERT(d_idx < max_possible_dofs);
-			return COEF_MARKED_BIT & get_mask(d_idx);
-		}
 
-		[[maybe_unused]] bool set_active(DOF_t dof, bool val) noexcept {
-			GUTIL_ASSERT(dof.is_valid());
-			uint8_t& byte  = get_mask_ref(dof);
-			const bool old = byte&ACTIVE_BIT;
-			if (old==val) {return false;}
-			val ? byte|=ACTIVE_BIT : byte&=~ACTIVE_BIT;
-			return true;
-		}
-
-		GUTIL_DECLARE_SIMD()
-		[[maybe_unused]] bool set_active(uint64_t d_idx, bool val) noexcept {
-			GUTIL_ASSERT(d_idx < max_possible_dofs);
-			uint8_t& byte  = get_mask_ref(d_idx);
-			const bool old = byte&ACTIVE_BIT;
-			if (old==val) {return false;}
-			val ? byte|=ACTIVE_BIT : byte&=~ACTIVE_BIT;
-			return true;
-		}
-
-		[[maybe_unused]] bool set_refined(DOF_t dof, bool val) noexcept {
-			GUTIL_ASSERT(dof.is_valid())
-			uint8_t& byte  = get_mask_ref(dof);
-			const bool old = byte&REFINED_BIT;
-			if (old==val) {return false;}
-			val ? byte|=REFINED_BIT : byte&=~REFINED_BIT;
-			#ifndef NDEBUG
-				if (!val) GUTIL_ASSERT(!(bool)(byte&INITIAL_DOF_BIT)); //the initial dofs should never be unrefined
-			#endif
-			return true;
-		}
-
-		GUTIL_DECLARE_SIMD()
-		[[maybe_unused]] bool set_refined(uint64_t d_idx, bool val) noexcept {
-			GUTIL_ASSERT(d_idx < max_possible_dofs);
-			uint8_t& byte  = get_mask_ref(d_idx);
-			const bool old = byte&REFINED_BIT;
-			if (old==val) {return false;}
-			val ? byte|=REFINED_BIT : byte&=~REFINED_BIT;
-			#ifndef NDEBUG
-				if (!val) GUTIL_ASSERT(!(bool)(byte&INITIAL_DOF_BIT)); //the initial dofs should never be unrefined
-			#endif
-			return true;
-		}
-
-		[[maybe_unused]] bool set_coef_marked(DOF_t dof, bool val) const noexcept {
-			GUTIL_ASSERT(dof.is_valid());
-			uint8_t& byte  = get_mask_ref(dof);
-			const bool old = byte&COEF_MARKED_BIT;
-			if (old==val) {return false;}
-			val ? byte|=COEF_MARKED_BIT : byte&=~COEF_MARKED_BIT;
-			return true;
-		}
-
-		[[maybe_unused]] bool set_coef_marked(uint64_t d_idx, bool val) const noexcept {
-			GUTIL_ASSERT(d_idx < max_possible_dofs)
-			uint8_t& byte  = get_mask_ref(d_idx);
-			const bool old = byte&COEF_MARKED_BIT;
-			if (old==val) {return false;}
-			val ? byte|=COEF_MARKED_BIT : byte&=~COEF_MARKED_BIT;
-			return true;
-		}
-
+		///////////////////////////////////////////////////////////////////////////
+		/// Define functions to sort DOFs into bins and to look up global dof numbers
+		///////////////////////////////////////////////////////////////////////////
 		GUTIL_DECLARE_SIMD()
 		[[nodiscard]] static constexpr int8_t dof_key_bin(uint64_t dof_key) noexcept {
 			int8_t bin = 0;
 			DOF_t dof{dof_key};
 			const uint64_t dd = dof.depth();
-			const uint64_t split = (dd>0) ? (uint64_t{1}<<(dd-1)) : 0;	//split the index space into 8 octants. ties go to lower bin.
+			const uint64_t split = (dd>0) ? (uint64_t{1}<<(dd-1)) : 0;
 			
 			if (dof.i() > split) { bin |= 1;}
 			if (dof.j() > split) { bin |= 2;}
@@ -365,7 +393,7 @@ namespace GV {
 		[[nodiscard]] static constexpr int dof_bin(DOF_t dof) noexcept {
 			int bin = 0;
 			const uint64_t dd = dof.depth();
-			const uint64_t split = (dd>0) ? (uint64_t{1}<<(dd-1)) : 0;	//split the index space into 8 octants. ties go to lower bin.
+			const uint64_t split = (dd>0) ? (uint64_t{1}<<(dd-1)) : 0;
 			
 			if (dof.i() > split) { bin |= 1;}
 			if (dof.j() > split) { bin |= 2;}
@@ -375,86 +403,73 @@ namespace GV {
 
 		//get a single dof global number
 		[[nodiscard]] uint64_t global_number(DOF_t dof) const noexcept {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
 			GUTIL_ASSERT(is_current());
 			return BASE::lookup_key(dof.key, &dof_key_bin);
 		}
 
-		//for vertex dofs, sometimes getting the correct depth is awkward.
-		//determine if any (there is at most one) dof lives at the same geometric location
-		//as the requested vertex
-		template<typename Vert_t> requires(std::same_as<Vert_t,MeshVert_t> || std::same_as<Vert_t,DofVert_t>)
-		[[nodiscard]] DofFeature_t get_dof_vertex(Vert_t vtx_) const noexcept requires(VERTEX_DOF) {
-			DofVert_t vtx = static_cast<DofVert_t>(vtx_);
-			if (!DOF_t{vtx}.exists()) {return DofFeature_t::None();} //not a valid feature for periodic dofs
-			//traverse to shallowest mesh key, then check going down
-			while (vtx.parent().exists()) { vtx = vtx.parent(); }
-			for (uint64_t dd=vtx.depth(); dd<=max_depth; ++dd) {
-				if (is_active(vtx.linear_index())) {return vtx;}
-				else if (vtx.child().exists()) {vtx = vtx.child();}
-				else {break;}
-			}
-			return DofFeature_t::None();
-		}
-
 		//sort the dofs by increasing global index and get their global index
 		void get_dof_number_local_sort(std::span<DOF_t> dofs, std::span<uint64_t> global_index) const noexcept {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
 			GUTIL_ASSERT(is_current());
 			GUTIL_ASSERT(is_sorted() && "DofHandler - the dofs must be sorted to get the correct global index");
 			BASE::lookup_keys_and_sort(
 				BASE::reinterpret_key_span<uint64_t,DOF_t>(dofs), global_index, 8, &dof_key_bin);
 		}
 		
-		
-
-
-
-
 
 		/////////////////////////////////////////////////////////////////////////
 		/// Initialization. The mesh must be in a conformal state.
 		/////////////////////////////////////////////////////////////////////////
 		void init_dofs() noexcept {
+			//TODO: ensure the mesh is in a stable state after it inherits from the HybridKeyTracker
+			BASE::clear();
+
 			if (mesh.element_begin()==mesh.element_end()) {
 				GUTIL_ABORT("ERROR: no elements found.")
 			}
 
-			clear();
-			
-			const uint64_t n_workers  = threads.n_threads();
-			const uint64_t el_per_thread = (n_workers==0) ? mesh.n_elements() : mesh.n_elements()/n_workers;
+			{
+				GV_BEGIN_UNSTABLE
 
-			for (uint64_t tid=0; tid<n_workers; ++tid) {
-				const uint64_t start = tid * el_per_thread;
-				const uint64_t end   = (tid==n_workers-1) ? mesh.n_elements() : start + el_per_thread;
-				auto job = [&](auto it, auto end) {
-					while (it != end) {
-						for (MeshFeature_t feat : features(*it)) {
-							const DOF_t dof{feat}; //constructor handles period transformation if needed
-							#ifndef NDEBUG
-							DofFeature_t d_feat{feat};
-							if (d_feat.exists() && !mesh.is_geometrically_conformal(d_feat)) {
-								GUTIL_ASSERT(dof==DOF_t{d_feat});
-								GUTIL_ERROR("dof_feature ", d_feat, " is not conformal in the mesh");
-								std::terminate();
-							}
-							#endif
-							if (dof.exists()) {
-								const uint64_t idx = dof.linear_index();
-								set_active(idx, true);
+				//TODO: dispatch to the mesh parallel pool after it inherits from the HybridKeyTracker
+				const uint64_t n_threads     = threads.n_threads() == 0 ? 1 : threads.n_threads();
+				const uint64_t el_per_thread = mesh.n_elements()/n_threads;
 
-								//mark as explicitly refinable
-								if (dof.depth() != max_depth) {
-									key_mask[idx] |= INITIAL_DOF_BIT;
+				for (uint64_t tid=0; tid<n_threads; ++tid) {
+					const uint64_t start = tid * el_per_thread;
+					const uint64_t end   = (tid==n_threads-1) ? mesh.n_elements() : start + el_per_thread;
+					auto job = [&](auto it, auto end) {
+						while (it != end) {
+							for (MeshFeature_t feat : features(*it)) {
+								const DOF_t dof{feat}; //constructor handles period transformation if needed
+								#ifndef NDEBUG
+								DofFeature_t d_feat{feat};
+								if (d_feat.exists() && !mesh.is_geometrically_conformal(d_feat)) {
+									GUTIL_ASSERT(dof==DOF_t{d_feat});
+									GUTIL_ERROR("dof_feature ", d_feat, " is not conformal in the mesh");
+									std::terminate();
+								}
+								#endif
+								if (dof.exists()) {
+									const uint64_t idx = dof.linear_index();
+									BASE::set_active(idx, true);
+
+									//mark as explicitly refinable
+									if (dof.depth() != max_depth) {
+										key_mask[idx] |= INITIAL_DOF_BIT;
+									}
 								}
 							}
+							++it;
 						}
-						++it;
-					}
-				};
-				GUTIL_ASSERT(start<=end);
-				threads.submit(job, mesh.element_begin()+start, mesh.element_begin()+end);
-			}
-			threads.wait_idle();
+					};
+					GUTIL_ASSERT(start<=end);
+					threads.submit(job, mesh.element_begin()+start, mesh.element_begin()+end);
+				}
+				threads.wait_idle();
+				GV_END_UNSTABLE
+			}//release mutex (collect dofs needs to re-aquire the unique lock)
 			collect_dofs();
 		}
 
@@ -462,19 +477,22 @@ namespace GV {
 		/////////////////////////////////////////////////////////////////////////
 		/// Book keeping methods
 		/////////////////////////////////////////////////////////////////////////
-		[[nodiscard]] size_t n_dofs() const noexcept { return active_dofs.size(); }
+		[[nodiscard]] size_t n_dofs() const noexcept {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			return active_dofs.size();
+		}
 
-		
 		void collect_dofs() noexcept {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
 			BASE::collect_active_keys<DOF_t>();
 			active_dofs = BASE::reinterpret_key_span<DOF_t,uint64_t>(std::span<uint64_t>(BASE::active_keys));
 			BASE::sort_active_keys(8, &DofHandler::dof_key_bin);
 		}
 
-
 		/// mark the start of a wide (look at lots of dofs) process
 		/// set_batch_start() sets the BATCH_PROCESS_BIT to true on all active dof masks
 		void set_batch_start() noexcept {
+			GV_ASSERT_KEY_MASK_UNSTABLE_STATE
 			BASE::conditional_bitwise_or_all_masks(ACTIVE_BIT,BATCH_PROCESS_BIT);
 			batch_is_set = true;
 		}
@@ -482,6 +500,7 @@ namespace GV {
 		/// mark the end of a wide (look at lots of dofs) process
 		/// set_batch_end() sets the BATCH_PROCESS_BIT to false on all dof masks
 		void set_batch_end() noexcept {
+			GV_ASSERT_KEY_MASK_UNSTABLE_STATE
 			BASE::unconditional_bitwise_and_all_masks(~BATCH_PROCESS_BIT);
 			batch_is_set = false;
 		}
@@ -515,6 +534,8 @@ namespace GV {
 		/////////////////////////////////////////////////////////////////////////
 		template<typename Elem_t> requires(std::same_as<Elem_t,DofElem_t> || std::same_as<Elem_t,MeshElem_t> )
 		void get_active_dofs_conformal(Elem_t el_, std::vector<DOF_t>& dofs, std::vector<uint64_t>& global_idx) const noexcept {
+			GV_BEGIN_MASK_UNSTABLE
+
 			GUTIL_ASSERT(BASE::is_current());
 			GUTIL_ASSERT(is_sorted() && "DofHandler - the dofs must be sorted to get the correct global index");
 			GUTIL_ASSERT(dofs.size()==global_idx.size());
@@ -527,7 +548,7 @@ namespace GV {
 
 			for (DofFeature_t feat : features(el)) {
 				const DOF_t dof{feat};
-				if (dof.exists() && is_active(dof)) {
+				if (dof.exists() && is_active_unstable(dof)) {
 					dofs.push_back(dof);
 				}
 			}
@@ -535,10 +556,14 @@ namespace GV {
 			global_idx.resize(dofs.size());
 			get_dof_number_local_sort(std::span<DOF_t>{dofs.begin()+start_size, dofs.end()}, 
 						std::span<uint64_t>{global_idx.begin()+start_size, global_idx.end()});
+
+			GV_END_MASK_UNSTABLE
 		}
 
 		template<typename Elem_t> requires(std::same_as<Elem_t,DofElem_t> || std::same_as<Elem_t,MeshElem_t> )
 		void get_active_dofs_quasi_hierarchical(Elem_t el_, std::vector<DOF_t>& dofs, std::vector<uint64_t>& global_idx) const noexcept {
+			GV_BEGIN_ACTIVE_STABLE
+
 			GUTIL_ASSERT(is_current() && "DofHandler - the dofs must be sorted to get the correct global index");
 			GUTIL_ASSERT(dofs.size()==global_idx.size());
 			//assume that dofs only exist at the features of active elements or the feature of a parent of an active element
@@ -551,7 +576,7 @@ namespace GV {
 			for (int i=0; i<2 && el.exists(); ++i) {
 				for (DofFeature_t feat : features(el)) {
 					const DOF_t dof{feat};
-					if (dof.exists() && is_active(dof)) {
+					if (dof.exists() && is_active_stable(dof)) {
 						dofs.push_back(dof);
 					}
 				}
@@ -561,10 +586,14 @@ namespace GV {
 			global_idx.resize(dofs.size());
 			get_dof_number_local_sort(std::span<DOF_t>{dofs.begin()+start_size, dofs.end()}, 
 						std::span<uint64_t>{global_idx.begin()+start_size, global_idx.end()});
+
+			GV_END_ACTIVE_STABLE
 		}
 
 		template<typename Elem_t> requires(std::same_as<Elem_t,DofElem_t> || std::same_as<Elem_t,MeshElem_t> )
 		void get_active_dofs_full_hierarchical(Elem_t el_, std::vector<DOF_t>& dofs, std::vector<uint64_t>& global_idx) const noexcept {
+			GV_BEGIN_ACTIVE_STABLE
+
 			GUTIL_ASSERT(is_current() && "DofHandler - the dofs must be sorted to get the correct global index");
 			GUTIL_ASSERT(dofs.size()==global_idx.size());
 			//assume that dofs only exist at the features of active elements or the feature of any ancestor of an active element
@@ -577,7 +606,7 @@ namespace GV {
 			while (el.exists()) {
 				for (DofFeature_t feat : features(el)) {
 					const DOF_t dof{feat};
-					if (dof.exists() && is_active(dof)) {
+					if (dof.exists() && is_active_stable(dof)) {
 						dofs.push_back(dof);
 					}
 				}
@@ -587,6 +616,8 @@ namespace GV {
 			global_idx.resize(dofs.size());
 			get_dof_number_local_sort(std::span<DOF_t>{dofs.begin()+start_size, dofs.end()}, 
 						std::span<uint64_t>{global_idx.begin()+start_size, global_idx.end()});
+
+			GV_END_ACTIVE_STABLE
 		}
 
 
@@ -614,26 +645,30 @@ namespace GV {
 		/// If you are passing an action, be cautious of race conditions when doing this.
 		///
 		/// It is not necessary that all input elements are at the same depth.
+		///
+		/// Depending on the Action, stable/unstable needs to be set by the caller
 		//////////////////////////////////////////////////////////////////////////////////////////////
 		template<typename Predicate, typename Action>
 		[[nodiscard]] std::vector<DOF_t> get_dofs_impl(
 				std::span<const DofElem_t> 	elems,
 				Predicate&& 				pred,
 				Action&& 					action,
-				uint8_t 					n_depths) const noexcept 
-		{
+				uint8_t 					n_depths) noexcept 
+		{	
+			GUTIL_TIMER("Gathering unique dofs on ", elems.size(), " elements");
+
 			//sanity checks and argument deduction
 			constexpr bool PRED_MASK = std::is_invocable_r_v<bool, Predicate, uint8_t>;
 			constexpr bool PRED_DOF  = std::is_invocable_r_v<bool, Predicate, DOF_t>;
 			constexpr bool PRED_BOTH = std::is_invocable_r_v<bool, Predicate, uint8_t, DOF_t>;
 			constexpr bool PRED_REV  = std::is_invocable_r_v<bool, Predicate, DOF_t, uint8_t>;
-			static_assert(PRED_MASK + PRED_DOF + PRED_BOTH + PRED_REV, "The predicate argument could not be determined");
-
+			static_assert(PRED_MASK + PRED_DOF + PRED_BOTH + PRED_REV, 
+									"The predicate argument could not be determined");
 
 			constexpr bool HAS_ACTION = !std::same_as<std::nullptr_t,Action>;
-			static_assert(!HAS_ACTION || std::is_invocable_r_v<void,Action,uint8_t&>, "The action must haave the signature void(uint8_t&)");
+			static_assert(!HAS_ACTION || std::is_invocable_r_v<void,Action,uint8_t&>, 
+									"The action must haave the signature void(uint8_t&)");
 
-			GUTIL_TIMER("Gathering unique dofs on ", elems.size(), " elements");
 
 			n_depths = std::min(n_depths, max_depth);						//make sure n_depths is feasible
 			std::vector<DofElem_t> dof_elems{elems.begin(), elems.end()};	//copy the elements so we are free to manipulate them.
@@ -653,14 +688,19 @@ namespace GV {
 					[](DofElem_t el) {return !el.exists();});
 
 				scratch.resize(dof_elems.size() * DOF_t::N_DOF_PER_ELEM);	//ensure the scratch is perfectly sized (only shrinks)
-				std::fill(scratch.begin(), scratch.end(), DOF_t{~Keys::Mesh3D::CHECK_BIT});
+				
+				#ifndef NDEBUG
+				//test that we write to every memory location in the scratch buffer
+				std::fill(scratch.begin(), scratch.end(), DOF_t{uint64_t(-1)});
+				#endif
+
 				GUTIL_SIMD()
 				for (size_t i=0; i<dof_elems.size(); ++i) {					//each element fills its buffer of potential dofs
 					DOF_t::dofs_on_elem_simd(dof_elems[i].key, 
-									&scratch[i*DOF_t::N_DOF_PER_ELEM]);		//IS THIS WRITE OK?
+									&scratch[i*DOF_t::N_DOF_PER_ELEM]);
 				}
-				GUTIL_ASSERT(std::find(scratch.begin(), 
-					scratch.end(), DOF_t{uint64_t(-1)}) == scratch.end());
+
+				GUTIL_ASSERT(std::find(scratch.begin(),scratch.end(), DOF_t{uint64_t(-1)}) == scratch.end());
 
 				std::sort(scratch.begin(), scratch.end(),					//clean up this depth
 							[](DOF_t a, DOF_t b) {return b<a;});			//note that DOF_t{0} (the does not exist flag) will be the last element
@@ -712,6 +752,8 @@ namespace GV {
 		///////////////////////////////////////////////////////////////////////
 		template<typename T=double, typename Action>
 		void gather_hierarchical_dofs(Action&& action, DofElem_t el, T* x, T* y, T* z, uint32_t N) const noexcept {
+			GV_BEGIN_STABLE
+
 			GUTIL_ASSERT(BASE::is_current());
 			GUTIL_ASSERT(active_dofs.size()>0);
 			GUTIL_ASSERT(x && y && z && N>0);
@@ -720,6 +762,8 @@ namespace GV {
 			constexpr bool ACTION_NEEDS_NO_INDEX     = std::is_invocable_r_v<void, Action, DOF_t, uint8_t, T, T, T>;
 			constexpr bool ACTION_NEEDS_GLOBAL_INDEX = std::is_invocable_r_v<void, Action, DOF_t, uint8_t, T, T, T, uint64_t>;
 			
+
+
 			static_assert(ACTION_NEEDS_NO_INDEX ^ ACTION_NEEDS_GLOBAL_INDEX, 
 				"the action must have the signature void(DOF_t,uint8_t,T,T,T,uint64_t) or void(DOF_t,uint8_t,T,T,T)");
 
@@ -740,7 +784,7 @@ namespace GV {
 				std::array<DOF_t, DOF_t::N_DOF_PER_ELEM> basis;
 				DOF_t::dofs_on_elem_simd(el.key, reinterpret_cast<uint64_t*>(&basis[0]));
 				for (DOF_t dof : basis) {
-					if (dof.exists() && is_active(dof)) {
+					if (dof.exists() && is_active_stable(dof)) {
 						[[maybe_unused]] uint64_t global_n;
 						if constexpr (ACTION_NEEDS_GLOBAL_INDEX) {
 							global_n = global_number(dof);
@@ -779,11 +823,15 @@ namespace GV {
 				}
 				el = parent;
 			}
+
+			GV_END_STABLE
 		}
 
 
 		template<typename T=double, typename Action, typename Vert_t> requires(std::same_as<Vert_t,MeshVert_t> || std::same_as<Vert_t,DofVert_t>)
 		void gather_hierarchical_dofs_at_vertex(Action&& action, Vert_t vtx) const noexcept {
+			GV_BEGIN_STABLE
+
 			GUTIL_ASSERT(BASE::is_current());
 			GUTIL_ASSERT(active_dofs.size()>0);
 
@@ -846,7 +894,7 @@ namespace GV {
 					std::array<DOF_t, DOF_t::N_DOF_PER_ELEM> basis;
 					DOF_t::dofs_on_elem_simd(el.key, &basis[0]);
 					for (DOF_t dof : basis) {
-						if (!dof.exists() || !is_active(dof)) { continue; }
+						if (!dof.exists() || !is_active_stable(dof)) { continue; }
 						uint64_t key = static_cast<uint64_t>(dof);
 						if (std::find(seen.begin(), seen.end(), key) != seen.end()) { continue; }
 						seen.push_back(key);
@@ -854,7 +902,7 @@ namespace GV {
 						[[maybe_unused]] uint64_t global_n;
 						if constexpr (ACTION_NEEDS_GLOBAL_INDEX) {
 							global_n = global_number(dof);
-							if (active_dofs[global_n]!=dof){
+							if (active_dofs[global_n]!=dof) {
 								
 								GUTIL_ERROR(dof, " is marked as active. global number ", global_n, " was found, but active_dofs[",global_n,"]= ", active_dofs[global_n]);
 
@@ -878,13 +926,28 @@ namespace GV {
 					elems[e] = el.parent();
 				}
 			}
+
+			GV_END_STABLE
 		}
 
 
 
 
 		/////////////////////////////////////////////////////////////////////////
-		/// Refinement queries and operations
+		/// Refinement queries that can be called inside either a stable or unstable
+		/// region.
+		///
+		///	From 'Natural hierarchical refinement for finite element methods'
+		///	in International J. for Numerical Methods in Engineering (2003, DOI 10.1002/nme.601)
+		///
+		/// 	There are 3 rules to guide refinement:
+		///
+		///	1) The refining/unrefining of a dof at depth dd may activate or deactivate that dof
+		///			or any of its children at depth dd+1.
+		///	2) A dof on level dd+1>0 may be refined only when all its parents on level dd have
+		///			been refined. (We track this by the INITIAL_DOF_BIT. here dd=0 is the root element)
+		///	3) A dof on level dd may be unrefined only if a) it was previously refined and
+		///			b) all its children on level dd+1 are not refined.
 		/////////////////////////////////////////////////////////////////////////
 		[[nodiscard]] bool mesh_can_support_any(DOF_t dof) const noexcept {
 			GUTIL_ASSERT(dof.is_valid());
@@ -914,33 +977,20 @@ namespace GV {
 			return true;
 		}
 
-
 		[[nodiscard]] bool is_refinable(DOF_t dof) const noexcept {
-			//	From 'Natural hierarchical refinement for finite element methods'
-			//	in International J. for Numerical Methods in Engineering (2003, DOI 10.1002/nme.601)
-			//
-			// 	There are 3 rules to guide refinement:
-			//
-			//	1) The refining/unrefining of a dof at depth dd may activate or deactivate that dof
-			//			or any of its children at depth dd+1.
-			//	2) A dof on level dd+1>0 may be refined only when all its parents on level dd have
-			//			been refined. (We track this by the INITIAL_DOF_BIT. here dd=0 is the root element)
-			//	3) A dof on level dd may be unrefined only if a) it was previously refined and
-			//			b) all its children on level dd+1 are not refined.
-
-
 			GUTIL_ASSERT(dof.is_valid());
-			GUTIL_ASSERT(is_active(dof));
+			GUTIL_ASSERT(is_active_no_check(dof));
 
 			if (dof.depth() >= max_depth) {return false;}		//we can't refine past max depth
 			
-			uint8_t byte = get_mask(dof);
+			uint8_t byte = BASE::get_mask_no_check(dof.linear_index());
 			if (byte&REFINED_BIT) {return false;}				//we can't refine a dof twice
 			if (byte&INITIAL_DOF_BIT) {return true;}			//an unrefined initial dof not at max depth can be refined
 			
 			for (const DOF_t p : dof.parents()) {
 				if (p.exists() && mesh_can_support_any(p)) {	//if the mesh does not capture the entire [0,1]^3 space, don't consider irrelevant parents
-					if (!is_refined(p)) {return false;}			//a dof can't be refined until ALL of its parents are refined
+					const uint8_t p_byte = BASE::get_mask_no_check(p.linear_index());
+					if (!(bool)(p_byte&REFINED_BIT)) {return false;}//a dof can't be refined until ALL of its parents are refined
 				}
 			}
 			return true;
@@ -948,71 +998,72 @@ namespace GV {
 
 		[[nodiscard]] bool is_unrefinable(DOF_t dof) const noexcept {
 			GUTIL_ASSERT(dof.is_valid());
-			
 			if (dof.depth()>=max_depth) {return false;}			//we call unrefine on the parent. at max depth it can't be a parent.
-			const uint8_t byte = get_mask(dof);
+			const uint8_t byte = BASE::get_mask_no_check(dof.linear_index());
 			if (byte&INITIAL_DOF_BIT) {return false;}			//we can't unrefine to be coarser than the initial dofs
 			if (!(bool)(byte&REFINED_BIT)) {return false;}		//we can't unrefine a dof that hasn't been previously refined
 
 			for (const DOF_t c : dof.children()) {				//we can't unrefine a dof if it has valid children that have been refined
 				if (c.exists() && mesh_can_support_any(c)) {
-					if (is_refined(c)) {return false;}
+					const uint8_t c_byte = BASE::get_mask_no_check(c.linear_index());
+					if (c_byte&REFINED_BIT) {return false;}
 				}
 			}
-
 			return true;
 		}
 
 		[[nodiscard]] bool can_deactivate(DOF_t dof) const noexcept {
+			GUTIL_ASSERT(dof.is_valid());
 			for (DOF_t p : dof.parents()) {						//rather than making a recursive unrefine, we check if child dofs can be deactivated
-				if (p.exists() && is_refined(p)) {return false;}
+				if (p.exists()) {
+					const uint8_t byte = BASE::get_mask_no_check(p.linear_index());
+					if (byte&REFINED_BIT) {return false;}
+				}
 			}
 			return true;
 		}
 
+
+		////////////////////////////////////////////////////////////////////
+		/// Refinement operations that must be called from within an unstable mask region.
+		///
+		/// Note that we are only requesting the mesh to refine. There is no guarentee
+		/// that it will resolve every requested support element (e.g., when a complex geometry is being modeled).
+		/// Additionally, the mesh refinement will note be done until the refinement batch is over.
+		/// 
+		/// Note that the mesh has a depth field so that we do not have to see if the support of a dof
+		/// is resolved by finer elements than needed. If that is the case, the depth marker will be larger
+		/// than the element depth.
+		////////////////////////////////////////////////////////////////////
 		void activate(DOF_t dof) noexcept {
+			GV_ASSERT_KEY_MASK_UNSTABLE_STATE
 			GUTIL_ASSERT(dof.is_valid());
 
-			if (!set_active(dof,true)) {						//return if the dof was already active
+			if (!set_active_compare_exchange(dof,true)) {		//return if the dof was already active
 				return;
 			}
 																//when refining, it is essential to have the mesh be able to resolve the support
 			const uint8_t depth = dof.depth_u8();
 			if (depth==0) { return; }							//at depth 0, there is nothing to do
-			
-			//	Request the mesh to resolve the support. Note that
-			//	the mesh may deny the request of any support element,
-			//	but it should never deny the request for all elements.
-			//	If this is the case, there is probably a bad predicate
-			//	in the mesh refinement. The mesh depth field marks 
-			//	the deepest level of refinement at or below the given element
-			//	so that we do not have to traverse the entire mesh hierarchy
 			for (DofElem_t spt : dof.support()) {			
 				if (!spt.exists()) {continue;}
 				MeshElem_t el = static_cast<MeshElem_t>(spt);
 				if (el.exists() && mesh.read_depth(el) < depth) {
-					GUTIL_ASSERT(mesh.is_active(el.parent()))		//the mesh should be respecting a 2-1 refinement rule
-					mesh.refine(el.parent());						//this is a request. pushes the element to a mutable list. it is protected by a mutex.
+					GUTIL_ASSERT(mesh.is_active(el.parent()))				//the mesh should be respecting a 2-1 refinement rule
+					mesh.refine(el.parent());								//this is a request. pushes the element to a mutable list. it is protected by a mutex.
 				}
-				
-				#ifndef NDEBUG
-				else if (!batch_is_set) {							//if no elements were requested to be active, then the dof must already
-					DofFeature_t d_feat{dof.key};					//be at a geometrically conformal feature.
-					if (!mesh.is_geometrically_conformal(d_feat)) {	//the request takes into account any periodic axes
-						GUTIL_ERROR(d_feat, " is not conformal in the mesh. ", DOF_t{d_feat}, " should have requested mesh refinement");
-					}
-				}
-				#endif
 			}
 		}
 
 		void deactivate(DOF_t dof) noexcept {						//when un-refining, it is not essential to have the mesh un-refine as well.
-			set_active(dof,false); 									//mesh unrefinement should be done in some cleanup pass so that
-		}															//multiple dofhandlers can be organized
+			GV_ASSERT_KEY_MASK_UNSTABLE_STATE						//mesh unrefinement should be done in some cleanup pass so that
+			set_active(dof,false); 									//multiple dofhandlers can be organized
+		}															
 
 		void refine_quasi_hierarchical(DOF_t dof) noexcept {
+			GV_ASSERT_KEY_MASK_UNSTABLE_STATE
 			GUTIL_ASSERT(dof.is_valid());
-			GUTIL_ASSERT(is_active(dof));
+			GUTIL_ASSERT(is_active_unstable(dof));
 
 			if(!is_refinable(dof)) {return;};
 			for (DOF_t c : dof.children()) {
@@ -1022,14 +1073,15 @@ namespace GV {
 			uint8_t& byte = get_mask_ref(dof);
 			byte&=~ACTIVE_BIT;							//deactivate parent
 			byte|=REFINED_BIT;							//set refined
-			GUTIL_ASSERT(is_refined(dof));
-			GUTIL_ASSERT(!is_active(dof));
-			GUTIL_ASSERT(is_unrefinable(dof) || (get_mask(dof)&INITIAL_DOF_BIT));
+			GUTIL_ASSERT(is_refined_unstable(dof));
+			GUTIL_ASSERT(!is_active_unstable(dof));
+			GUTIL_ASSERT(is_unrefinable(dof) || (get_mask_unstable(dof)&INITIAL_DOF_BIT));
 		}
 
 		void refine_hierarchical(DOF_t dof) noexcept requires(VERTEX_DOF) {
+			GV_ASSERT_KEY_MASK_UNSTABLE_STATE
 			GUTIL_ASSERT(dof.is_valid());
-			GUTIL_ASSERT(is_active(dof));
+			GUTIL_ASSERT(is_active_stable(dof));
 
 			if(!is_refinable(dof)) {return;};
 			const MeshFeature_t p_feat = static_cast<MeshFeature_t>(dof);
@@ -1041,12 +1093,13 @@ namespace GV {
 
 			uint8_t& byte = get_mask_ref(dof);
 			byte|=REFINED_BIT;							//set refined
-			GUTIL_ASSERT(is_refined(dof));
-			GUTIL_ASSERT(is_active(dof));
-			GUTIL_ASSERT(is_unrefinable(dof) || (get_mask(dof)&INITIAL_DOF_BIT));
+			GUTIL_ASSERT(is_refined_unstable(dof));
+			GUTIL_ASSERT(is_active_unstable(dof));
+			GUTIL_ASSERT(is_unrefinable(dof) || (get_mask_unstable(dof)&INITIAL_DOF_BIT));
 		}
 
 		void unrefine_quasi_hierarchical(DOF_t dof) noexcept {
+			GV_ASSERT_KEY_MASK_UNSTABLE_STATE
 			GUTIL_ASSERT(dof.is_valid());
 
 			uint8_t& byte = get_mask_ref(dof);
@@ -1057,7 +1110,7 @@ namespace GV {
 			activate(dof);											//processes mesh refinement request
 			for (DOF_t c : dof.children()) {
 				if (c.exists()) {
-					GUTIL_ASSERT(!is_refined(c));
+					GUTIL_ASSERT(!is_refined_unstable(c));
 					if (can_deactivate(c)) {
 						set_active(c, false);
 					}
@@ -1069,7 +1122,7 @@ namespace GV {
 
 			#ifndef NDEBUG
 				bool success  = true;
-				if (!is_active(dof)) {
+				if (!is_active_unstable(dof)) {
 					success = false;
 					GUTIL_ERROR(dof, " should have been activated");
 				}
@@ -1085,10 +1138,11 @@ namespace GV {
 		}
 
 		void unrefine_hierarchical(DOF_t dof) noexcept {
-			GUTIL_ASSERT(is_active(dof));
+			GV_ASSERT_KEY_MASK_UNSTABLE_STATE
+			GUTIL_ASSERT(is_active_unstable(dof));
 			
 			//in a quasi-hierarchical scheme, the parent dof (this) stays active
-			if(!is_active(dof) || !is_unrefinable(dof)) {return;};
+			if(!is_active_unstable(dof) || !is_unrefinable(dof)) {return;};
 			for (DOF_t c : dof.children()) {
 				if (c.exists()) {set_active(c, false);}
 			}
@@ -1100,7 +1154,7 @@ namespace GV {
 
 
 		//////////////////////////////////////////////////////////////////////////////////////
-		/// Primary refine/unrefine commands
+		/// Primary refine/unrefine commands for bulk operations. Called from outside this class.
 		//////////////////////////////////////////////////////////////////////////////////////
 		template<typename Container_t>
 		[[maybe_unused]] size_t refine_quasi_hierarchical(const Container_t& elems) noexcept {
@@ -1117,9 +1171,6 @@ namespace GV {
 			GUTIL_TIMER("Refining (QH) dofs on ", elems.size(), " elements");
 			size_t n_start = active_dofs.size();
 			
-			BASE::mark_stale();
-			set_batch_start();
-
 			//a dof must be active and not refined and in the current batch.
 			constexpr uint8_t MASK = ACTIVE_BIT | BATCH_PROCESS_BIT;	//0b00010001
 			auto pred = [MASK](uint8_t byte) -> bool {
@@ -1130,26 +1181,32 @@ namespace GV {
 				byte&=~BATCH_PROCESS_BIT;
 			};
 
-			// std::nullptr_t action = nullptr;
-			std::vector<DOF_t> dofs = get_dofs_impl(BASE::reinterpret_key_span<DofElem_t,Elem_t>(elems), 
-										std::move(pred), std::move(action), max_depth);
-			
-			// TODO use binsort so we recover the partition between depths. then refine in parallel at
-			// each depth. Refine coarse to fine.
-			std::sort(dofs.begin(), dofs.end(), [](DOF_t a, DOF_t b){return a.depth() < b.depth();});
+			BASE::mark_stale();
+			{
+				GV_BEGIN_MASK_UNSTABLE
+				set_batch_start();
+				std::vector<DOF_t> dofs = get_dofs_impl(BASE::reinterpret_key_span<DofElem_t,Elem_t>(elems), 
+											std::move(pred), std::move(action), max_depth);
+				
+				// TODO use binsort so we recover the partition between depths. then refine in parallel at
+				// each depth. Refine coarse to fine.
+				std::sort(dofs.begin(), dofs.end(), [](DOF_t a, DOF_t b){return a.depth() < b.depth();});
 
-			for (size_t i=0; i<dofs.size(); ++i) {
-				#ifndef NDEBUG
-					GUTIL_ASSERT(dofs[i].is_valid());
-					uint8_t byte = get_mask(dofs[i]);
-					GUTIL_ASSERT(byte&ACTIVE_BIT);
-					GUTIL_ASSERT((byte&REFINED_BIT)==0);
-					GUTIL_ASSERT((byte&BATCH_PROCESS_BIT)==0);
-				#endif
-				refine_quasi_hierarchical(dofs[i]);
+				for (size_t i=0; i<dofs.size(); ++i) {
+					#ifndef NDEBUG
+						GUTIL_ASSERT(dofs[i].is_valid());
+						uint8_t byte = get_mask_unstable(dofs[i]);
+						GUTIL_ASSERT(byte&ACTIVE_BIT);
+						GUTIL_ASSERT((byte&REFINED_BIT)==0);
+						GUTIL_ASSERT((byte&BATCH_PROCESS_BIT)==0);
+					#endif
+					refine_quasi_hierarchical(dofs[i]);
+				}
+
+				set_batch_end();
+				GV_END_MASK_UNSTABLE
 			}
 
-			set_batch_end();
 			collect_dofs();
 			size_t n_end = active_dofs.size();
 			GUTIL_LOG("n_dofs at start=", n_start, ", n_dofs at end=", n_end, " (", n_end-n_start, ")");
@@ -1171,12 +1228,10 @@ namespace GV {
 
 		template<typename Elem_t> requires (std::same_as<Elem_t,MeshElem_t> || std::same_as<Elem_t,DofElem_t>)
 		[[maybe_unused]] size_t unrefine_quasi_hierarchical(std::span<const Elem_t> elems) noexcept {
+
 			GUTIL_TIMER("Unrefining (QH) dofs on ", elems.size(), " elements");
 			size_t n_start = active_dofs.size();
 			
-			BASE::mark_stale();
-			set_batch_start();
-
 			//a dof must be inactive and refined and in the current batch
 			//it also must have no refined children, so it must be at most one depth above.
 			auto pred = [](uint8_t byte) -> bool {
@@ -1187,8 +1242,12 @@ namespace GV {
 				byte&=~BATCH_PROCESS_BIT;
 			};
 
+			BASE::mark_stale();
+			set_batch_start();
+			GV_BEGIN_MASK_UNSTABLE	//the action clears a bit
 			std::vector<DOF_t> dofs = get_dofs_impl(BASE::reinterpret_key_span<DofElem_t,Elem_t>(elems), 
 										std::move(pred), std::move(action), max_depth);
+
 
 			//unrefine from deepest to shallowest
 			std::sort(dofs.begin(), dofs.end(), [](DOF_t a, DOF_t b){ return a.depth()>b.depth(); });
@@ -1196,7 +1255,7 @@ namespace GV {
 			for (size_t i=0; i<dofs.size(); ++i) {
 				#ifndef NDEBUG
 					GUTIL_ASSERT(dofs[i].is_valid());
-					uint8_t byte = get_mask(dofs[i]);
+					uint8_t byte = get_mask_unstable(dofs[i]);
 					GUTIL_ASSERT((byte&ACTIVE_BIT)==0);
 					GUTIL_ASSERT((byte&REFINED_BIT));
 					GUTIL_ASSERT((byte&BATCH_PROCESS_BIT)==0);
@@ -1204,8 +1263,10 @@ namespace GV {
 				unrefine_quasi_hierarchical(dofs[i]);
 			}
 
+			GV_END_MASK_UNSTABLE
 			set_batch_end();
 			collect_dofs();
+
 			size_t n_end = active_dofs.size();
 			GUTIL_LOG("n_dofs at start=", n_start, ", n_dofs at end=", n_end, " (", n_start-n_end, ")");
 			GUTIL_ASSERT(is_current());
@@ -1220,7 +1281,7 @@ namespace GV {
 
 		// 	std::vector<DOF_t> dofs = get_active_dofs_impl<true,Elem_t>(elems, max_depth);
 		// 	for (DOF_t dof : dofs) {
-		// 		GUTIL_ASSERT(is_active(dof));
+		// 		GUTIL_ASSERT(is_active_stable(dof));
 		// 		refine_hierarchical(dof);
 		// 	}
 
@@ -1235,7 +1296,7 @@ namespace GV {
 
 		// 	std::vector<DOF_t> dofs = get_active_dofs_impl<true,Elem_t>(elems, max_depth);
 		// 	for (DOF_t dof : dofs) {
-		// 		GUTIL_ASSERT(is_active(dof));
+		// 		GUTIL_ASSERT(is_active_stable(dof));
 		// 		MeshFeature_t feat = static_cast<MeshFeature_t>(dof);
 		// 		unrefine_quasi_hierarchical(static_cast<DOF_t>(feat.parent()));
 		// 	}

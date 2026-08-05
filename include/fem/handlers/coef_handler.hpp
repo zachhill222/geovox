@@ -44,46 +44,26 @@ namespace GV {
 		// Hold a snapshot of the last dofs (current coefficients)
 		// and a reference to the latest dofs (what we need to transform to)
 		//////////////////////////////////////////////////////////////////
-		std::vector<DOF_t> dofs{};
-		const DofHandler_t& dofhandler;
-		std::span<const DOF_t> dh_curr_dofs;
-		const Mesh_t& mesh;
-		
-		mutable gutil::ThreadPool threads{N};
-		void set_threads(int n) {threads.wait_idle(); threads = gutil::ThreadPool{n};}
-
-		//////////////////////////////////////////////////////////////////
-		/// Hold coefficients
-		//////////////////////////////////////////////////////////////////
-		std::array<std::vector<T>,N> coefs{};
-
+		mutable gutil::ThreadPool 		threads{N};
+		const Mesh_t& 					mesh;
+		const DofHandler_t& 			dofhandler;
+		std::span<const DOF_t> 			dh_curr_dofs;
+		std::vector<DOF_t> 				dofs{};
+		std::array<std::vector<T>,N> 	coefs{};
+		static constexpr uint8_t 		COEF_MARKED_BIT = DofHandler_type::COEF_MARKED_BIT;
 
 		//////////////////////////////////////////////////////////////////
 		/// Constructor and movement
 		//////////////////////////////////////////////////////////////////
 		CoefHandler() = delete;
 		CoefHandler(const DofHandler_t& dofhandler) noexcept : 
+			mesh{dofhandler.mesh},
 			dofhandler{dofhandler},
-			dh_curr_dofs{dofhandler.active_dofs},
-			mesh{dofhandler.mesh} {}
-		CoefHandler(CoefHandler&& other) noexcept :
-			dofs{std::move(other.dofs)},
-			dofhandler{other.dofhandler},
-			dh_curr_dofs{other.dh_curr_dofs},
-			mesh{other.mesh},
-			coefs{std::move(other.coefs)} {}
-		CoefHandler(const CoefHandler&) = delete;
-		CoefHandler& operator=(CoefHandler&& other) noexcept {
-			if (this!=&other) {
-				if (&dofhandler!=&other.dofhandler || &mesh!=&other.mesh) {
-					GUTIL_ABORT("the dofhandler and mesh must be the same");
-				}
-				dofs = std::move(other.dofs);
-				coefs = std::move(other.coefs);
-			}
-			return *this;
-		}
-
+			dh_curr_dofs{dofhandler.active_dofs} {}
+		CoefHandler(CoefHandler&& other) noexcept = default;
+		CoefHandler(const CoefHandler&) = default;
+		CoefHandler& operator=(CoefHandler&& other) noexcept = default;
+		~CoefHandler() {threads.wait_idle();}
 
 		///////////////////////////////////////////////////////////////////
 		/// Initialize a coefficient field by a scalar function.
@@ -94,11 +74,13 @@ namespace GV {
 		///////////////////////////////////////////////////////////////////
 		template<typename DofEval>
 		void init_coefs(uint8_t i, DofEval&& eval) noexcept {
+			auto lock = dofhandler.start_active_keys_stable();
+
 			dh_curr_dofs = dofhandler.active_dofs;
 			dofs.clear();
 			dofs.insert(dofs.end(), dh_curr_dofs.begin(),dh_curr_dofs.end());
 			GUTIL_ASSERT(i<N);
-			reset_dofs();
+
 			GUTIL_ASSERT(dofs.size()>0);
 			coefs[i].resize(dofs.size());
 			GUTIL_OMP(parallel for)
@@ -109,15 +91,8 @@ namespace GV {
 				#endif
 				coefs[i][idx] = eval(dofs[idx]);
 			}
-		}
 
-		void reset_dofs() noexcept {
-			GUTIL_OMP(parallel for)
-			for (uint64_t idx=0; idx<dofs.size(); ++idx) {
-				dofhandler.set_coef_marked(dofs[idx], false);
-			}
-			dofs.clear();
-			dofs.insert(dofs.end(), dh_curr_dofs.begin(), dh_curr_dofs.end());
+			dofhandler.end_active_keys_stable();
 		}
 
 
@@ -127,32 +102,46 @@ namespace GV {
 		/// Note that we can only do one layer of refinement at a time
 		///////////////////////////////////////////////////////////////////
 		void update_coefs() noexcept {
-			//relink the span
+			auto lock1 = dofhandler.start_active_keys_stable();
+			
 			dh_curr_dofs = dofhandler.active_dofs;
 			GUTIL_TIMER("updating coefficients (", dofs.size(), " -> ", dh_curr_dofs.size(), ")");
-
-			//get new coefficients
 			{
+				//mark all dof masks with which ones are in the current batch
+				auto lock = dofhandler.start_key_mask_unstable();
+				dofhandler.unconditional_bitwise_and_all_masks(~COEF_MARKED_BIT);
+				GUTIL_OMP(parallel for schedule(static, 1024))
+				for (uint64_t idx=0; idx<dofs.size(); ++idx) {
+					dofhandler.set_coef_marked(dofs[idx], false);
+				}
+				dofhandler.end_key_mask_unstable();
+			}
+
+			{
+				//compute new coefficients
+				auto lock2 = dofhandler.start_key_mask_stable();
 				std::array<std::vector<Scalar_t>,N> new_coefs;
 				auto job = [&](uint8_t i) { update_coefs(i,new_coefs[i]); };
 				for (uint8_t i=0; i<N; ++i) {
 					threads.submit(job, i);
 				}
 				threads.wait_idle();
+				dofhandler.end_key_mask_stable();
 				coefs = std::move(new_coefs);
 			}
-			//update dofs
-			{
-				reset_dofs();//copies over new dofs and clears the coef_marked flags
-				GUTIL_OMP(parallel for)
-				for (uint64_t idx=0; idx<dofs.size(); ++idx) {
-					dofhandler.set_coef_marked(dofs[idx], true);
-				}
-			}
+
+			//finalize
+			dofs.clear();
+			dofs.insert(dofs.end(), dh_curr_dofs.begin(), dh_curr_dofs.end());
+
+			dofhandler.end_active_keys_stable();
 		}
 
 		void update_coefs(uint8_t i, std::vector<Scalar_t>& new_coefs) noexcept {
+			GUTIL_ASSERT(dofhandler.is_active_keys_stable());
+			GUTIL_ASSERT(dofhandler.is_key_mask_stable());
 			GUTIL_ASSERT(i<N);
+
 			const size_t old_size = dofs.size();
 			const size_t new_size = dh_curr_dofs.size();
 			new_coefs.resize(new_size, Scalar_t{0});
@@ -171,47 +160,14 @@ namespace GV {
 						new_coefs[n_idx] = coefs[i][idx];
 						continue;
 					}
-					GUTIL_ASSERT(!dofhandler.is_active(dof))
+					GUTIL_ASSERT(!dofhandler.is_active_stable(dof))
 
-					if (dofhandler.is_refined(dof)) {
+					if (dofhandler.is_refined_stable(dof)) {
 					    distribute_refined(dof, coefs[i][idx], new_coefs, new_size);
 					}
 					else {
 						distribute_unrefined(dof, coefs[i][idx], new_coefs, new_size);
 					}
-					//if the dof does not exist anymore, then it must have
-					//either been refined, unrefined, or deactivated
-					// if (dofhandler.is_refined(dof)) {
-					// 	dof.children_simd(pc_dofs);
-					// 	for (uint8_t c=0; c<DOF_t::N_CHILDREN; ++c) {
-					// 		if (!pc_dofs[c].exists()) {continue;}
-							
-					// 		n_idx = dofhandler.global_number(pc_dofs[c]);
-					// 		if (n_idx<new_size) {
-					// 			GUTIL_OMP(atomic)
-					// 			new_coefs[n_idx] += coefs[i][idx] * dof.template child_coef<Scalar_t>(c);
-					// 		}
-					// 	}
-					// 	continue;
-					// }
-
-					// //check if any parent is newly created (it doesn't have a coef yet)
-					// //the coefficient of the parent is the sum of coefficients of the children dofs
-					// //such that the parent of the child dof feature is the feature of the parent dof
-					// //for vertices, there is only one such child, for faces, there are 4 and for elements there are 8.
-					// dof.parents_simd(pc_dofs);
-					// DofFeature_t p_feat = DofFeature_t{dof.key}.parent();
-					// for (uint8_t p=0; p<DOF_t::N_PARENTS; ++p) {
-					// 	if (!pc_dofs[p].exists()) {continue;}
-					// 	if (p_feat != DofFeature_t{pc_dofs[p].key}) {continue;}
-
-					// 	n_idx = dofhandler.global_number(pc_dofs[p]);
-					// 	if (n_idx<new_size ){//&& !dofhandler.is_coef_marked(pc_dofs[p])) {
-					// 		GUTIL_OMP(atomic)
-					// 		// new_coefs[n_idx] += coefs[i][idx] * dof.template parent_coef<Scalar_t>(p);
-					// 		new_coefs[n_idx] += coefs[i][idx];
-					// 	}
-					// }//parent check
 				}//for dofs
 			}//omp parallel
 		}//update coefs
@@ -233,13 +189,13 @@ namespace GV {
 				if (!c_dofs[c].exists()) {continue;}
 				Scalar_t child_contribution = contribution * dof.template child_coef<Scalar_t>(c);
 				
-				if (dofhandler.is_refined(c_dofs[c])) {
+				if (dofhandler.is_refined_stable(c_dofs[c])) {
 					distribute_refined(c_dofs[c], child_contribution, new_coefs, new_size);
 				}
 				else {
 					size_t n_idx = dofhandler.global_number(c_dofs[c]);
 					if (n_idx<new_size) {
-						GUTIL_ASSERT(dofhandler.is_active(c_dofs[c]));
+						GUTIL_ASSERT(dofhandler.is_active_stable(c_dofs[c]));
 						GUTIL_OMP(atomic)
 						new_coefs[n_idx] += child_contribution;
 					}
@@ -259,12 +215,12 @@ namespace GV {
 
 				size_t n_idx = dofhandler.global_number(pc_dofs[p]);
 				if (n_idx<new_size) {
-					if (!dofhandler.is_coef_marked(pc_dofs[p])) {
+					if (!dofhandler.is_coef_marked_stable(pc_dofs[p])) {
 						GUTIL_OMP(atomic)
 						new_coefs[n_idx] += parent_contribution;
 					}
 				}
-				else if (!dofhandler.is_active(pc_dofs[p])) {
+				else if (!dofhandler.is_active_stable(pc_dofs[p])) {
 					distribute_unrefined(pc_dofs[p], parent_contribution, new_coefs, new_size);
 				}
 			}

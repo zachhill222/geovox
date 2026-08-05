@@ -136,7 +136,7 @@ namespace GV
 		if (!file.is_open()) {
 			throw std::runtime_error("append_cell_data_field_vtk - Could not open file: " + filename);
 		}
-
+		
 		//write section header and get feature count
 		const uint64_t f_count = mesh.n_elements();
 		file << "CELL_DATA " << f_count << "\n";

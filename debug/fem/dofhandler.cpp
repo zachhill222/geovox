@@ -288,7 +288,7 @@ void evaluate_and_save(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_han
 	auto pt_coef_lookup = GV::make_feature_lookup<MeshVert_t>(
 			[&](MeshVert_t vtx) {
 				auto d_vtx = handler.get_dof_vertex(vtx);
-				return d_vtx.exists() && handler.is_active(DOF_t{d_vtx}) ? (int64_t)coef_handler.coefs[0][handler.global_number(DOF_t{d_vtx})] : -1;
+				return d_vtx.exists() && handler.is_active_stable(DOF_t{d_vtx}) ? (int64_t)coef_handler.coefs[0][handler.global_number(DOF_t{d_vtx})] : -1;
 			}, "scalar_coef");
 
 	auto pt_sd_lookup = GV::make_feature_lookup<MeshVert_t>(
@@ -298,14 +298,14 @@ void evaluate_and_save(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_han
 	auto pt_dof_active_lookup = GV::make_feature_lookup<MeshVert_t>(
 			[&](MeshVert_t vtx) {
 				auto d_vtx = handler.get_dof_vertex(vtx);
-				return d_vtx.exists() && handler.is_active(DOF_t{d_vtx}) ? (int64_t)handler.global_number(DOF_t{d_vtx}) : -1;
+				return d_vtx.exists() && handler.is_active_stable(DOF_t{d_vtx}) ? (int64_t)handler.global_number(DOF_t{d_vtx}) : -1;
 			}, "active_dof_index");
 
 	auto pt_dof_refinable_lookup = GV::make_feature_lookup<MeshVert_t>(
 			[&](MeshVert_t vtx) {
 				auto d_vtx = handler.get_dof_vertex(vtx);
 				int val = -1;
-				if (d_vtx.exists() && handler.is_active(DOF_t{d_vtx}) ) {
+				if (d_vtx.exists() && handler.is_active_stable(DOF_t{d_vtx}) ) {
 					val = 10*(int)handler.is_refinable(DOF_t{d_vtx}) + (int)handler.is_unrefinable(DOF_t{d_vtx});
 				}
 				return val;
@@ -314,7 +314,7 @@ void evaluate_and_save(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_han
 	auto pt_dof_key_lookup = GV::make_feature_lookup<MeshVert_t>(
 			[&](MeshVert_t vtx) {
 				auto d_vtx = handler.get_dof_vertex(vtx);
-				return d_vtx.exists() && handler.is_active(DOF_t{d_vtx}) ?
+				return d_vtx.exists() && handler.is_active_stable(DOF_t{d_vtx}) ?
 							std::array<int64_t,4>{(int64_t)d_vtx.depth(), (int64_t)d_vtx.i(), (int64_t)d_vtx.j(), (int64_t)d_vtx.k()} :
 							std::array<int64_t,4>{-1,-1,-1,-1};
 			}, "dof_key");

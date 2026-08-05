@@ -158,6 +158,11 @@ namespace GV {
 		UnstructuredVoxelMesh& operator=(const UnstructuredVoxelMesh&) = delete;
 		UnstructuredVoxelMesh& operator=(UnstructuredVoxelMesh&&) = delete;
 		
+		~UnstructuredVoxelMesh() {
+			large_pool.wait_idle();
+			small_pool.wait_idle();
+			std::lock_guard<std::mutex> lock(mtx);
+		}
 
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Simple queries and commands
