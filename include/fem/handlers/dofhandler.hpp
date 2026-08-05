@@ -38,7 +38,7 @@ namespace GV {
 		typename Mesh_t::GeoPoint_t;
 
 		//necessary constants
-		{ Mesh_t::MAX_DEPTH } 		-> std::convertible_to<uint64_t>;
+		{ mesh.max_depth } 			-> std::convertible_to<uint8_t>;
 
 		//necessary queries
 		{ mesh.is_active(el) }		-> std::same_as<bool>;
@@ -102,10 +102,8 @@ namespace GV {
 		//The maximum depth of a given mesh is specified at runtime. However, to avoid accidentally
 		//requesting say depth 12 (2^(3*12) elements at depth 12, (2^33 -1)/7 ~ 10^10.3 total elements)
 		//we set a maximum depth at compile time.
-		static constexpr uint8_t  MAX_DEPTH           = GV_MAX_RUNTIME_KEY_DEPTH;
-		static constexpr uint64_t MAX_POSSIBLE_DOFS   = DOF_t::total_possible(MAX_DEPTH);
-		const  			 uint8_t  max_depth 		  = MAX_DEPTH;
-		const 			 uint64_t max_possible_dofs   = DOF_t::total_possible(MAX_DEPTH);
+		const  			 uint8_t  max_depth;
+		const 			 uint64_t max_possible_dofs;
 
 		using BASE::ACTIVE_BIT; 						//0b00000001;	
 		static constexpr uint8_t REFINED_BIT 			= 0b00000010;
@@ -148,7 +146,6 @@ namespace GV {
 						GUTIL_LOG("Requested pool size (", n_threads, ") exceeds what is seen by std::thread::hardware_concurrency() (",
 								std::thread::hardware_concurrency(), ")");
 					}
-
 					GUTIL_ASSERT(max_depth == m.max_depth);
 					GUTIL_ASSERT(max_depth<GV_MAX_RUNTIME_KEY_DEPTH);
 				}
@@ -397,7 +394,7 @@ namespace GV {
 				else {break;}
 			}
 			return DofFeature_t::None();
-		}  
+		}
 
 		//sort the dofs by increasing global index and get their global index
 		void get_dof_number_local_sort(std::span<DOF_t> dofs, std::span<uint64_t> global_index) const noexcept {
@@ -618,12 +615,12 @@ namespace GV {
 		///
 		/// It is not necessary that all input elements are at the same depth.
 		//////////////////////////////////////////////////////////////////////////////////////////////
-		template<typename Predicate, typename Action=std::nullptr_t>
+		template<typename Predicate, typename Action>
 		[[nodiscard]] std::vector<DOF_t> get_dofs_impl(
 				std::span<const DofElem_t> 	elems,
 				Predicate&& 				pred,
-				Action&& 					action   = nullptr,
-				uint8_t 					n_depths = MAX_DEPTH) const noexcept 
+				Action&& 					action,
+				uint8_t 					n_depths) const noexcept 
 		{
 			//sanity checks and argument deduction
 			constexpr bool PRED_MASK = std::is_invocable_r_v<bool, Predicate, uint8_t>;
@@ -932,7 +929,7 @@ namespace GV {
 			GUTIL_ASSERT(dof.is_valid());
 			GUTIL_ASSERT(is_active(dof));
 
-			if (dof.depth() >= MAX_DEPTH) {return false;}		//we can't refine past max depth
+			if (dof.depth() >= max_depth) {return false;}		//we can't refine past max depth
 			
 			uint8_t byte = get_mask(dof);
 			if (byte&REFINED_BIT) {return false;}				//we can't refine a dof twice
@@ -949,7 +946,7 @@ namespace GV {
 		[[nodiscard]] bool is_unrefinable(DOF_t dof) const noexcept {
 			GUTIL_ASSERT(dof.is_valid());
 			
-			if (dof.depth()>=MAX_DEPTH) {return false;}			//we call unrefine on the parent. at max depth it can't be a parent.
+			if (dof.depth()>=max_depth) {return false;}			//we call unrefine on the parent. at max depth it can't be a parent.
 			const uint8_t byte = get_mask(dof);
 			if (byte&INITIAL_DOF_BIT) {return false;}			//we can't unrefine to be coarser than the initial dofs
 			if (!(bool)(byte&REFINED_BIT)) {return false;}		//we can't unrefine a dof that hasn't been previously refined
@@ -1134,6 +1131,10 @@ namespace GV {
 			std::vector<DOF_t> dofs = get_dofs_impl(BASE::reinterpret_key_span<DofElem_t,Elem_t>(elems), 
 										std::move(pred), std::move(action), max_depth);
 			
+			// TODO use binsort so we recover the partition between depths. then refine in parallel at
+			// each depth. Refine coarse to fine.
+			std::sort(dofs.begin(), dofs.end(), [](DOF_t a, DOF_t b){return a.depth() < b.depth();});
+
 			for (size_t i=0; i<dofs.size(); ++i) {
 				#ifndef NDEBUG
 					GUTIL_ASSERT(dofs[i].is_valid());
@@ -1185,7 +1186,10 @@ namespace GV {
 
 			std::vector<DOF_t> dofs = get_dofs_impl(BASE::reinterpret_key_span<DofElem_t,Elem_t>(elems), 
 										std::move(pred), std::move(action), max_depth);
-			
+
+			//unrefine from deepest to shallowest
+			std::sort(dofs.begin(), dofs.end(), [](DOF_t a, DOF_t b){ return a.depth()>b.depth(); });
+
 			for (size_t i=0; i<dofs.size(); ++i) {
 				#ifndef NDEBUG
 					GUTIL_ASSERT(dofs[i].is_valid());

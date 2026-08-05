@@ -159,10 +159,6 @@ namespace GV {
 
 			GUTIL_OMP(parallel)
 			{
-				//make space for the fast parent/child operations
-				// constexpr uint64_t H_SIZE = DOF_t::N_CHILDREN > DOF_t::N_PARENTS ? DOF_t::N_CHILDREN : DOF_t::N_PARENTS;
-				// DOF_t pc_dofs[H_SIZE];
-				
 				GUTIL_OMP(for)
 				for (size_t idx=0; idx<old_size; ++idx) {
 					DOF_t dof = dofs[idx];
@@ -231,20 +227,19 @@ namespace GV {
 		//until reaching descendants that are genuinely active (not themselves refined further
 		//within the same batch)
 		void distribute_refined(DOF_t dof, Scalar_t contribution, std::vector<Scalar_t>& new_coefs, size_t new_size) const noexcept {
-			DOF_t pc_dofs[DOF_t::N_CHILDREN];
-			dof.children_simd(pc_dofs);
+			DOF_t c_dofs[DOF_t::N_CHILDREN];
+			dof.children_simd(c_dofs);
 			for (uint8_t c=0; c<DOF_t::N_CHILDREN; ++c) {
-				if (!pc_dofs[c].exists()) {continue;}
+				if (!c_dofs[c].exists()) {continue;}
 				Scalar_t child_contribution = contribution * dof.template child_coef<Scalar_t>(c);
-				if (child_contribution == Scalar_t{0}) {continue;}
-
-				if (dofhandler.is_refined(pc_dofs[c])) {
-				// if (!dofhandler.is_coef_marked(pc_dofs[c])) {
-					distribute_refined(pc_dofs[c], child_contribution, new_coefs, new_size);
+				
+				if (dofhandler.is_refined(c_dofs[c])) {
+					distribute_refined(c_dofs[c], child_contribution, new_coefs, new_size);
 				}
 				else {
-					size_t n_idx = dofhandler.global_number(pc_dofs[c]);
-					if (n_idx<new_size && !dofhandler.is_coef_marked(pc_dofs[c])) {
+					size_t n_idx = dofhandler.global_number(c_dofs[c]);
+					if (n_idx<new_size) {
+						GUTIL_ASSERT(dofhandler.is_active(c_dofs[c]));
 						GUTIL_OMP(atomic)
 						new_coefs[n_idx] += child_contribution;
 					}

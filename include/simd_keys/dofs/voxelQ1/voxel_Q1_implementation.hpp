@@ -230,35 +230,17 @@ namespace LagrangeQ1 {
 		children[26] = Mesh3D::MakeVertex<Period>(dd, ip1, jp1, kp1);
 	}
 
-	//the coeficients of the parents are all 1/n_parents_that_exist
-	//where n_parents_that_exist depends on the feature that the projection
-	//of the dof vertex lands on when going up a hierarchy level.
-	//see GetDofParents_SIMD below.
+	//the coefficeint of the parent is 1 if the feature of the parent is the
+	//parent of the feature of the dof and 0 otherwise. For a vertex DOF,
+	//this only happens if all of its indices are 0.
 	GUTIL_DECLARE_SIMD()
 	template<typename T=double, uint8_t Period> requires(Period<8)
 	[[nodiscard]] inline constexpr T GetParentCoef(uint64_t dof) noexcept {
 		GUTIL_ASSERT(Mesh3D::Depth(dof)>0)
 		ASSERT_VALID_VOXELQ1_DOF(dof)
 		GUTIL_ASSERT(Mesh3D::IsValid<Period>(dof))
-		const uint64_t ii = Mesh3D::IndexI_SIMD(dof);
-		const uint64_t jj = Mesh3D::IndexJ_SIMD(dof);
-		const uint64_t kk = Mesh3D::IndexK_SIMD(dof);
-		int bi = ii&1, bj = jj&1, bk = kk&1;
-
-		//at parent depth 0, a periodic axis wraps every position onto the same
-		//unique parent, so the dof genuinely shares that feature regardless of
-		//its raw parity -- same override as before, still needed
-		if (Mesh3D::Depth(dof)==1) {
-			if constexpr (Period&0b001) {bi=0;}
-			if constexpr (Period&0b010) {bj=0;}
-			if constexpr (Period&0b100) {bk=0;}
-		}
-
-		//only the dof that coincides exactly with the parent's own position
-		//(all axes even) contributes anything -- everything else is a genuinely
-		//different geometric point and must contribute 0, so that refine->unrefine
-		//is lossless for a constant field
-		return (bi==0 && bj==0 && bk==0) ? T{1} : T{0};
+		
+		return static_cast<T>(Mesh3D::VertexIndexPairity_SIMD(dof) == 0);
 	}
 
 

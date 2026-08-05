@@ -106,7 +106,7 @@ namespace Keys{
 
 		GUTIL_DECLARE_SIMD()
 		[[nodiscard]] constexpr uint64_t kji_pairity_simd() const noexcept {
-			return ((k()&1)<<2)|((j()&1)<<1)|(i()&1);
+			return Mesh3D::CartesianIndexPairity_SIMD(key);
 		}
 
 		GUTIL_DECLARE_SIMD()

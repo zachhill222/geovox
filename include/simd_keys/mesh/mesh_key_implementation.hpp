@@ -307,6 +307,24 @@ namespace GV {
 			return IsElement(key) ? SubIndexK_SIMD(DecodeElement(key)) : SubIndexK_SIMD(key);
 		}
 
+		GUTIL_DECLARE_SIMD()
+		[[nodiscard]] inline constexpr uint64_t MortonIndexPairity_SIMD(uint64_t key) noexcept {
+			GUTIL_ASSERT(IsMorton(key));
+			return (key&0b111);
+		}
+
+		GUTIL_DECLARE_SIMD()
+		[[nodiscard]] inline constexpr uint64_t CartesianIndexPairity_SIMD(uint64_t key) noexcept {
+			GUTIL_ASSERT(IsCartesian(key));
+			return ((IndexK_SIMD(key)&1) << 2) | ((IndexJ_SIMD(key)&1) << 1) | ((IndexI_SIMD(key)&1));
+		}
+
+		GUTIL_DECLARE_SIMD()
+		[[nodiscard]] inline constexpr uint64_t IndexPairity_SIMD(uint64_t key) noexcept {
+			return IsMorton(key) ? MortonIndexPairity_SIMD(key) : CartesianIndexPairity_SIMD(key);
+		}
+
+
 
 		///////////////////////////////////////////////////////////
 		/// Query functions to return a smaller integer width

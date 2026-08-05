@@ -5,6 +5,7 @@
 #include "util/concepts.hpp"
 #include "util/macros.hpp"
 
+#include "simd_keys/containers.hpp"
 #include "simd_keys/mesh/mesh_keys.hpp"
 #include "mesh/vtk_file_io.hpp"
 #include "mesh/voxel_mesh_structured.hpp"
@@ -64,23 +65,10 @@ namespace GV {
 		using Mesh_t       = UnstructuredVoxelMesh<MaxDepth,T>;
 
 
-		static constexpr uint8_t MAX_DEPTH = MaxDepth;	//the maximum depth
-		const uint8_t max_depth = MAX_DEPTH;
-		static_assert(MAX_DEPTH <= S_Layer_t::MAX_DEPTH);
-		static constexpr uint64_t TOTAL_POSSIBLE_ELEMENTS = VoxelElement::elements_below_depth(MAX_DEPTH+1);
+		static constexpr uint8_t 	MAX_DEPTH 				= MaxDepth;
+		static constexpr uint64_t 	TOTAL_POSSIBLE_ELEMENTS = VoxelElement::elements_below_depth(MAX_DEPTH+1);
 
-		//random access iterator class to loop through the elements
-		//this wraps the individual vector iterators but wraps to the next depth if possible
-		// using ElementIterator  = IteratorBase<VoxelElement,S_Layer_t,MAX_DEPTH,false>;
-		// using CElementIterator = IteratorBase<VoxelElement,S_Layer_t,MAX_DEPTH,true>;
-		using VertexIterator   = IteratorBase<VoxelVertex,S_Layer_t,MAX_DEPTH,false>;
-		using CVertexIterator  = IteratorBase<VoxelVertex,S_Layer_t,MAX_DEPTH,true>;
 		
-		// static_assert(std::random_access_iterator<ElementIterator>);
-		// static_assert(std::random_access_iterator<CElementIterator>);
-		static_assert(std::random_access_iterator<VertexIterator>);
-		static_assert(std::random_access_iterator<CVertexIterator>);
-
 		//For some algorithms, it is useful to mark an element as being visited
 		//The top three bits in S_Layer_t::element_mask are free to use
 		static constexpr uint8_t VISITED_BIT = 0b0010000;

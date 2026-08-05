@@ -37,12 +37,9 @@ namespace GV {
 
 		//depths are more convenient to use as 1byte so they are easier to use
 		//with the element_mask.
-		static constexpr uint8_t MAX_DEPTH = static_cast<uint8_t>(Keys::Mesh3D::MAX_DEPTH);
 		uint8_t depth;				//the depth of this mesh
 		int max_omp_threads{0};		//how many OpenMP threads this layer is allowed to use
 		
-		static_assert(MAX_DEPTH < 16, "Max depth is too large to store in 4 bits");
-
 		static constexpr int DIMENSION = 3;	//TODO: support 2D
 		[[nodiscard]] constexpr uint64_t axis_max_elements() const noexcept { return uint64_t{1} << depth; }
 		[[nodiscard]] constexpr uint64_t max_elements() const noexcept { return uint64_t{1} << (DIMENSION*depth); }
@@ -65,7 +62,7 @@ namespace GV {
 		std::vector<VoxelVertex> 	compressed_vertices{};	
 
 		std::span<VoxelElement> 	active_element_view{};	//the primary mesh will provide a view into the stolen compressed_elements
-		std::span<VoxelVertex> 		tracked_vertices_view{};//the primary mesh will provide a view into the stolen copressed_vertices
+		std::span<VoxelVertex> 		tracked_vertices_view{};//the primary mesh will provide a view into the stolen compressed_vertices
 
 		void init_element_mask(std::span<uint8_t> view) noexcept {
 			// element_mask.resize(max_elements(), 0);
@@ -83,36 +80,14 @@ namespace GV {
 		/// Constructors and movement
 		//////////////////////////////////////////////////////////////////////////////////////////////////
 		StructuredVoxelMesh() = default;
-		StructuredVoxelMesh(const StructuredVoxelMesh& other) :
-			depth{other.depth},
-			max_omp_threads{other.max_omp_threads},
-			box{other.box},
-			element_mask_view{other.element_mask_view},
-			compressed_elements{other.compressed_elements},
-			compressed_vertices{other.compressed_vertices} {}
+		StructuredVoxelMesh(const StructuredVoxelMesh&) = default;
 		StructuredVoxelMesh& operator=(const StructuredVoxelMesh&) = delete;
-		StructuredVoxelMesh(StructuredVoxelMesh&& other) noexcept : 
-			depth{other.depth},
-			max_omp_threads{other.max_omp_threads},
-			box{std::move(other.box)},
-			element_mask_view{std::move(other.element_mask_view)},
-			tracked_vertices_view{std::move(other.tracked_vertices_view)},
-			compressed_elements{std::move(other.compressed_elements)},
-			compressed_vertices{std::move(other.compressed_vertices)}{}
-		StructuredVoxelMesh& operator=(StructuredVoxelMesh&& other) noexcept {
-			if (this != &other) {
-				depth = other.depth;
-				max_omp_threads = other.max_omp_threads;
-				box = std::move(other.box);
-				element_mask_view = std::move(other.element_mask_view);
-				tracked_vertices_view = std::move(other.tracked_vertices_view);
-				compressed_elements = std::move(other.compressed_elements);
-				compressed_vertices = std::move(other.compressed_vertices);
-			}
-			return *this;
-		}
+		StructuredVoxelMesh(StructuredVoxelMesh&& other) noexcept = default;
+		StructuredVoxelMesh& operator=(StructuredVoxelMesh&& other) noexcept = default;
 
-		StructuredVoxelMesh(const Box_t& box, uint8_t depth) noexcept : depth{depth}, box{box} {}
+		StructuredVoxelMesh(const Box_t& box, uint8_t depth) noexcept : depth{depth}, box{box} {
+			GUTIL_ASSERT(depth<Keys::Mesh3D::MAX_DEPTH);
+		}
 
 
 		//////////////////////////////////////////////////////////////////////////////////////////////////

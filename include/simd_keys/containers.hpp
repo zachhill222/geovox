@@ -1,7 +1,7 @@
 #pragma once
 
 #include "gutil.hpp"
-
+#include "simd_keys/mesh/mesh_key_implementation.hpp"
 #include "util/byte_print.hpp"
 
 #include <cstdint>
@@ -500,10 +500,7 @@ namespace Keys {
 		/////////////////////////////////////////////////////////////////////////
 		GUTIL_DECLARE_SIMD()
 		[[nodiscard]] int static constexpr default_key_bin(uint64_t key) noexcept {
-			return Mesh3D::IsMorton(key) ? static_cast<int>(key&0b111) : 
-						static_cast<int>( 	  ((Mesh3D::IndexK_SIMD(key)&1)<<2) 
-												| ((Mesh3D::IndexJ_SIMD(key)&1)<<1) 
-												| (Mesh3D::IndexI_SIMD(key)&1)      );
+			return Mesh3D::IndexPairity_SIMD(key);
 		}
 
 		template<typename BinFun = decltype(&HybridKeyTracker::default_key_bin)>
