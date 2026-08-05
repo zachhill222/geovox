@@ -133,10 +133,10 @@ namespace DOFS {
 		}
 
 		GUTIL_DECLARE_SIMD()
-		[[maybe_unused]] static uint64_t* dofs_on_elem_simd(uint64_t s, uint64_t* dof) noexcept {
+		[[maybe_unused]] static VoxelQ1* dofs_on_elem_simd(uint64_t s, VoxelQ1* dof) noexcept {
 			GUTIL_ASSERT(dof);
 			GUTIL_ASSERT(DofElem_t{s}.is_valid())
-			LagrangeQ1::GetDofsOnElement_SIMD<Period>(s, dof);
+			LagrangeQ1::GetDofsOnElement_SIMD<Period>(s, reinterpret_cast<uint64_t*>(dof));
 			return dof;
 		}
 

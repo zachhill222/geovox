@@ -545,7 +545,7 @@ namespace GV {
 		[[nodiscard]] inline constexpr uint64_t ElementParent_SIMD(uint64_t key) noexcept {
 			GUTIL_ASSERT(Exists(key));
 			GUTIL_ASSERT(IsElement(key));
-			GUTIL_ASSERT(IsMorton(key));	//keep all element hierarcy relations in morton codes
+			GUTIL_ASSERT(IsMorton(key));	//keep all element hierarcy relations in morton codes by default
 			const uint64_t morton_idx = MortonIndex(key) >> 3;
 			key &= ~TOTAL_IDX_MASK;
 			key |= morton_idx;
@@ -554,6 +554,31 @@ namespace GV {
 			key &= ~(DEPTH_MASK<<DEPTH_SHIFT);
 			return (dd <= MAX_DEPTH) ? ( key | (dd<<DEPTH_SHIFT)) : 0;
 		}
+
+		GUTIL_DECLARE_SIMD()
+		[[nodiscard]] inline constexpr uint64_t ElementParentCartesian_SIMD(uint64_t key) noexcept {
+			GUTIL_ASSERT(Exists(key));
+			GUTIL_ASSERT(IsElement(key));
+			GUTIL_ASSERT(IsCartesian(key));
+			#ifndef NDEBUG
+				uint64_t p = ElementParent_SIMD(EncodeElement_SIMD(key));
+			#endif
+
+			//truncate each index and move back to the original position (divided by 2)
+			//                                  get the index bits      /2    shift into place
+			const uint64_t ii_in_place = (((key >> I_SHIFT) & IDX_MASK) >> 1) << I_SHIFT;
+			const uint64_t jj_in_place = (((key >> J_SHIFT) & IDX_MASK) >> 1) << J_SHIFT;
+			const uint64_t kk_in_place = (((key >> K_SHIFT) & IDX_MASK) >> 1) << K_SHIFT;
+			const uint64_t dd          = Depth(key)-1; //overflow if the depth was 0 (no parent)
+			
+			constexpr uint64_t DEPTH_INDEX_MASK = (DEPTH_MASK << DEPTH_SHIFT) | TOTAL_IDX_MASK;
+			key &= ~DEPTH_INDEX_MASK;
+			key |= (dd<<DEPTH_SHIFT) | ii_in_place | jj_in_place | kk_in_place;
+
+			GUTIL_ASSERT( (!Exists(p) && dd>MAX_DEPTH) || (DecodeElement_SIMD(p) == key));
+			return (dd <= MAX_DEPTH) ? key : 0;
+		}
+
 
 		GUTIL_DECLARE_SIMD()
 		[[nodiscard]] inline constexpr uint64_t VertexParent(uint64_t key) noexcept {

@@ -61,15 +61,26 @@ namespace Keys{
 		/////////////////////////////////////////////////////////////
 		/// Convert between encodings.
 		/////////////////////////////////////////////////////////////
-		[[nodiscard]] constexpr VoxelElement encode() noexcept {
+		GUTIL_DECLARE_SIMD()
+		[[nodiscard]] constexpr uint64_t encode_simd() noexcept {
 			GUTIL_ASSERT(is_valid());
-			return VoxelElement{ is_encoded() ? key : Mesh3D::EncodeElement_SIMD(key)};
+			return is_encoded() ? key : Mesh3D::EncodeElement_SIMD(key);
 		}
 
-		[[nodiscard]] constexpr VoxelElement decode() noexcept {
-			GUTIL_ASSERT(is_valid());
-			return VoxelElement{ is_encoded() ? Mesh3D::DecodeElement_SIMD(key) : key};
+		[[nodiscard]] constexpr VoxelElement encode() noexcept {
+			return VoxelElement{encode_simd()};
 		}
+
+		GUTIL_DECLARE_SIMD()
+		[[nodiscard]] constexpr uint64_t decode_simd() noexcept {
+			GUTIL_ASSERT(is_valid());
+			return is_encoded() ? Mesh3D::DecodeElement_SIMD(key) : key;
+		}
+		
+		[[nodiscard]] constexpr VoxelElement decode() noexcept {
+			return VoxelElement{decode_simd()};
+		}
+
 
 
 		/////////////////////////////////////////////////////////////
@@ -192,8 +203,8 @@ namespace Keys{
 		}
 
 		GUTIL_DECLARE_SIMD()
-		[[maybe_unused]] constexpr VoxelElement parent_simd() const noexcept {
-			return VoxelElement{Mesh3D::ElementParent_SIMD(key)};
+		[[maybe_unused]] constexpr uint64_t parent_simd() const noexcept {
+			return is_encoded() ? Mesh3D::ElementParent_SIMD(key) : Mesh3D::ElementParentCartesian_SIMD(key);
 		}
 
 

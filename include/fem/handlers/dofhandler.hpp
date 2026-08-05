@@ -4,7 +4,9 @@
 
 #include "simd_keys/containers.hpp"
 #include "simd_keys/mesh/mesh_keys.hpp"
+
 #include "util/byte_print.hpp"
+#include "util/compatibility.hpp"
 
 #include <concepts>
 #include <cstdint>
@@ -128,9 +130,7 @@ namespace GV {
 		using BASE::key_mask;
 		using BASE::threads;										//max hardware concurency by default
 		public:
-		// std::vector<DOF_t> 						active_dofs{};		//a compressed list of the active dofs
 		std::span<DOF_t>						active_dofs;
-		gutil::BinSort<DOF_t> 					active_dof_sorter;	//responsible for global dof numbers and lookup
 		const Mesh_t& 							mesh;				//link to the mesh, we can request refinement through const methods
 		mutable bool 							batch_is_set{false};//check if the batch start bit has been set.
 
@@ -139,33 +139,34 @@ namespace GV {
 		/// and the mesh must outlive the dofhandler.
 		/////////////////////////////////////////////////////////////////////////
 		DofHandler() = delete;
-		DofHandler(const Mesh_t& m, uint8_t max_depth_ =GV_MAX_RUNTIME_KEY_DEPTH, size_t n_threads = std::thread::hardware_concurrency()) : 
-				BASE(DOF_t::total_possible(gutil::min(max_depth_, GV_MAX_RUNTIME_KEY_DEPTH, m.max_depth)), n_threads),
-				max_depth(gutil::min(max_depth_, GV_MAX_RUNTIME_KEY_DEPTH, m.max_depth)),
-				max_possible_dofs{DOF_t::total_possible(max_depth)},
+		DofHandler(const Mesh_t& m, size_t n_threads = std::thread::hardware_concurrency()) : 
+				BASE(DOF_t::total_possible(m.max_depth), n_threads),
+				max_depth(m.max_depth),
+				max_possible_dofs{DOF_t::total_possible(m.max_depth)},
 				mesh(m) {
-					if (max_depth_ > GV_MAX_RUNTIME_KEY_DEPTH) {
-						GUTIL_LOG("Requested depth (", max_depth_, ") exceeds allowed depth (", GV_MAX_RUNTIME_KEY_DEPTH,"). ",
-							"Compile with -DGV_MAX_RUNTIME_KEY_DEPTH=", max_depth_, " to allow this. Proceeding with max_depth=", 
-								max_depth);
-					}
-
 					if (n_threads > std::thread::hardware_concurrency()) {
 						GUTIL_LOG("Requested pool size (", n_threads, ") exceeds what is seen by std::thread::hardware_concurrency() (",
 								std::thread::hardware_concurrency(), ")");
 					}
+
+					GUTIL_ASSERT(max_depth == m.max_depth);
+					GUTIL_ASSERT(max_depth<GV_MAX_RUNTIME_KEY_DEPTH);
 				}
 				
 		
-		DofHandler(const DofHandler& other) : BASE(other), mesh(other.mesh) {}
-		DofHandler(DofHandler&& other) : BASE(other), mesh(other.mesh) {}
-		
+		DofHandler(const DofHandler& other) : BASE(other), mesh(other.mesh) {
+			active_dofs = BASE::reinterpret_key_span<DOF_t,uint64_t>(std::span<uint64_t>(BASE::active_keys));
+		}
+		DofHandler(DofHandler&& other) : BASE(std::move(other)), mesh(other.mesh) {
+			active_dofs = BASE::reinterpret_key_span<DOF_t,uint64_t>(std::span<uint64_t>(BASE::active_keys));
+		}
+
 		[[nodiscard]] DofHandler& operator=(const DofHandler& other) noexcept {
 			GUTIL_ASSERT(&mesh==&other.mesh);
 			if (this != &other) {
 				key_mask = other.key_mask;
-				active_dofs = other.active_dofs;
-				active_dof_sorter = other.active_dof_sorter;
+				BASE::active_keys = other.active_keys;
+				active_dofs = BASE::reinterpret_key_span<DOF_t,uint64_t>(std::span<uint64_t>(BASE::active_keys));
 			}
 			return *this;
 		}
@@ -173,8 +174,8 @@ namespace GV {
 			GUTIL_ASSERT(&mesh==&other.mesh);
 			if (this != &other) {
 				key_mask = std::move(other.key_mask);
-				active_dofs = std::move(other.active_dofs);
-				active_dof_sorter = std::move(other.active_dof_sorter);
+				BASE::active_keys = std::move(other.active_keys);
+				active_dofs = BASE::reinterpret_key_span<DOF_t,uint64_t>(std::span<uint64_t>(BASE::active_keys));
 			}
 			return *this;
 		}
@@ -273,19 +274,19 @@ namespace GV {
 
 		GUTIL_DECLARE_SIMD()
 		[[nodiscard]] bool is_active(uint64_t d_idx) const noexcept {
-			GUTIL_ASSERT(d_idx < MAX_POSSIBLE_DOFS);
+			GUTIL_ASSERT(d_idx < max_possible_dofs);
 			return ACTIVE_BIT & get_mask(d_idx);
 		}
 
 		GUTIL_DECLARE_SIMD()
 		[[nodiscard]] bool is_refined(uint64_t d_idx) const noexcept {
-			GUTIL_ASSERT(d_idx < MAX_POSSIBLE_DOFS);
+			GUTIL_ASSERT(d_idx < max_possible_dofs);
 			return REFINED_BIT & get_mask(d_idx);
 		}
 
 		GUTIL_DECLARE_SIMD()
 		[[nodiscard]] bool is_coef_marked(uint64_t d_idx) const noexcept {
-			GUTIL_ASSERT(d_idx < MAX_POSSIBLE_DOFS);
+			GUTIL_ASSERT(d_idx < max_possible_dofs);
 			return COEF_MARKED_BIT & get_mask(d_idx);
 		}
 
@@ -300,7 +301,7 @@ namespace GV {
 
 		GUTIL_DECLARE_SIMD()
 		[[maybe_unused]] bool set_active(uint64_t d_idx, bool val) noexcept {
-			GUTIL_ASSERT(d_idx < MAX_POSSIBLE_DOFS);
+			GUTIL_ASSERT(d_idx < max_possible_dofs);
 			uint8_t& byte  = get_mask_ref(d_idx);
 			const bool old = byte&ACTIVE_BIT;
 			if (old==val) {return false;}
@@ -322,7 +323,7 @@ namespace GV {
 
 		GUTIL_DECLARE_SIMD()
 		[[maybe_unused]] bool set_refined(uint64_t d_idx, bool val) noexcept {
-			GUTIL_ASSERT(d_idx < MAX_POSSIBLE_DOFS);
+			GUTIL_ASSERT(d_idx < max_possible_dofs);
 			uint8_t& byte  = get_mask_ref(d_idx);
 			const bool old = byte&REFINED_BIT;
 			if (old==val) {return false;}
@@ -343,7 +344,7 @@ namespace GV {
 		}
 
 		[[maybe_unused]] bool set_coef_marked(uint64_t d_idx, bool val) const noexcept {
-			GUTIL_ASSERT(d_idx < MAX_POSSIBLE_DOFS)
+			GUTIL_ASSERT(d_idx < max_possible_dofs)
 			uint8_t& byte  = get_mask_ref(d_idx);
 			const bool old = byte&COEF_MARKED_BIT;
 			if (old==val) {return false;}
@@ -364,8 +365,8 @@ namespace GV {
 			return bin;
 		}
 
-		[[nodiscard]] static constexpr int8_t dof_bin(DOF_t dof) noexcept {
-			int8_t bin = 0;
+		[[nodiscard]] static constexpr int dof_bin(DOF_t dof) noexcept {
+			int bin = 0;
 			const uint64_t dd = dof.depth();
 			const uint64_t split = (dd>0) ? (uint64_t{1}<<(dd-1)) : 0;	//split the index space into 8 octants. ties go to lower bin.
 			
@@ -377,11 +378,8 @@ namespace GV {
 
 		//get a single dof global number
 		[[nodiscard]] uint64_t global_number(DOF_t dof) const noexcept {
-			GUTIL_ASSERT(is_sorted() && "DofHandler - the dofs must be sorted to get the correct global index");
-			const int bin = dof_bin(dof);
-			auto list = active_dof_sorter.get_bin(bin);
-			auto it = std::lower_bound(list.begin(), list.end(), dof); 
-			return (it==list.end() || *it!=dof) ? uint64_t(-1) : active_dof_sorter.bin_start(bin) + std::distance(list.begin(), it);
+			GUTIL_ASSERT(is_current());
+			return BASE::lookup_key(dof.key, &dof_key_bin);
 		}
 
 		//for vertex dofs, sometimes getting the correct depth is awkward.
@@ -393,7 +391,7 @@ namespace GV {
 			if (!DOF_t{vtx}.exists()) {return DofFeature_t::None();} //not a valid feature for periodic dofs
 			//traverse to shallowest mesh key, then check going down
 			while (vtx.parent().exists()) { vtx = vtx.parent(); }
-			for (uint64_t dd=vtx.depth(); dd<=MAX_DEPTH; ++dd) {
+			for (uint64_t dd=vtx.depth(); dd<=max_depth; ++dd) {
 				if (is_active(vtx.linear_index())) {return vtx;}
 				else if (vtx.child().exists()) {vtx = vtx.child();}
 				else {break;}
@@ -402,24 +400,11 @@ namespace GV {
 		}  
 
 		//sort the dofs by increasing global index and get their global index
-		void get_dof_number_local_sort(std::span<DOF_t> dofs, std::span<uint64_t> global_idx) const noexcept {
+		void get_dof_number_local_sort(std::span<DOF_t> dofs, std::span<uint64_t> global_index) const noexcept {
+			GUTIL_ASSERT(is_current());
 			GUTIL_ASSERT(is_sorted() && "DofHandler - the dofs must be sorted to get the correct global index");
-			auto local_sorter = sort_dofs_singlethread(dofs);
-			uint64_t n = 0; //the local dof number (index into the dofs)
-			for (int i=0; i<8; ++i) {
-				auto local_list = local_sorter.get_bin(i);
-				auto global_list = active_dof_sorter.get_bin(i);
-				for (uint64_t j=0; j<local_sorter.bin_size(i); ++j, ++n) {
-					DOF_t dof = local_list[j]; //subspan of the sorted original dofs
-					GUTIL_ASSERT(dof==dofs[n]);
-					auto it = std::lower_bound(global_list.begin(), global_list.end(), dof);
-					if ( it==global_list.end() || *it!=dof) { global_idx[n] = uint64_t(-1); }
-					else {
-						global_idx[n] = active_dof_sorter.bin_start(i) + 
-								static_cast<uint64_t>(std::distance(global_list.begin(), it));
-					}
-				}
-			}
+			BASE::lookup_keys_and_sort(
+				BASE::reinterpret_key_span<uint64_t,DOF_t>(dofs), global_index, 8, &dof_key_bin);
 		}
 		
 		
@@ -431,8 +416,7 @@ namespace GV {
 		/////////////////////////////////////////////////////////////////////////
 		/// Initialization. The mesh must be in a conformal state.
 		/////////////////////////////////////////////////////////////////////////
-		void init_dofs() noexcept { dispatch_init_dofs(); wait_idle();}
-		void dispatch_init_dofs() noexcept {
+		void init_dofs() noexcept {
 			if (mesh.element_begin()==mesh.element_end()) {
 				GUTIL_ABORT("ERROR: no elements found.")
 			}
@@ -462,7 +446,7 @@ namespace GV {
 								set_active(idx, true);
 
 								//mark as explicitly refinable
-								if (dof.depth() != MAX_DEPTH) {
+								if (dof.depth() != max_depth) {
 									key_mask[idx] |= INITIAL_DOF_BIT;
 								}
 							}
@@ -473,6 +457,8 @@ namespace GV {
 				GUTIL_ASSERT(start<=end);
 				threads.submit(job, mesh.element_begin()+start, mesh.element_begin()+end);
 			}
+			threads.wait_idle();
+			collect_dofs();
 		}
 
 
@@ -482,89 +468,23 @@ namespace GV {
 		[[nodiscard]] size_t n_dofs() const noexcept { return active_dofs.size(); }
 
 		
-		void sort_dofs() noexcept {
-			GUTIL_LOG(active_dofs.size());
-			GUTIL_LOG(key_mask.size());
-			BASE::sort_keys(8, &DofHandler::dof_key_bin);
-			// active_dof_sorter = (active_dofs.size() > 1024) ? 
-			// 		sort_dofs_multithread(active_dofs) : sort_dofs_singlethread(active_dofs);
-		}
-
-		[[nodiscard]] gutil::BinSort<DOF_t> sort_dofs_multithread(std::span<DOF_t> dofs) const noexcept {
-			gutil::BinSort<DOF_t> local_sorter(dofs, 8);
-			local_sorter.dispatch_sort([&](DOF_t dof){ return dof_bin(dof); }, &threads);
-			threads.wait_idle();
-
-			for (int i=0; i<8; ++i) {
-				threads.submit( [](std::span<DOF_t> list){ std::sort(list.begin(), list.end()); }, local_sorter.get_bin(i));
-			}
-			threads.wait_idle();
-
-			return local_sorter;
-		}
-
-		[[nodiscard]] gutil::BinSort<DOF_t> sort_dofs_singlethread(std::span<DOF_t> dofs) const noexcept {
-			gutil::BinSort<DOF_t> local_sorter(dofs, 8);
-			local_sorter.sort([&](DOF_t dof){ return dof_bin(dof); });
-			for (int i=0; i<8; ++i) {
-				std::span<DOF_t> list = local_sorter.get_bin(i);
-				std::sort(list.begin(), list.end());
-			}
-			return local_sorter;
-		}
-
-		[[nodiscard]] bool is_sorted() const noexcept {
-			//TODO: make a bool to track the status of sorting. similar for the mesh being up to date.
-			GUTIL_ASSERT(active_dofs.size()>0 && "DofHandler - did you forget dofhandler.collect_dofs()?");
-			return active_dof_sorter.bin_end(7) == active_dofs.size();
-		}
-
-
 		void collect_dofs() noexcept {
 			BASE::collect_active_keys<DOF_t>();
-			active_dofs = std::span<DOF_t>{reinterpret_cast<DOF_t*>(BASE::active_keys.data()), BASE::active_keys.size()};
-			GUTIL_LOG("BASE ", BASE::active_keys.size());
-			GUTIL_LOG("DOF ", active_dofs.size());
-			// const size_t n_threads = threads.n_threads();
-			// const size_t dofs_per_thread = n_threads==0 ? MAX_POSSIBLE_DOFS : MAX_POSSIBLE_DOFS/n_threads;
-			
-			// std::vector<std::vector<DOF_t>> thread_dofs(threads.n_threads());
-			// auto job = [&](size_t tid){
-			// 	const size_t start = tid*dofs_per_thread;
-			// 	const size_t end = (tid==threads.n_threads()-1) ? MAX_POSSIBLE_DOFS : start + dofs_per_thread;
-
-			// 	for (size_t idx=start; idx<end; ++idx) {
-			// 		GUTIL_ASSERT(DOF_t::MakeFromIndex(idx).is_valid());
-			// 		if (is_active(idx)) { thread_dofs[tid].push_back(DOF_t::MakeFromIndex(idx)); }
-			// 	}
-			// };
-
-			// for (size_t tid=0; tid<threads.n_threads(); ++tid) {
-			// 	threads.submit(job, tid);
-			// }
-			// threads.wait_idle();
-
-			// active_dofs.clear();
-			// for (auto& list : thread_dofs) {
-			// 	active_dofs.insert(active_dofs.end(), std::make_move_iterator(list.begin()), std::make_move_iterator(list.end()));
-			// }
-
-			sort_dofs();
+			active_dofs = BASE::reinterpret_key_span<DOF_t,uint64_t>(std::span<uint64_t>(BASE::active_keys));
+			BASE::sort_active_keys(8, &DofHandler::dof_key_bin);
 		}
 
 
 		/// mark the start of a wide (look at lots of dofs) process
 		/// set_batch_start() sets the BATCH_PROCESS_BIT to true on all active dof masks
-		void set_batch_start() const noexcept {
-			GUTIL_TIMER("set_batch_start");
+		void set_batch_start() noexcept {
 			BASE::conditional_bitwise_or_all_masks(ACTIVE_BIT,BATCH_PROCESS_BIT);
 			batch_is_set = true;
 		}
 
 		/// mark the end of a wide (look at lots of dofs) process
 		/// set_batch_end() sets the BATCH_PROCESS_BIT to false on all dof masks
-		void set_batch_end() const noexcept {
-			GUTIL_TIMER("set_batch_end");
+		void set_batch_end() noexcept {
 			BASE::unconditional_bitwise_and_all_masks(~BATCH_PROCESS_BIT);
 			batch_is_set = false;
 		}
@@ -598,6 +518,7 @@ namespace GV {
 		/////////////////////////////////////////////////////////////////////////
 		template<typename Elem_t> requires(std::same_as<Elem_t,DofElem_t> || std::same_as<Elem_t,MeshElem_t> )
 		void get_active_dofs_conformal(Elem_t el_, std::vector<DOF_t>& dofs, std::vector<uint64_t>& global_idx) const noexcept {
+			GUTIL_ASSERT(BASE::is_current());
 			GUTIL_ASSERT(is_sorted() && "DofHandler - the dofs must be sorted to get the correct global index");
 			GUTIL_ASSERT(dofs.size()==global_idx.size());
 			//assume that dofs only exist at the features of active elements
@@ -621,7 +542,7 @@ namespace GV {
 
 		template<typename Elem_t> requires(std::same_as<Elem_t,DofElem_t> || std::same_as<Elem_t,MeshElem_t> )
 		void get_active_dofs_quasi_hierarchical(Elem_t el_, std::vector<DOF_t>& dofs, std::vector<uint64_t>& global_idx) const noexcept {
-			GUTIL_ASSERT(is_sorted() && "DofHandler - the dofs must be sorted to get the correct global index");
+			GUTIL_ASSERT(is_current() && "DofHandler - the dofs must be sorted to get the correct global index");
 			GUTIL_ASSERT(dofs.size()==global_idx.size());
 			//assume that dofs only exist at the features of active elements or the feature of a parent of an active element
 			//additionally, if a feature at depth d is active, then its parent feature at depth d-1 cannot be active
@@ -647,7 +568,7 @@ namespace GV {
 
 		template<typename Elem_t> requires(std::same_as<Elem_t,DofElem_t> || std::same_as<Elem_t,MeshElem_t> )
 		void get_active_dofs_full_hierarchical(Elem_t el_, std::vector<DOF_t>& dofs, std::vector<uint64_t>& global_idx) const noexcept {
-			GUTIL_ASSERT(is_sorted() && "DofHandler - the dofs must be sorted to get the correct global index");
+			GUTIL_ASSERT(is_current() && "DofHandler - the dofs must be sorted to get the correct global index");
 			GUTIL_ASSERT(dofs.size()==global_idx.size());
 			//assume that dofs only exist at the features of active elements or the feature of any ancestor of an active element
 			//additionally, if a feature at depth d is active, then its parent feature at depth d-1 cannot be active
@@ -671,8 +592,127 @@ namespace GV {
 						std::span<uint64_t>{global_idx.begin()+start_size, global_idx.end()});
 		}
 
+
+
+		////////////////////////////////////////////////////////////////////////////////////////////
+		/// Primary method for bulk gathering dofs.
+		///
+		/// Given a collection of elements, find all dofs whos support overlaps them and satisfy a predicate. 
+		/// Only dofs at a depth at or above the provided element will be considered, so the elements should 
+		/// be active mesh elements. If you know the maximum difference in depth between the elements and the dofs
+		/// you are looking for, you can pass that as n_depths.
+		///
+		/// For example, pass a predicate 	auto pred = [ACTIVE_BIT](uint8_t dof_mask) { return dof_mask&ACTIVE_BIT; }
+		/// to collect the active dofs. Similarly, you can only get dofs that are marked with the batch bit.
+		/// Alternatively, the dof can be passed to the predicate.
+		///
+		/// The possible signatures are bool(uint8_t), bool(uint8_t,DOF_t), bool(DOF_t,uint8_t), bool(DOF_t).
+		///
+		/// You may also pass an action to take on the dof_mask. For example, turn off the batch bit.
+		/// The action must have the signature void(uint_t&). To work with the active dof representation,
+		/// you will need to look up its global index.
+		///
+		/// Note that this is a single-threaded SIMD operation. Feel free to use the thread pool to dispatch
+		/// several queries (there may be duplicate dofs between queries, which may or may not be what you want).
+		/// If you are passing an action, be cautious of race conditions when doing this.
+		///
+		/// It is not necessary that all input elements are at the same depth.
+		//////////////////////////////////////////////////////////////////////////////////////////////
+		template<typename Predicate, typename Action=std::nullptr_t>
+		[[nodiscard]] std::vector<DOF_t> get_dofs_impl(
+				std::span<const DofElem_t> 	elems,
+				Predicate&& 				pred,
+				Action&& 					action   = nullptr,
+				uint8_t 					n_depths = MAX_DEPTH) const noexcept 
+		{
+			//sanity checks and argument deduction
+			constexpr bool PRED_MASK = std::is_invocable_r_v<bool, Predicate, uint8_t>;
+			constexpr bool PRED_DOF  = std::is_invocable_r_v<bool, Predicate, DOF_t>;
+			constexpr bool PRED_BOTH = std::is_invocable_r_v<bool, Predicate, uint8_t, DOF_t>;
+			constexpr bool PRED_REV  = std::is_invocable_r_v<bool, Predicate, DOF_t, uint8_t>;
+			static_assert(PRED_MASK + PRED_DOF + PRED_BOTH + PRED_REV, "The predicate argument could not be determined");
+
+
+			constexpr bool HAS_ACTION = !std::same_as<std::nullptr_t,Action>;
+			static_assert(!HAS_ACTION || std::is_invocable_r_v<void,Action,uint8_t&>, "The action must haave the signature void(uint8_t&)");
+
+			GUTIL_TIMER("Gathering unique dofs on ", elems.size(), " elements");
+
+			n_depths = std::min(n_depths, max_depth);						//make sure n_depths is feasible
+			std::vector<DofElem_t> dof_elems{elems.begin(), elems.end()};	//copy the elements so we are free to manipulate them.
+
+			GUTIL_SIMD()													//ensure elements are in cartesian form
+			for (size_t i=0; i<dof_elems.size(); ++i) {
+				GUTIL_ASSERT(dof_elems[i].exists());
+				dof_elems[i] = DofElem_t{dof_elems[i].decode_simd()};
+			}
+
+			std::vector<DOF_t> result{};									//space for the result
+			std::vector<DOF_t> scratch{};									//space for potential results
+
+			for (uint8_t dd=0; dd<n_depths && dof_elems.size()>0; ++dd) {	//gather dofs at each depth
+				
+				std::erase_if(dof_elems, 									//drop any elements that were processed to depth 0
+					[](DofElem_t el) {return !el.exists();});
+
+				scratch.resize(dof_elems.size() * DOF_t::N_DOF_PER_ELEM);	//ensure the scratch is perfectly sized (only shrinks)
+				GUTIL_SIMD()
+				for (size_t i=0; i<dof_elems.size(); ++i) {					//each element fills its buffer of potential dofs
+					DOF_t::dofs_on_elem_simd(dof_elems[i].key, 
+									&scratch[i*DOF_t::N_DOF_PER_ELEM]);
+				}
+
+				std::sort(scratch.begin(), scratch.end(),					//clean up this depth
+							[](DOF_t a, DOF_t b) {return b<a;});			//note that DOF_t{0} (the does not exist flag) will be the last element
+				auto it = std::unique(scratch.begin(), scratch.end());
+				scratch.erase(it, scratch.end());							//erases all but one non-existant dofs (there could be 1 non-existant element)
+				// if (!scratch.back().exists()) {scratch.pop_back();}			//all dofs exist now.
+				std::erase_if(scratch, [](DOF_t dof){ return !dof.exists() || !dof.is_valid();});
+
+				//gather valid dofs
+				result.reserve(result.size() + scratch.size());
+				for (DOF_t dof : scratch) {
+					// GUTIL_LOG(dof, " : ", print_bytes(dof.key));
+					GUTIL_ASSERT(dof.exists() && dof.is_valid());
+
+					if constexpr (PRED_DOF) {								//maybe we don't have to fetch the mask
+						if (!pred(dof)) {continue;}
+						result.push_back(dof);
+						if constexpr (HAS_ACTION) {action(get_mask_ref(dof));}
+					}
+					else {
+						uint8_t& byte = get_mask_ref(dof);
+						if 		constexpr 	(PRED_MASK) {if (!pred(byte)) 	  {continue;}}
+						else if constexpr 	(PRED_BOTH) {if (!pred(byte,dof)) {continue;}}
+						else if constexpr 	(PRED_REV) 	{if (!pred(dof,byte)) {continue;}}
+						result.push_back(dof);
+						if constexpr (HAS_ACTION) {action(byte);}
+					}
+				}
+
+				//step each element up
+				GUTIL_SIMD()
+				for (size_t i=0; i<dof_elems.size(); ++i) {
+					dof_elems[i] = DofElem_t{dof_elems[i].parent_simd()};
+				}
+			}
+
+			//final pass to ensure all dofs are unique
+			//note that this is required because we do not know that all of the input elements were at the
+			//same depth. The dofs are mostly sorted in decreasing order, so keep that order
+			std::sort(result.begin(), result.end(), [](DOF_t a, DOF_t b) { return b < a; });
+			auto it = std::unique(result.begin(), result.end());
+			result.erase(it, result.end());
+			return result;
+		}
+
+
+		///////////////////////////////////////////////////////////////////////
+		/// A few methods for calling actions on each unique dof in a region
+		///////////////////////////////////////////////////////////////////////
 		template<typename T=double, typename Action>
 		void gather_hierarchical_dofs(Action&& action, DofElem_t el, T* x, T* y, T* z, uint32_t N) const noexcept {
+			GUTIL_ASSERT(BASE::is_current());
 			GUTIL_ASSERT(active_dofs.size()>0);
 			GUTIL_ASSERT(x && y && z && N>0);
 			GUTIL_ASSERT(el.is_valid());
@@ -744,6 +784,7 @@ namespace GV {
 
 		template<typename T=double, typename Action, typename Vert_t> requires(std::same_as<Vert_t,MeshVert_t> || std::same_as<Vert_t,DofVert_t>)
 		void gather_hierarchical_dofs_at_vertex(Action&& action, Vert_t vtx) const noexcept {
+			GUTIL_ASSERT(BASE::is_current());
 			GUTIL_ASSERT(active_dofs.size()>0);
 
 			//this method calls action(dof,local,x,y,z) for each active dof whose
@@ -760,7 +801,7 @@ namespace GV {
 			//project down to the deepest possible representation, so .elements() sees
 			//every element that could possibly be active nearby, regardless of local refinement
 			DofVert_t dv = static_cast<DofVert_t>(vtx);
-			while (dv.depth() < Mesh_t::MAX_DEPTH) { dv = dv.child(); }
+			while (dv.depth() < max_depth) { dv = dv.child(); }
 
 			std::array<DofElem_t,8> elems;
 			dv.elements_simd(&elems[0]);
@@ -784,7 +825,7 @@ namespace GV {
 
 			std::vector<uint64_t> seen;	//running tally of which dofs have been acted on at each depth
 
-			for (uint8_t level=0; level<=Mesh_t::MAX_DEPTH; ++level) {
+			for (uint8_t level=0; level<=max_depth; ++level) {
 				seen.clear();
 				for (uint8_t e=0; e<8; ++e) {
 					if (!elem_exists[e] || !elems[e].exists()) { continue; }
@@ -792,7 +833,7 @@ namespace GV {
 					DofElem_t el = elems[e];
 					GUTIL_ASSERT(!el.is_encoded());
 
-					const uint64_t delta = Mesh_t::MAX_DEPTH - el.depth();
+					const uint64_t delta = max_depth - el.depth();
 					const uint64_t span  = uint64_t{1} << delta;
 
 					GUTIL_ASSERT(eff_i[e]>=span*el.i_simd());
@@ -803,7 +844,7 @@ namespace GV {
 					const T z = T{2}*T(eff_k[e] - el.k_simd()*span)/T(span) - T{1};
 
 					std::array<DOF_t, DOF_t::N_DOF_PER_ELEM> basis;
-					DOF_t::dofs_on_elem_simd(el.key, reinterpret_cast<uint64_t*>(&basis[0]));
+					DOF_t::dofs_on_elem_simd(el.key, &basis[0]);
 					for (DOF_t dof : basis) {
 						if (!dof.exists() || !is_active(dof)) { continue; }
 						uint64_t key = static_cast<uint64_t>(dof);
@@ -930,6 +971,8 @@ namespace GV {
 		}
 
 		void activate(DOF_t dof) noexcept {
+			GUTIL_ASSERT(dof.is_valid());
+
 			if (!set_active(dof,true)) {						//return if the dof was already active
 				return;
 			}
@@ -957,7 +1000,6 @@ namespace GV {
 					DofFeature_t d_feat{dof.key};					//be at a geometrically conformal feature.
 					if (!mesh.is_geometrically_conformal(d_feat)) {	//the request takes into account any periodic axes
 						GUTIL_ERROR(d_feat, " is not conformal in the mesh. ", DOF_t{d_feat}, " should have requested mesh refinement");
-						// std::terminate();
 					}
 				}
 				#endif
@@ -971,23 +1013,24 @@ namespace GV {
 		void refine_quasi_hierarchical(DOF_t dof) noexcept {
 			GUTIL_ASSERT(dof.is_valid());
 			GUTIL_ASSERT(is_active(dof));
-			
+
 			if(!is_refinable(dof)) {return;};
-			deactivate(dof);
 			for (DOF_t c : dof.children()) {
 				if (c.exists()) { activate(c); }
 			}
 
 			uint8_t& byte = get_mask_ref(dof);
-			byte|=(ACTIVE_BIT|REFINED_BIT);							//set active and refined
-			byte&=~BATCH_PROCESS_BIT;								//remove from current batch
+			byte&=~ACTIVE_BIT;							//deactivate parent
+			byte|=REFINED_BIT;							//set refined
 			GUTIL_ASSERT(is_refined(dof));
+			GUTIL_ASSERT(!is_active(dof));
 			GUTIL_ASSERT(is_unrefinable(dof) || (get_mask(dof)&INITIAL_DOF_BIT));
 		}
 
 		void refine_hierarchical(DOF_t dof) noexcept requires(VERTEX_DOF) {
 			GUTIL_ASSERT(dof.is_valid());
 			GUTIL_ASSERT(is_active(dof));
+
 			if(!is_refinable(dof)) {return;};
 			const MeshFeature_t p_feat = static_cast<MeshFeature_t>(dof);
 			for (DOF_t c : dof.children()) {
@@ -997,14 +1040,15 @@ namespace GV {
 			}
 
 			uint8_t& byte = get_mask_ref(dof);
-			byte|=REFINED_BIT;										//set refined
-			byte&=~BATCH_PROCESS_BIT;								//remove from current batch
+			byte|=REFINED_BIT;							//set refined
 			GUTIL_ASSERT(is_refined(dof));
+			GUTIL_ASSERT(is_active(dof));
 			GUTIL_ASSERT(is_unrefinable(dof) || (get_mask(dof)&INITIAL_DOF_BIT));
 		}
 
 		void unrefine_quasi_hierarchical(DOF_t dof) noexcept {
 			GUTIL_ASSERT(dof.is_valid());
+
 			uint8_t& byte = get_mask_ref(dof);
 
 			if (byte&ACTIVE_BIT) { return; }						//in a Q-H scheme, the parent dof must not be active
@@ -1022,7 +1066,6 @@ namespace GV {
 
 			byte|=ACTIVE_BIT;										//mark as active
 			byte&=~REFINED_BIT;										//mark as not refined
-			byte&=~BATCH_PROCESS_BIT;								//remove from current batch
 
 			#ifndef NDEBUG
 				bool success  = true;
@@ -1043,6 +1086,7 @@ namespace GV {
 
 		void unrefine_hierarchical(DOF_t dof) noexcept {
 			GUTIL_ASSERT(is_active(dof));
+			
 			//in a quasi-hierarchical scheme, the parent dof (this) stays active
 			if(!is_active(dof) || !is_unrefinable(dof)) {return;};
 			for (DOF_t c : dof.children()) {
@@ -1051,56 +1095,147 @@ namespace GV {
 
 			uint8_t& byte = get_mask_ref(dof);
 			byte&=~REFINED_BIT;										//mark as not refined
-			byte&=~BATCH_PROCESS_BIT;								//remove from current batch
 			GUTIL_ASSERT(is_unrefinable(dof));
 		}
 
 
 		//////////////////////////////////////////////////////////////////////////////////////
-		/// Utility refine/unrefine commands
+		/// Primary refine/unrefine commands
 		//////////////////////////////////////////////////////////////////////////////////////
-		void refine_hierarchical(DofElem_t el) noexcept {
-			GUTIL_ASSERT(batch_is_set && "call set_batch_start() for synchronization");
-			std::vector<DOF_t> dofs;
-			std::vector<uint64_t> ids;
-			get_active_dofs_full_hierarchical(el, dofs, ids);
-
-			for (DOF_t dof : dofs) {
-				if(dof.exists() && (get_mask(dof)&BATCH_PROCESS_BIT)) {refine_hierarchical(dof);}
-			}
+		template<typename Container_t>
+		[[maybe_unused]] size_t refine_quasi_hierarchical(const Container_t& elems) noexcept {
+			return refine_quasi_hierarchical(as_span(elems));
 		}
 
-		void refine_quasi_hierarchical(DofElem_t el) noexcept {
-			GUTIL_ASSERT(batch_is_set && "call set_batch_start() for synchronization");
-			std::vector<DOF_t> dofs;
-			std::vector<uint64_t> ids;
-			get_active_dofs_quasi_hierarchical(el, dofs, ids);
-
-			for (DOF_t dof : dofs) {
-				if(dof.exists() && (get_mask(dof)&BATCH_PROCESS_BIT)) {refine_quasi_hierarchical(dof);}
-			}
+		template<std::contiguous_iterator I>
+		[[maybe_unused]] size_t refine_quasi_hierarchical(I begin, I end) noexcept {
+			return refine_quasi_hierarchical(std::span<std::iter_value_t<I>>{begin, end});
 		}
 
-		void unrefine_hierarchical(DofElem_t el) noexcept {
-			GUTIL_ASSERT(batch_is_set && "call set_batch_start() for synchronization");
-			std::vector<DOF_t> dofs;
-			std::vector<uint64_t> ids;
-			get_active_dofs_full_hierarchical(el, dofs, ids);
+		template<typename Elem_t> requires (std::same_as<Elem_t,MeshElem_t> || std::same_as<Elem_t,DofElem_t>)
+		[[maybe_unused]] size_t refine_quasi_hierarchical(std::span<const Elem_t> elems) noexcept {
+			GUTIL_TIMER("Refining (QH) dofs on ", elems.size(), " elements");
+			size_t n_start = active_dofs.size();
+			
+			BASE::mark_stale();
+			set_batch_start();
 
-			for (DOF_t dof : dofs) {
-				if(dof.exists() && (get_mask(dof)&BATCH_PROCESS_BIT)) {unrefine_hierarchical(dof);}
+			//a dof must be active and not refined and in the current batch.
+			constexpr uint8_t MASK = ACTIVE_BIT | BATCH_PROCESS_BIT;	//0b00010001
+			auto pred = [MASK](uint8_t byte) -> bool {
+				return ((byte&MASK) == MASK) && ((byte&REFINED_BIT) == 0);
+			};
+
+			auto action = [](uint8_t& byte) -> void {
+				byte&=~BATCH_PROCESS_BIT;
+			};
+
+			// std::nullptr_t action = nullptr;
+			std::vector<DOF_t> dofs = get_dofs_impl(BASE::reinterpret_key_span<DofElem_t,Elem_t>(elems), 
+										std::move(pred), std::move(action), max_depth);
+			
+			for (size_t i=0; i<dofs.size(); ++i) {
+				#ifndef NDEBUG
+					GUTIL_ASSERT(dofs[i].is_valid());
+					uint8_t byte = get_mask(dofs[i]);
+					GUTIL_ASSERT(byte&ACTIVE_BIT);
+					GUTIL_ASSERT((byte&REFINED_BIT)==0);
+					GUTIL_ASSERT((byte&BATCH_PROCESS_BIT)==0);
+				#endif
+				refine_quasi_hierarchical(dofs[i]);
 			}
+
+			set_batch_end();
+			collect_dofs();
+			size_t n_end = active_dofs.size();
+			GUTIL_LOG("n_dofs at start=", n_start, ", n_dofs at end=", n_end, " (", n_end-n_start, ")");
+			GUTIL_ASSERT(is_current());
+			GUTIL_ASSERT(n_end>=n_start);
+			return n_end - n_start;
 		}
 
-		void unrefine_quasi_hierarchical(DofElem_t el) noexcept {
-			GUTIL_ASSERT(batch_is_set && "call set_batch_start() for synchronization");
-			std::vector<DOF_t> dofs;
-			std::vector<uint64_t> ids;
-			get_active_dofs_quasi_hierarchical(el, dofs, ids);
-			for (DOF_t dof : dofs) {
-				if(dof.exists() && (get_mask(dof)&BATCH_PROCESS_BIT)) {unrefine_quasi_hierarchical(dof);}
-			}
+
+		template<typename Container_t>
+		[[maybe_unused]] size_t unrefine_quasi_hierarchical(const Container_t& elems) noexcept {
+			return unrefine_quasi_hierarchical(as_span(elems));
 		}
+
+		template<std::contiguous_iterator I>
+		[[maybe_unused]] size_t unrefine_quasi_hierarchical(I begin, I end) noexcept {
+			return unrefine_quasi_hierarchical(std::span<std::iter_value_t<I>>{begin, end});
+		}
+
+		template<typename Elem_t> requires (std::same_as<Elem_t,MeshElem_t> || std::same_as<Elem_t,DofElem_t>)
+		[[maybe_unused]] size_t unrefine_quasi_hierarchical(std::span<const Elem_t> elems) noexcept {
+			GUTIL_TIMER("Unrefining (QH) dofs on ", elems.size(), " elements");
+			size_t n_start = active_dofs.size();
+			
+			BASE::mark_stale();
+			set_batch_start();
+
+			//a dof must be inactive and refined and in the current batch
+			//it also must have no refined children, so it must be at most one depth above.
+			auto pred = [](uint8_t byte) -> bool {
+				return ((byte&ACTIVE_BIT)==0) && ((byte&REFINED_BIT)) && ((byte&BATCH_PROCESS_BIT));
+			};
+
+			auto action = [](uint8_t& byte) -> void {
+				byte&=~BATCH_PROCESS_BIT;
+			};
+
+			std::vector<DOF_t> dofs = get_dofs_impl(BASE::reinterpret_key_span<DofElem_t,Elem_t>(elems), 
+										std::move(pred), std::move(action), max_depth);
+			
+			for (size_t i=0; i<dofs.size(); ++i) {
+				#ifndef NDEBUG
+					GUTIL_ASSERT(dofs[i].is_valid());
+					uint8_t byte = get_mask(dofs[i]);
+					GUTIL_ASSERT((byte&ACTIVE_BIT)==0);
+					GUTIL_ASSERT((byte&REFINED_BIT));
+					GUTIL_ASSERT((byte&BATCH_PROCESS_BIT)==0);
+				#endif
+				unrefine_quasi_hierarchical(dofs[i]);
+			}
+
+			set_batch_end();
+			collect_dofs();
+			size_t n_end = active_dofs.size();
+			GUTIL_LOG("n_dofs at start=", n_start, ", n_dofs at end=", n_end, " (", n_start-n_end, ")");
+			GUTIL_ASSERT(is_current());
+			GUTIL_ASSERT(n_start>=n_end);
+			return n_start-n_end;
+		}
+
+		// template<typename Elem_t> requires (std::same_as<Elem_t,MeshElem_t> || std::same_as<Elem_t,DofElem_t>)
+		// void refine_hierarchical(std::span<const Elem_t> elems) noexcept {
+		// 	BASE::mark_stale();
+		// 	set_batch_start();
+
+		// 	std::vector<DOF_t> dofs = get_active_dofs_impl<true,Elem_t>(elems, max_depth);
+		// 	for (DOF_t dof : dofs) {
+		// 		GUTIL_ASSERT(is_active(dof));
+		// 		refine_hierarchical(dof);
+		// 	}
+
+		// 	set_batch_end();
+		// 	collect_dofs();
+		// }
+
+		// template<typename Elem_t> requires (std::same_as<Elem_t,MeshElem_t> || std::same_as<Elem_t,DofElem_t>)
+		// void unrefine_quasi_hierarchical(std::span<const Elem_t> elems) noexcept {
+		// 	BASE::mark_stale();
+		// 	set_batch_start();
+
+		// 	std::vector<DOF_t> dofs = get_active_dofs_impl<true,Elem_t>(elems, max_depth);
+		// 	for (DOF_t dof : dofs) {
+		// 		GUTIL_ASSERT(is_active(dof));
+		// 		MeshFeature_t feat = static_cast<MeshFeature_t>(dof);
+		// 		unrefine_quasi_hierarchical(static_cast<DOF_t>(feat.parent()));
+		// 	}
+
+		// 	set_batch_end();
+		// 	collect_dofs();
+		// }
 
 	};
 

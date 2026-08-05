@@ -369,10 +369,10 @@ namespace GV {
 		[[nodiscard]] uint64_t n_elements() const noexcept { return active_element_view.size(); }
 		[[nodiscard]] uint64_t n_vertices() const noexcept { return tracked_vertices_view.size(); }
 
-		auto element_begin() const noexcept { return active_element_view.cbegin(); }
-		auto element_end() 	 const noexcept { return active_element_view.cend();   }
-		auto vertex_begin()  const noexcept { return tracked_vertices_view.cbegin(); }
-		auto vertex_end()    const noexcept { return tracked_vertices_view.cend();   }
+		auto element_begin() const noexcept { return active_element_view.begin(); }
+		auto element_end() 	 const noexcept { return active_element_view.end();   }
+		auto vertex_begin()  const noexcept { return tracked_vertices_view.begin(); }
+		auto vertex_end()    const noexcept { return tracked_vertices_view.end();   }
 
 		auto element_begin() noexcept { return active_element_view.begin(); }
 		auto element_end()   noexcept { return active_element_view.end();   }

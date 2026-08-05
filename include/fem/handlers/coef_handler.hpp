@@ -129,10 +129,10 @@ namespace GV {
 		void update_coefs() noexcept {
 			//relink the span
 			dh_curr_dofs = dofhandler.active_dofs;
+			GUTIL_TIMER("updating coefficients (", dofs.size(), " -> ", dh_curr_dofs.size(), ")");
 
 			//get new coefficients
 			{
-				GUTIL_TIMER("computing new coefficients (", dofs.size(), " -> ", dh_curr_dofs.size(), ")");
 				std::array<std::vector<Scalar_t>,N> new_coefs;
 				auto job = [&](uint8_t i) { update_coefs(i,new_coefs[i]); };
 				for (uint8_t i=0; i<N; ++i) {
@@ -143,7 +143,6 @@ namespace GV {
 			}
 			//update dofs
 			{
-				GUTIL_TIMER("updating dof tracking");
 				reset_dofs();//copies over new dofs and clears the coef_marked flags
 				GUTIL_OMP(parallel for)
 				for (uint64_t idx=0; idx<dofs.size(); ++idx) {
@@ -161,8 +160,8 @@ namespace GV {
 			GUTIL_OMP(parallel)
 			{
 				//make space for the fast parent/child operations
-				constexpr uint64_t H_SIZE = DOF_t::N_CHILDREN > DOF_t::N_PARENTS ? DOF_t::N_CHILDREN : DOF_t::N_PARENTS;
-				DOF_t pc_dofs[H_SIZE];
+				// constexpr uint64_t H_SIZE = DOF_t::N_CHILDREN > DOF_t::N_PARENTS ? DOF_t::N_CHILDREN : DOF_t::N_PARENTS;
+				// DOF_t pc_dofs[H_SIZE];
 				
 				GUTIL_OMP(for)
 				for (size_t idx=0; idx<old_size; ++idx) {
@@ -178,44 +177,137 @@ namespace GV {
 					}
 					GUTIL_ASSERT(!dofhandler.is_active(dof))
 
+					if (dofhandler.is_refined(dof)) {
+					    distribute_refined(dof, coefs[i][idx], new_coefs, new_size);
+					}
+					else {
+						distribute_unrefined(dof, coefs[i][idx], new_coefs, new_size);
+					}
 					//if the dof does not exist anymore, then it must have
 					//either been refined, unrefined, or deactivated
-					if (dofhandler.is_refined(dof)) {
-						dof.children_simd(pc_dofs);
-						for (uint8_t c=0; c<DOF_t::N_CHILDREN; ++c) {
-							if (!pc_dofs[c].exists()) {continue;}
+					// if (dofhandler.is_refined(dof)) {
+					// 	dof.children_simd(pc_dofs);
+					// 	for (uint8_t c=0; c<DOF_t::N_CHILDREN; ++c) {
+					// 		if (!pc_dofs[c].exists()) {continue;}
 							
-							n_idx = dofhandler.global_number(pc_dofs[c]);
-							if (n_idx<new_size) {
-								GUTIL_OMP(atomic)
-								new_coefs[n_idx] += coefs[i][idx] * dof.template child_coef<Scalar_t>(c);
-							}
-						}
-						continue;
-					}
+					// 		n_idx = dofhandler.global_number(pc_dofs[c]);
+					// 		if (n_idx<new_size) {
+					// 			GUTIL_OMP(atomic)
+					// 			new_coefs[n_idx] += coefs[i][idx] * dof.template child_coef<Scalar_t>(c);
+					// 		}
+					// 	}
+					// 	continue;
+					// }
 
-					//check if any parent is newly created (it doesn't have a coef yet)
-					//the coefficient of the parent is the sum of coefficients of the children dofs
-					//such that the parent of the child dof feature is the feature of the parent dof
-					//for vertices, there is only one such child, for faces, there are 4 and for elements there are 8.
-					dof.parents_simd(pc_dofs);
+					// //check if any parent is newly created (it doesn't have a coef yet)
+					// //the coefficient of the parent is the sum of coefficients of the children dofs
+					// //such that the parent of the child dof feature is the feature of the parent dof
+					// //for vertices, there is only one such child, for faces, there are 4 and for elements there are 8.
+					// dof.parents_simd(pc_dofs);
 					// DofFeature_t p_feat = DofFeature_t{dof.key}.parent();
-					for (uint8_t p=0; p<DOF_t::N_PARENTS; ++p) {
-						if (!pc_dofs[p].exists()) {continue;}
-						// if (p_feat != DofFeature_t{pc_dofs[p].key}) {continue;}
+					// for (uint8_t p=0; p<DOF_t::N_PARENTS; ++p) {
+					// 	if (!pc_dofs[p].exists()) {continue;}
+					// 	if (p_feat != DofFeature_t{pc_dofs[p].key}) {continue;}
 
-						n_idx = dofhandler.global_number(pc_dofs[p]);
-						if (n_idx<new_size && !dofhandler.is_coef_marked(pc_dofs[p])) {
-							GUTIL_OMP(atomic)
-							new_coefs[n_idx] += coefs[i][idx] * dof.template parent_coef<Scalar_t>(p);
-							// new_coefs[n_idx] += coefs[i][idx];
-						}
-					}//parent check
+					// 	n_idx = dofhandler.global_number(pc_dofs[p]);
+					// 	if (n_idx<new_size ){//&& !dofhandler.is_coef_marked(pc_dofs[p])) {
+					// 		GUTIL_OMP(atomic)
+					// 		// new_coefs[n_idx] += coefs[i][idx] * dof.template parent_coef<Scalar_t>(p);
+					// 		new_coefs[n_idx] += coefs[i][idx];
+					// 	}
+					// }//parent check
 				}//for dofs
 			}//omp parallel
 		}//update coefs
 
 
+
+
+		//////////////////////////////////////////////////////////////////////////
+		/// Helper functions to ensure multiple refinements can be processed correctly
+		//////////////////////////////////////////////////////////////////////////
+	private:
+		//recursively distribute a refined old-dof's contribution down through the hierarchy
+		//until reaching descendants that are genuinely active (not themselves refined further
+		//within the same batch)
+		void distribute_refined(DOF_t dof, Scalar_t contribution, std::vector<Scalar_t>& new_coefs, size_t new_size) const noexcept {
+			DOF_t pc_dofs[DOF_t::N_CHILDREN];
+			dof.children_simd(pc_dofs);
+			for (uint8_t c=0; c<DOF_t::N_CHILDREN; ++c) {
+				if (!pc_dofs[c].exists()) {continue;}
+				Scalar_t child_contribution = contribution * dof.template child_coef<Scalar_t>(c);
+				if (child_contribution == Scalar_t{0}) {continue;}
+
+				if (dofhandler.is_refined(pc_dofs[c])) {
+				// if (!dofhandler.is_coef_marked(pc_dofs[c])) {
+					distribute_refined(pc_dofs[c], child_contribution, new_coefs, new_size);
+				}
+				else {
+					size_t n_idx = dofhandler.global_number(pc_dofs[c]);
+					if (n_idx<new_size && !dofhandler.is_coef_marked(pc_dofs[c])) {
+						GUTIL_OMP(atomic)
+						new_coefs[n_idx] += child_contribution;
+					}
+				}
+			}
+		}
+
+		//recursively distribute an unrefined-away old-dof's contribution up through the
+		//hierarchy until reaching an ancestor that's genuinely active
+		void distribute_unrefined(DOF_t dof, Scalar_t contribution, std::vector<Scalar_t>& new_coefs, size_t new_size) const noexcept {
+			DOF_t pc_dofs[DOF_t::N_PARENTS];
+			dof.parents_simd(pc_dofs);
+			for (uint8_t p=0; p<DOF_t::N_PARENTS; ++p) {
+				if (!pc_dofs[p].exists()) {continue;}
+				Scalar_t parent_contribution = contribution * dof.template parent_coef<Scalar_t>(p);
+				if (parent_contribution == Scalar_t{0}) {continue;}
+
+				size_t n_idx = dofhandler.global_number(pc_dofs[p]);
+				if (n_idx<new_size) {
+					if (!dofhandler.is_coef_marked(pc_dofs[p])) {
+						GUTIL_OMP(atomic)
+						new_coefs[n_idx] += parent_contribution;
+					}
+				}
+				else if (!dofhandler.is_active(pc_dofs[p])) {
+					distribute_unrefined(pc_dofs[p], parent_contribution, new_coefs, new_size);
+				}
+			}
+		}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+	public:
 		////////////////////////////////////////////////////////////////////////
 		/// Evaluate at mesh vertices for visualizations
 		/// Pass begin/end iterators to the existing vertices
