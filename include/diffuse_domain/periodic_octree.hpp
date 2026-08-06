@@ -95,7 +95,7 @@ namespace GV {
 		/////////////////////////////////////////////////
 		void push_back(value_type value) noexcept {
 			push_back_range(std::span<value_type>{&value, 1});
-		};
+		}
 
 		void push_back_range(std::vector<value_type>&& values) noexcept {
 			push_back_range(std::span<value_type>(values.begin(), values.end()));

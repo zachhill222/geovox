@@ -128,16 +128,16 @@ namespace GV {
 		public:
 		using BASE::is_key_mask_unstable;
 		using BASE::is_key_mask_stable;
-		using BASE::start_key_mask_stable;
+		using BASE::begin_key_mask_stable;
 		using BASE::end_key_mask_stable;
-		using BASE::start_key_mask_unstable;
+		using BASE::begin_key_mask_unstable;
 		using BASE::end_key_mask_unstable;
 		
 		using BASE::is_active_keys_unstable;
 		using BASE::is_active_keys_stable;
-		using BASE::start_active_keys_stable;
+		using BASE::begin_active_keys_stable;
 		using BASE::end_active_keys_stable;
-		using BASE::start_active_keys_unstable;
+		using BASE::begin_active_keys_unstable;
 		using BASE::end_active_keys_unstable;
 
 		std::span<DOF_t>					active_dofs;
@@ -145,8 +145,7 @@ namespace GV {
 		mutable std::atomic<bool> 			batch_is_set{false};	//check if the batch start bit has been set.
 		
 		[[nodiscard]] bool is_active_dofs_linked() const noexcept {	//check that we are linked to the active_keys correctly
-			return reinterpret_cast<uintptr_t>(active_dofs.data())==reinterpret_cast<uintptr_t>(BASE::active_keys.data()) &&
-					reinterpret_cast<uintptr_t>(active_dofs.data()+active_dofs.size())==reinterpret_cast<uintptr_t>(BASE::active_keys.data()+BASE::active_keys.size());
+			return are_spans_same_data(active_dofs, BASE::active_keys);
 		}
 		[[nodiscard]] bool is_current() const noexcept {
 			return BASE::is_current() && is_active_dofs_linked();
@@ -425,57 +424,48 @@ namespace GV {
 
 		/////////////////////////////////////////////////////////////////////////
 		/// Initialization. The mesh must be in a conformal state.
+		/// Additionally, we assume that this initial mesh is not very large.
 		/////////////////////////////////////////////////////////////////////////
 		void init_dofs() noexcept {
-			//TODO: ensure the mesh is in a stable state after it inherits from the HybridKeyTracker
-			BASE::clear();
-
-			if (mesh.element_begin()==mesh.element_end()) {
-				GUTIL_ABORT("ERROR: no elements found.")
-			}
-
+			GUTIL_ASSERT(mesh.is_current() && mesh.is_depth_field_correct());
 			{
 				GV_BEGIN_UNSTABLE
+				BASE::clear();
 
-				//TODO: dispatch to the mesh parallel pool after it inherits from the HybridKeyTracker
-				const uint64_t n_threads     = threads.n_threads() == 0 ? 1 : threads.n_threads();
-				const uint64_t el_per_thread = mesh.n_elements()/n_threads;
+				//note that all elements have the same encoding. periodicity only affects the methods.
+				std::span<const DofElem_t> dof_elements = mesh.template elements_as_span<DOF_t::PERIOD>();
+				BASE::active_keys.resize(DOF_t::N_DOF_PER_ELEM * dof_elements.size(), uint64_t(-1));
 
-				for (uint64_t tid=0; tid<n_threads; ++tid) {
-					const uint64_t start = tid * el_per_thread;
-					const uint64_t end   = (tid==n_threads-1) ? mesh.n_elements() : start + el_per_thread;
-					auto job = [&](auto it, auto end) {
-						while (it != end) {
-							for (MeshFeature_t feat : features(*it)) {
-								const DOF_t dof{feat}; //constructor handles period transformation if needed
-								#ifndef NDEBUG
-								DofFeature_t d_feat{feat};
-								if (d_feat.exists() && !mesh.is_conformal(d_feat)) {
-									GUTIL_ASSERT(dof==DOF_t{d_feat});
-									GUTIL_ERROR("dof_feature ", d_feat, " is not conformal in the mesh");
-									std::terminate();
-								}
-								#endif
-								if (dof.exists()) {
-									const uint64_t idx = dof.linear_index();
-									BASE::set_active(idx, true);
-
-									//mark as explicitly refinable
-									if (dof.depth() != max_depth) {
-										key_mask[idx] |= INITIAL_DOF_BIT;
-									}
-								}
-							}
-							++it;
-						}
-					};
-					GUTIL_ASSERT(start<=end);
-					threads.submit(job, mesh.element_begin()+start, mesh.element_begin()+end);
+				GUTIL_SIMD()
+				for (size_t i=0; i<dof_elements.size(); ++i) {
+					DOF_t::dofs_on_elem_simd_raw(dof_elements[i].decode_simd(), 	//returns the raw key of the element's cartesian form
+							&BASE::active_keys[i*DOF_t::N_DOF_PER_ELEM]);
 				}
-				threads.wait_idle();
+
+				#ifndef NDEBUG
+				GUTIL_ASSERT(std::find(BASE::active_keys.begin(), BASE::active_keys.end(), uint64_t(-1)) == BASE::active_keys.end());
+				#endif
+
+				BASE::sort_and_unique(BASE::active_keys, [](uint64_t a, uint64_t b) {return b<a;});	//large dofs on the left
+				std::erase_if(BASE::active_keys, [](uint64_t a){return !DOF_t{a}.is_valid();});				//cleanup any singleton bad dofs
+				BASE::active_keys.shrink_to_fit();
+				active_dofs = BASE::reinterpret_key_span<DOF_t,uint64_t>(std::span<uint64_t>(BASE::active_keys));
+				BASE::is_collected_.store(true);
+
+				GUTIL_OMP(parallel for)
+				for (size_t i=0; i<BASE::active_keys.size(); ++i) {
+					set_active(DOF_t{BASE::active_keys[i]}, true);
+					set_initial_marked(DOF_t{BASE::active_keys[i]}, true);
+				}
+
+				
+
 				GV_END_UNSTABLE
 			}//release mutex (collect dofs needs to re-aquire the unique lock)
-			collect_dofs();
+			BASE::sort_active_keys(8, &DofHandler::dof_key_bin);
+			// collect_dofs();
+			GUTIL_ASSERT(is_current());
+			GUTIL_ASSERT(is_all_dofs_conformal());
 		}
 
 
@@ -492,6 +482,11 @@ namespace GV {
 			BASE::collect_active_keys<DOF_t>();
 			active_dofs = BASE::reinterpret_key_span<DOF_t,uint64_t>(std::span<uint64_t>(BASE::active_keys));
 			BASE::sort_active_keys(8, &DofHandler::dof_key_bin);
+			#ifndef NDEBUG
+				if (!mesh.has_pending_refine_requests()) {
+					GUTIL_ASSERT(is_all_dofs_conformal());
+				}
+			#endif
 		}
 
 		/// mark the start of a wide (look at lots of dofs) process
@@ -508,6 +503,31 @@ namespace GV {
 			GV_ASSERT_KEY_MASK_UNSTABLE_STATE
 			BASE::unconditional_bitwise_and_all_masks(~BATCH_PROCESS_BIT);
 			batch_is_set = false;
+		}
+
+		/// ensure that every active dof is at a conformal vertex in the mesh
+		[[nodiscard]] bool is_all_dofs_conformal() const noexcept {
+			GUTIL_ASSERT(is_current());
+			GUTIL_ASSERT(mesh.is_current());
+
+			size_t count = 0;
+			{
+				GV_BEGIN_STABLE
+				auto m_lock = mesh.begin_key_mask_stable();
+
+				for (size_t i=0; i<active_dofs.size(); ++i) {
+					if (!mesh.is_conformal(DofFeature_t{BASE::active_keys[i]})) {
+						DOF_t dof = active_dofs[i];
+						GUTIL_ASSERT(dof == DOF_t{BASE::active_keys[i]});
+						GUTIL_ERROR("active_dof[",i,"] ", dof, " at ", DofFeature_t{dof.key}, " is non-conformal");
+						++count;
+					}
+				}
+				GV_END_STABLE
+			}
+
+			GUTIL_LOG(count, "/", active_dofs.size(), " dofs are on non-conformal features");
+			return count==0;
 		}
 
 		// void deactivate_stranded_dofs() noexcept {
@@ -1217,7 +1237,6 @@ namespace GV {
 			collect_dofs();
 			size_t n_end = active_dofs.size();
 			GUTIL_LOG("n_dofs at start=", n_start, ", n_dofs at end=", n_end, " (", n_end-n_start, ")");
-			GUTIL_ASSERT(is_current());
 			GUTIL_ASSERT(n_end>=n_start);
 			return n_end - n_start;
 		}
@@ -1251,33 +1270,35 @@ namespace GV {
 			};
 
 			BASE::mark_stale();
-			set_batch_start();
-			GV_BEGIN_MASK_UNSTABLE	//the action clears a bit
-			std::vector<DOF_t> dofs = get_dofs_impl(BASE::reinterpret_key_span<DofElem_t,Elem_t>(elems), 
-										std::move(pred), std::move(action), max_depth);
+			{
+				GV_BEGIN_MASK_UNSTABLE
+				set_batch_start();
+				std::vector<DOF_t> dofs = get_dofs_impl(BASE::reinterpret_key_span<DofElem_t,Elem_t>(elems), 
+											std::move(pred), std::move(action), max_depth);
 
 
-			//unrefine from deepest to shallowest
-			std::sort(dofs.begin(), dofs.end(), [](DOF_t a, DOF_t b){ return a.depth()>b.depth(); });
+				//unrefine from deepest to shallowest
+				std::sort(dofs.begin(), dofs.end(), [](DOF_t a, DOF_t b){ return a.depth()>b.depth(); });
 
-			for (size_t i=0; i<dofs.size(); ++i) {
-				#ifndef NDEBUG
-					GUTIL_ASSERT(dofs[i].is_valid());
-					uint8_t byte = get_mask_unstable(dofs[i]);
-					GUTIL_ASSERT((byte&ACTIVE_BIT)==0);
-					GUTIL_ASSERT((byte&REFINED_BIT));
-					GUTIL_ASSERT((byte&BATCH_PROCESS_BIT)==0);
-				#endif
-				unrefine_quasi_hierarchical(dofs[i]);
+				for (size_t i=0; i<dofs.size(); ++i) {
+					#ifndef NDEBUG
+						GUTIL_ASSERT(dofs[i].is_valid());
+						uint8_t byte = get_mask_unstable(dofs[i]);
+						GUTIL_ASSERT((byte&ACTIVE_BIT)==0);
+						GUTIL_ASSERT((byte&REFINED_BIT));
+						GUTIL_ASSERT((byte&BATCH_PROCESS_BIT)==0);
+					#endif
+					unrefine_quasi_hierarchical(dofs[i]);
+				}
+
+				set_batch_end();
+				GV_END_MASK_UNSTABLE
 			}
-
-			GV_END_MASK_UNSTABLE
-			set_batch_end();
 			collect_dofs();
+			//note that we may have 'non-conformal' dofs if the mesh doesn't process all refine requests
 
 			size_t n_end = active_dofs.size();
 			GUTIL_LOG("n_dofs at start=", n_start, ", n_dofs at end=", n_end, " (", n_start-n_end, ")");
-			GUTIL_ASSERT(is_current());
 			GUTIL_ASSERT(n_start>=n_end);
 			return n_start-n_end;
 		}

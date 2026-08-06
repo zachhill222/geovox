@@ -16,8 +16,16 @@ namespace GV {
 
 		using BASE::BASE;
 
+		[[nodiscard]] T signed_distance(const Point_t& point) const noexcept {
+			const size_t idx = this->find_nearest(point);
+			GUTIL_ASSERT(idx< this->data_.size());
+			return this->data_[idx].signed_distance(point);
+		}
+
+
 		[[nodiscard]] Point_t grad_signed_distance(const Point_t& point) const noexcept {
 			const size_t idx = this->find_nearest(point);
+			GUTIL_ASSERT(idx< this->data_.size());
 			return this->data_[idx].grad_signed_distance_impl(point);
 		}
 
@@ -26,7 +34,7 @@ namespace GV {
 			//return 1 if sgndist(point) > eps (outside all particles)
 			assert(eps>T{0});
 
-			const T sd = this->signed_distance(point);
+			const T sd = signed_distance(point);
 
 			if (sd < -eps) {return 0;}
 			else if (sd > eps) {return 1;}
@@ -39,7 +47,7 @@ namespace GV {
 			//return 0 if |sgndist(point)| > eps (heaviside function is constant)
 			assert(eps>0);
 
-			const T sd = this->signed_distance(point);
+			const T sd = signed_distance(point);
 			if ( gutil::abs(sd) > eps) {return 0;}
 
 			const T ratio = T{1.0}/eps;

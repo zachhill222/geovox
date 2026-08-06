@@ -68,48 +68,47 @@ namespace GV {
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Data
 		/////////////////////////////////////////////////////////////////////////////////////////////////
-		const uint8_t				max_depth;
-		const uint64_t				max_possible_elements;
+		const uint8_t								max_depth;
+		const uint64_t								max_possible_elements;
 		
-		const Box_t 				box;							//physical extents of the domain
-		const GeoPoint_t 			diag;							//diagonal/sidelength of the domain
-		const GeoPoint_t 			inv_diag;						//reciprocal of the sidelength
+		const Box_t 								box;						//physical extents of the domain
+		const GeoPoint_t 							diag;						//diagonal/sidelength of the domain
+		const GeoPoint_t 							inv_diag;					//reciprocal of the sidelength
 		
-		std::vector<Vert_t> 		tracked_vertices;				//a compressed list of 'active' vertices, primarily used for visualization. reduced keys are stored.
-		gutil::BinSort<Vert_t>		vertex_sorter;					//sort the vertices for better lookup and deduplication
-		mutable std::atomic<bool>	is_vertices_collected_{false};	
+		std::vector<Vert_t> 						tracked_vertices{};			//a compressed list of 'active' vertices, primarily used for visualization. reduced keys are stored.
+		gutil::BinSort<Vert_t>						vertex_sorter{};			//sort the vertices for better lookup and deduplication
+		mutable std::atomic<bool>					is_vertices_collected_{false};	
+		mutable std::atomic<bool>					is_depth_explicitly_correct_{false};
 
 		protected:
-		std::span<Elem_t>			active_elements;				//a view into BASE::active_keys (std::vector<uint64_t>) re-interpreted as Elem_t
-		using BASE::key_mask;										//vector<uint8_t> of size max_possible_elements
+		std::span<Elem_t>							active_elements{};			//a view into BASE::active_keys (std::vector<uint64_t>) re-interpreted as Elem_t
+		using BASE::key_mask;													//vector<uint8_t> of size max_possible_elements
 		using BASE::threads;
-		using BASE::sorter;											//the bins of this sorter will correspond to each depth in the mesh, will need to re-interpret the spans
+		using BASE::sorter;														//the bins of this sorter will correspond to each depth in the mesh, will need to re-interpret the spans
 
 		mutable std::mutex							request_mutex{};			//sync refine requests. TODO: make requests per-thread-per-depth if it's slow
 		mutable std::vector<std::vector<Elem_t>> 	request_refine_list{};		//allow classes with const-ref to request refinement
 		mutable std::vector<std::vector<Elem_t>>	request_unrefine_list{};	//allow classes with const-ref to request unrefinement
 
 		public:
-		using BASE::is_key_mask_unstable;									//synchronization tools used in macros
-		using BASE::is_key_mask_stable;										//exposing to external classes can be helpul
-		using BASE::start_key_mask_stable;
+		using BASE::is_key_mask_unstable;										//synchronization tools used in macros
+		using BASE::is_key_mask_stable;											//exposing to external classes can be helpul
+		using BASE::begin_key_mask_stable;
 		using BASE::end_key_mask_stable;
-		using BASE::start_key_mask_unstable;
+		using BASE::begin_key_mask_unstable;
 		using BASE::end_key_mask_unstable;
 		
 		using BASE::is_active_keys_unstable;
 		using BASE::is_active_keys_stable;
-		using BASE::start_active_keys_stable;
+		using BASE::begin_active_keys_stable;
 		using BASE::end_active_keys_stable;
-		using BASE::start_active_keys_unstable;
+		using BASE::begin_active_keys_unstable;
 		using BASE::end_active_keys_unstable;
-
 
 		//a few helper methods to check that we haven't forgot to call something like collect_vertices etc.
 		[[nodiscard]] bool is_vertices_collected() const noexcept {return is_vertices_collected_.load();}
 		[[nodiscard]] bool is_active_elements_linked() const noexcept {
-			return reinterpret_cast<uintptr_t>(active_elements.data())==reinterpret_cast<uintptr_t>(BASE::active_keys.data()) &&
-					reinterpret_cast<uintptr_t>(active_elements.data()+active_elements.size())==reinterpret_cast<uintptr_t>(BASE::active_keys.data()+BASE::active_keys.size());
+			return are_spans_same_data(active_elements,BASE::active_keys);
 		}
 		[[nodiscard]] bool is_current() const noexcept {	//for most processes we only care about the elements
 			return BASE::is_current() && is_active_elements_linked();
@@ -133,11 +132,29 @@ namespace GV {
 				request_unrefine_list.resize(max_depth+1);
 			}
 		
+		~UnstructuredVoxelMesh() {
+			std::lock_guard<std::mutex> lock(request_mutex);
+			threads.wait_idle();
+		}
 		UnstructuredVoxelMesh(const UnstructuredVoxelMesh&) = delete;
-		UnstructuredVoxelMesh(UnstructuredVoxelMesh&& other) = default;
 		UnstructuredVoxelMesh& operator=(const UnstructuredVoxelMesh&) = delete;
 		UnstructuredVoxelMesh& operator=(UnstructuredVoxelMesh&&) = delete;
-		~UnstructuredVoxelMesh() {std::lock_guard<std::mutex> lock(request_mutex);}
+		
+		UnstructuredVoxelMesh(UnstructuredVoxelMesh&& other) noexcept :
+			BASE(std::move(other)),
+			max_depth{other.max_depth},
+			max_possible_elements{other.max_possible_elements},
+			box{other.box},
+			diag{other.diag},
+			inv_diag{other.inv_diag},
+			tracked_vertices{std::move(other.tracked_vertices)},
+			vertex_sorter{std::move(other.vertex_sorter)},
+			is_vertices_collected_{other.is_vertices_collected_.load()},
+			active_elements{BASE::reinterpret_key_span<Elem_t,uint64_t>(std::span<uint64_t>(BASE::active_keys))},
+			request_refine_list{std::move(other.request_refine_list)},
+			request_unrefine_list{std::move(other.request_unrefine_list)}
+			{}
+		
 
 
 		/////////////////////////////////////////////////////////////////////////////////////////////////
@@ -179,14 +196,18 @@ namespace GV {
 			GUTIL_ASSERT(el.is_valid()); BASE::set_active(el.linear_index(), val);
 		}
 
+		GUTIL_DECLARE_SIMD()
+		[[nodiscard]] uint8_t static constexpr read_depth_from_byte(uint8_t byte) noexcept {
+			return (byte&DEPTH_BITS)>>1;
+		}
 		[[nodiscard]] uint8_t read_depth_field(Elem_t el) const noexcept {
-			GUTIL_ASSERT(el.is_valid()); return (get_mask(el)&DEPTH_BITS)>>1;
+			GUTIL_ASSERT(el.is_valid()); return read_depth_from_byte(get_mask(el));
 		}
 		[[nodiscard]] uint8_t read_depth_field_stable(Elem_t el) const noexcept {
-			GUTIL_ASSERT(el.is_valid()); return (get_mask_stable(el)&DEPTH_BITS)>>1;
+			GUTIL_ASSERT(el.is_valid()); return read_depth_from_byte(get_mask_stable(el));
 		}
 		[[nodiscard]] uint8_t read_depth_field_unstable(Elem_t el) const noexcept {
-			GUTIL_ASSERT(el.is_valid()); return (get_mask_unstable(el)&DEPTH_BITS)>>1;
+			GUTIL_ASSERT(el.is_valid()); return read_depth_from_byte(get_mask_unstable(el));
 		}
 		[[nodiscard]] bool set_depth_field_check_changed(Elem_t el, uint8_t val) noexcept {
 			GUTIL_ASSERT(el.is_valid()); 
@@ -226,18 +247,46 @@ namespace GV {
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Simple queries and commands
 		/////////////////////////////////////////////////////////////////////////////////////////////////
+		UnstructuredVoxelMesh get_depth_slice_as_mesh(uint8_t min_d, uint8_t max_d) const noexcept {
+			GV_BEGIN_STABLE
+
+			GUTIL_ASSERT(min_d <= max_d && max_d<=max_depth);
+			UnstructuredVoxelMesh result(box, max_d);
+
+			//copy the mask
+			GUTIL_ASSERT(key_mask.size() == max_possible_elements);
+			GUTIL_ASSERT(result.key_mask.size() == result.max_possible_elements);
+			GUTIL_ASSERT(result.max_possible_elements <= max_possible_elements);
+			std::copy(key_mask.begin(), key_mask.begin()+result.max_possible_elements, result.key_mask.begin());
+
+			//deactivate any elements below the requested depth
+			const size_t min_depth_start = Elem_t::elements_below_depth(min_d);
+			GUTIL_SIMD()
+			for (size_t i=0; i<min_depth_start; ++i) {
+				result.key_mask[i]&=~ACTIVE_BIT;
+			}
+
+			GV_END_STABLE
+			return result;
+		}
+
+
 		void set_depth(uint8_t depth) noexcept {
-			BASE::clear();
+			if (depth>max_depth) {GUTIL_ABORT("depth too large");}
 			{
 				GV_BEGIN_UNSTABLE
+				BASE::clear();
 
 				uint64_t start = Elem_t::elements_below_depth(depth);
 				uint64_t end   = Elem_t::elements_below_depth(depth+1);
-				std::fill(key_mask.begin()+start, key_mask.begin()+end, ACTIVE_BIT);
+				uint8_t depth_mask = (depth<<1)&DEPTH_BITS;
+				std::fill(key_mask.begin()+start, key_mask.begin()+end, ACTIVE_BIT|depth_mask);
+				std::fill(key_mask.begin(), key_mask.begin()+start, depth_mask);
 				is_vertices_collected_.store(false);
 				GV_END_UNSTABLE
 			}
 			collect_elements();
+			GUTIL_ASSERT(is_current() && is_depth_field_correct());
 		}
 
 		void collect_elements() noexcept {
@@ -247,6 +296,7 @@ namespace GV {
 			BASE::collect_active_keys<Elem_t>();
 			active_elements = BASE::reinterpret_key_span<Elem_t,uint64_t>(std::span<uint64_t>(BASE::active_keys));
 			BASE::sort_active_keys(max_depth, &UnstructuredVoxelMesh::element_key_bin);
+			GUTIL_ASSERT(is_current());
 		}
 
 		void collect_vertices() noexcept {
@@ -255,6 +305,8 @@ namespace GV {
 			GUTIL_ASSERT(is_current());
 			is_vertices_collected_.store(false);
 
+			// go through active elements and collect their vertices
+			// reduce the vertex index (eg., (3,4,2,6) -> (2,2,1,3)) for deduplication by geometric coordinates
 			const size_t n_threads = threads.n_threads()==0 ? 1 : threads.n_threads();
 			std::vector<std::vector<Vert_t>> thread_verts(n_threads);
 
@@ -291,7 +343,8 @@ namespace GV {
 			}
 			thread_verts.clear();
 
-			vertex_sorter = gutil::BinSort<Vert_t>(tracked_vertices, max_depth);
+			vertex_sorter = gutil::BinSort<Vert_t>(tracked_vertices, max_depth+1);
+			GUTIL_ASSERT(vertex_sorter.n_bins() == max_depth+1);
 			vertex_sorter.dispatch_sort(&vertex_bin, &threads);
 			threads.wait_idle();
 
@@ -357,52 +410,52 @@ namespace GV {
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		template<uint8_t Period> requires(Period<8)
 		[[nodiscard]] bool is_conformal(Keys::VoxelVertex<Period> vtx) const noexcept {
-		    GV_ASSERT_KEY_MASK_STABLE_STATE
+			GV_ASSERT_KEY_MASK_STABLE_STATE
 
-		    using P_Elem_t = Keys::VoxelElement<Period>;
-		    using P_Vert_t = Keys::VoxelVertex<Period>;
+			using P_Elem_t = Keys::VoxelElement<Period>;
+			using P_Vert_t = Keys::VoxelVertex<Period>;
 
-		    P_Vert_t native = vtx.reduced_key();
-		    const uint8_t native_depth = native.depth_u8();
-		    if (native_depth==0) {return true;}
+			P_Vert_t native = vtx.reduced_key();
+			const uint8_t native_depth = native.depth_u8();
+			if (native_depth==0) {return true;}
 
-		    const uint64_t par  = native.kji_pairity_simd();
-		    const uint64_t bi   = (par&0b001) ? 0 : 1;
-		    const uint64_t bj   = (par&0b010) ? 0 : 1;
-		    const uint64_t bk   = (par&0b100) ? 0 : 1;
+			const uint64_t par  = native.kji_pairity_simd();
+			const uint64_t bi   = (par&0b001) ? 0 : 1;
+			const uint64_t bj   = (par&0b010) ? 0 : 1;
+			const uint64_t bk   = (par&0b100) ? 0 : 1;
 
-		    const uint64_t dd   = native_depth-1;
-		    const uint64_t n_el = uint64_t{1} << dd;
+			const uint64_t dd   = native_depth-1;
+			const uint64_t n_el = uint64_t{1} << dd;
 
-		    //el_idx[0]/[2]/[4] = the LOW candidate (q-1 when bi=1, else q); [1]/[3]/[5] = the HIGH (q)
-		    int64_t el_idx[6];
-		    el_idx[0] = static_cast<int64_t>(native.i()/2) - static_cast<int64_t>(bi);
-		    el_idx[2] = static_cast<int64_t>(native.j()/2) - static_cast<int64_t>(bj);
-		    el_idx[4] = static_cast<int64_t>(native.k()/2) - static_cast<int64_t>(bk);
-		    el_idx[1] = el_idx[0] + bi;
-		    el_idx[3] = el_idx[2] + bj;
-		    el_idx[5] = el_idx[4] + bk;
+			//el_idx[0]/[2]/[4] = the LOW candidate (q-1 when bi=1, else q); [1]/[3]/[5] = the HIGH (q)
+			int64_t el_idx[6];
+			el_idx[0] = static_cast<int64_t>(native.i()/2) - static_cast<int64_t>(bi);
+			el_idx[2] = static_cast<int64_t>(native.j()/2) - static_cast<int64_t>(bj);
+			el_idx[4] = static_cast<int64_t>(native.k()/2) - static_cast<int64_t>(bk);
+			el_idx[1] = el_idx[0] + bi;
+			el_idx[3] = el_idx[2] + bj;
+			el_idx[5] = el_idx[4] + bk;
 
-		    //periodic wrap: only relevant when bi=1 (the low candidate was actually computed) and it went negative
-		    if constexpr (Period&0b001) {if (bi==1 && el_idx[0]<0) {el_idx[0]=n_el-1;} }
-		    if constexpr (Period&0b010) {if (bj==1 && el_idx[2]<0) {el_idx[2]=n_el-1;} }
-		    if constexpr (Period&0b100) {if (bk==1 && el_idx[4]<0) {el_idx[4]=n_el-1;} }
+			//periodic wrap: only relevant when bi=1 (the low candidate was actually computed) and it went negative
+			if constexpr (Period&0b001) {if (bi==1 && el_idx[0]<0) {el_idx[0]=n_el-1;} }
+			if constexpr (Period&0b010) {if (bj==1 && el_idx[2]<0) {el_idx[2]=n_el-1;} }
+			if constexpr (Period&0b100) {if (bk==1 && el_idx[4]<0) {el_idx[4]=n_el-1;} }
 
-		    for (uint64_t di=0; di<=bi; ++di) {
-		        if (el_idx[di]<0) { continue; }
-		        for (uint64_t dj=0; dj<=bj; ++dj) {
-		            if (el_idx[2+dj]<0) { continue; }
-		            for (uint64_t dk=0; dk<=bk; ++dk) {
-		                if (el_idx[4+dk]<0) { continue; }
-		                P_Elem_t elem{dd, static_cast<uint64_t>(el_idx[di]),
-		                                  static_cast<uint64_t>(el_idx[2+dj]),
-		                                  static_cast<uint64_t>(el_idx[4+dk])};
-		                if (!elem.exists()) { continue; }
-		                if (is_active(Elem_t{elem})) {return false; }
-		            }
-		        }
-		    }
-		    return true;
+			for (uint64_t di=0; di<=bi; ++di) {
+				if (el_idx[di]<0) { continue; }
+				for (uint64_t dj=0; dj<=bj; ++dj) {
+					if (el_idx[2+dj]<0) { continue; }
+					for (uint64_t dk=0; dk<=bk; ++dk) {
+						if (el_idx[4+dk]<0) { continue; }
+						P_Elem_t elem{dd, static_cast<uint64_t>(el_idx[di]),
+										  static_cast<uint64_t>(el_idx[2+dj]),
+										  static_cast<uint64_t>(el_idx[4+dk])};
+						if (!elem.exists()) { continue; }
+						if (is_active(Elem_t{elem})) {return false; }
+					}
+				}
+			}
+			return true;
 		}
 
 
@@ -434,13 +487,13 @@ namespace GV {
 			//descend to root, check for active elements on the way up
 			
 			GUTIL_ASSERT(vtx.is_valid());
-			const uint8_t min_depth = min_active_depth();
-			const uint8_t max_depth = max_active_depth();
-			while(vtx.depth()>min_depth) {vtx = vtx.parent();}
-			GUTIL_ASSERT(vtx.is_valid() && vtx.depth()<=min_depth);
+			const uint8_t min_d = min_active_depth();
+			const uint8_t max_d = max_active_depth();
+			while(vtx.depth()>min_d) {vtx = vtx.parent();}
+			GUTIL_ASSERT(vtx.is_valid() && vtx.depth()<=min_d);
 
 			Keys::VoxelElement<Period> els[8];
-			while (vtx.depth()>=max_depth) {
+			while (vtx.depth()>=max_d) {
 				vtx.elements_simd(els);
 				for (int i=0; i<8; ++i) {
 					if (is_active_stable(static_cast<Elem_t>(els[i]))) { return vtx;}
@@ -454,9 +507,16 @@ namespace GV {
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Methods primarily for writing to vtk files
 		/////////////////////////////////////////////////////////////////////////////////////////////////
-		[[nodiscard]] GeoPoint_t geo_coord(const Vert_t vtx) const noexcept {return box.low + (box.high-box.low)*vtx.normalized_coordinate();}
-		[[nodiscard]] GeoPoint_t geo_center(const Elem_t el) const noexcept {return box.low + (box.high-box.low)*el.normalized_center();}
-		
+		[[nodiscard]] GeoPoint_t geo_coord(Vert_t vtx) const noexcept {return box.low + (box.high-box.low)*vtx.normalized_coordinate();}
+		[[nodiscard]] GeoPoint_t geo_center(Elem_t el) const noexcept {return box.low + (box.high-box.low)*el.normalized_center();}
+		[[nodiscard]] GeoPoint_t el_size(Elem_t el) const noexcept {
+			return gutil::ldexp(Scalar_t{1}, -(int)(el.depth())) * diag;
+		}
+		[[nodiscard]] GeoPoint_t el_size_inv(Elem_t el) const noexcept {
+			return gutil::ldexp(Scalar_t{1}, (int)(el.depth())) * inv_diag;
+		}
+
+
 		[[nodiscard]] size_t n_elements() const noexcept {
 			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
 			GUTIL_ASSERT(is_current());
@@ -476,6 +536,7 @@ namespace GV {
 			GUTIL_ASSERT(is_current());
 			GUTIL_ASSERT(is_vertices_collected());
 			GUTIL_ASSERT(vtx.is_valid());
+			GUTIL_ASSERT(vertex_sorter.n_bins() == max_depth+1);
 			vtx.reduced_key_simd_in_place();
 			int bn = static_cast<int>(vtx.depth());
 			std::span<const Vert_t> list = vertex_sorter.get_bin(bn);
@@ -488,6 +549,13 @@ namespace GV {
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Methods for manipulating the mesh
 		/////////////////////////////////////////////////////////////////////////////////////////////////
+		[[nodiscard]] bool has_pending_refine_requests() const noexcept {
+			for (auto& list : request_refine_list) {
+				if (list.size()>0) {return true;}
+			}
+			return false;
+		}
+
 		void request_refine(Elem_t el) const noexcept {
 			//this is only a request and does not alter the mesh
 			//we only care about the safety of adding to the request list
@@ -558,7 +626,7 @@ namespace GV {
 			threads.wait_idle();
 		}
 
-		void synchronize_depth_field() noexcept;
+		[[nodiscard]] bool is_depth_field_correct() const noexcept;
 		void propagate_depth_field(Elem_t el) noexcept;
 		void process_unrefine() noexcept;
 
@@ -657,51 +725,45 @@ namespace GV {
 
 
 		/////////////////////////////////////////////////////////////////////////////////////////////////
-		/// Iterators for element access
+		/// Iterators and other element access
 		/////////////////////////////////////////////////////////////////////////////////////////////////
+		template<uint8_t Period=0> requires(Period<8)
+		std::span<const Keys::VoxelElement<Period>> elements_as_span() const noexcept {
+			return BASE::reinterpret_key_span<Keys::VoxelElement<Period>, uint64_t>(BASE::active_keys);
+		}
+
+
 		auto element_begin() 			 const {
-			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
-			GUTIL_ASSERT(is_current());
-			return active_elements.cbegin();
+			using c_iter = std::span<const Elem_t>::iterator;
+			return c_iter{active_elements.data()};
+			// return active_elements.cbegin();
 		}
 		auto element_end()   			 const {
-			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
-			GUTIL_ASSERT(is_current());
-			return active_elements.cend();
+			using c_iter = std::span<const Elem_t>::iterator;
+			return c_iter{active_elements.data() + active_elements.size()};
+			// return active_elements.cend();
 		}
 		auto element_begin(uint8_t dd)  const {
-			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
-			GUTIL_ASSERT(is_current());
-			GUTIL_ASSERT(dd<=max_depth);
+			GUTIL_ASSERT(dd<=max_depth && BASE::is_sorted());
 			return sorter.begin(static_cast<int>(dd));
 		}
 		auto element_end(uint8_t dd)    const {
-			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
-			GUTIL_ASSERT(is_current());
-			GUTIL_ASSERT(dd<=max_depth);
+			GUTIL_ASSERT(dd<=max_depth && BASE::is_sorted());
 			return sorter.end(static_cast<int>(dd));
 		}
 
 		auto element_begin() 			 {
-			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
-			GUTIL_ASSERT(is_current());
 			return active_elements.begin();
 		}
 		auto element_end()   			 {
-			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
-			GUTIL_ASSERT(is_current());
 			return active_elements.end();
 		}
 		auto element_begin(uint8_t dd)  {
-			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
-			GUTIL_ASSERT(is_current());
-			GUTIL_ASSERT(dd<=max_depth);
+			GUTIL_ASSERT(dd<=max_depth && BASE::is_sorted());
 			return sorter.begin(static_cast<int>(dd));
 		}
 		auto element_end(uint8_t dd)    {
-			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
-			GUTIL_ASSERT(is_current());
-			GUTIL_ASSERT(dd<=max_depth);
+			GUTIL_ASSERT(dd<=max_depth && BASE::is_sorted());
 			return sorter.end(static_cast<int>(dd));
 		}
 		
@@ -710,51 +772,35 @@ namespace GV {
 		/// Iterators for vertex access
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		auto vertex_begin() 			 const {
-			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
-			GUTIL_ASSERT(is_current());
 			return tracked_vertices.cbegin();
 		}
 		auto vertex_end()   			 const {
-			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
-			GUTIL_ASSERT(is_current());
 			return tracked_vertices.cend();
 		}
 		auto vertex_begin(uint64_t dd)  const {
-			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
-			GUTIL_ASSERT(is_current());
-			GUTIL_ASSERT(dd<=max_depth);
+			GUTIL_ASSERT(dd<=max_depth && is_vertices_collected());
 			return vertex_sorter.begin(static_cast<int>(dd));
 		}
 		auto vertex_end(uint64_t dd)    const {
-			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
-			GUTIL_ASSERT(is_current());
-			GUTIL_ASSERT(dd<=max_depth);
+			GUTIL_ASSERT(dd<=max_depth && is_vertices_collected());
 			return vertex_sorter.end(static_cast<int>(dd));
 		}
 
 		auto vertex_begin() 			 {
-			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
-			GUTIL_ASSERT(is_current());
 			return tracked_vertices.begin();
 		}
 		auto vertex_end()   			 {
-			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
-			GUTIL_ASSERT(is_current());
 			return tracked_vertices.end();
 		}
 		auto vertex_begin(uint64_t dd)  {
-			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
-			GUTIL_ASSERT(is_current());
-			GUTIL_ASSERT(dd<=max_depth);
+			GUTIL_ASSERT(dd<=max_depth && is_vertices_collected());
 			return vertex_sorter.begin(static_cast<int>(dd));
 		}
 		auto vertex_end(uint64_t dd)    {
-			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
-			GUTIL_ASSERT(is_current());
-			GUTIL_ASSERT(dd<=max_depth);
+			GUTIL_ASSERT(dd<=max_depth && is_vertices_collected());
 			return vertex_sorter.end(static_cast<int>(dd));
 		}
-	};
+	};//UnstructuredVoxelMesh
 
 
 	//////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -767,6 +813,7 @@ namespace GV {
 		{
 			GV_BEGIN_UNSTABLE
 			is_vertices_collected_.store(false);
+			is_depth_explicitly_correct_.store(false);	//set true by checking all elements in debug
 			std::lock_guard<std::mutex> lock(request_mutex);	//don't allow incoming requests
 			{
 				//ensure the unrefine lists don't contain duplicates
@@ -813,7 +860,8 @@ namespace GV {
 				auto job = [&](uint64_t dd) {
 					GUTIL_OMP(parallel num_threads(n_threads))
 					{
-						auto& list = updated[omp_get_thread_num()][dd];
+						const int tid = GUTIL_OMP_TERNARY(omp_get_thread_num(), 0);
+						auto& list = updated[tid][dd];
 						GUTIL_OMP(for schedule(guided,512))
 						for (size_t i=0; i<request_unrefine_list[dd].size(); ++i) {
 							Elem_t el = request_unrefine_list[dd][i];
@@ -852,6 +900,7 @@ namespace GV {
 			GV_END_UNSTABLE
 		}
 		collect_elements();
+		GUTIL_ASSERT(is_current() && is_depth_field_correct());
 	}
 
 	template<typename T>
@@ -862,6 +911,7 @@ namespace GV {
 		{
 			GV_BEGIN_UNSTABLE
 			is_vertices_collected_.store(false);
+			is_depth_explicitly_correct_.store(false);	//set true by checking all elements in debug
 			std::lock_guard<std::mutex> lock(request_mutex);	//don't allow incoming requests
 
 			//ensure the refine lists don't contain duplicates
@@ -891,7 +941,7 @@ namespace GV {
 			auto job = [&](uint8_t dd) {
 				GUTIL_OMP(parallel num_threads(n_threads))
 				{	
-					const int tid = GUTIL_OMP_TERNARY(omp_get_thread_num(),1);
+					const int tid = GUTIL_OMP_TERNARY(omp_get_thread_num(),0);
 
 					auto& list_d0 = updated[tid][dd];
 					auto& list_d1 = updated[tid][dd+1];
@@ -940,40 +990,16 @@ namespace GV {
 				}
 			}
 
-		GV_END_UNSTABLE
+			GV_END_UNSTABLE
 		}
 		collect_elements();
-	}
-
-	template<typename T>
-	void UnstructuredVoxelMesh<T>::synchronize_depth_field() noexcept {
-		GV_ASSERT_ACTIVE_KEYS_UNSTABLE_STATE
-		GUTIL_TIMER("synchronize_depth_field : ", max_possible_elements, " elements to check");
-
-		auto action = [&](auto idx, auto dd) {
-			if (dd==max_depth) {
-				set_depth_field(idx, is_active(idx) ? dd : 0);
-				return;
-			}
-
-			if (is_active(idx)) {set_depth_field(idx,dd);}
-			else {
-				uint8_t cd = 0;
-				for (Elem_t c : Elem_t{static_cast<uint64_t>(dd),idx}.children()) {
-					cd = std::max(cd, read_depth_field(c));
-				}
-				set_depth_field(idx,cd);
-			}
-		};
-
-		for (uint8_t dd=max_depth+1; dd>0; --dd) {
-			for_each_index_simd(action, dd-1);
-		}
+		GUTIL_ASSERT(is_current() && is_depth_field_correct());
 	}
 
 	template<typename T>
 	void UnstructuredVoxelMesh<T>::propagate_depth_field(Elem_t el) noexcept {
 		GV_ASSERT_ACTIVE_KEYS_UNSTABLE_STATE
+
 		const bool now_active = is_active_unstable(el);
 		const uint8_t dd = el.depth_u8();
 		uint8_t new_depth = now_active ? dd : 0;
@@ -1000,7 +1026,70 @@ namespace GV {
 			cur = parent;
 		}
 	}
-}
+
+	///////////////////////////////////////////////////////////////////////
+	/// Debugging: verify the depth field satisfies its own documented invariant:
+	///   - if E is active,                        D(E) == E.depth()
+	///   - if E is inactive but has an active     D(E) == max(D(C)) over E's children C
+	///     descendant,
+	///   - if E is inactive with no active        D(E) == 0
+	///     descendants,
+	/// Walks bottom-up (deepest first) so a coarse-level mismatch can be
+	/// attributed to its own children being wrong first, if that's the root
+	/// cause. Logs every mismatch found; returns false if any were found.
+	///////////////////////////////////////////////////////////////////////
+	template<typename T>
+	[[nodiscard]] bool UnstructuredVoxelMesh<T>::is_depth_field_correct() const noexcept {
+		GV_ASSERT_KEY_MASK_STABLE_STATE
+		if (is_depth_explicitly_correct_.load()) {return true;}
+		
+		GV_BEGIN_STABLE
+		
+		size_t count = 0;
+		for (uint8_t dd=max_depth+1; dd>0; --dd) {
+			const uint8_t depth = dd-1;
+			const uint64_t start = Elem_t::elements_below_depth(depth);
+			const uint64_t end   = Elem_t::elements_below_depth(depth+1);
+
+			GUTIL_OMP(parallel for reduction(+:count) schedule(static, 1024))
+			for (uint64_t idx=start; idx<end; ++idx) {
+				//read the actual depth and validate that the mask bits and
+				//standard element interface agree.
+				const uint8_t byte = key_mask[idx];
+				const uint8_t actual = read_depth_from_byte(byte);
+				Elem_t el = Elem_t::MakeFromIndex(idx);
+				if(read_depth_field(el)!=actual) {
+					GUTIL_ERROR("something went wrong. read depth ", actual, " from mask ", print_bytes(byte),
+									" at mask index ", idx, ". The corresponding element ", el, " read deapth ",
+									read_depth_field(el), " the computed linear index for the element is ", el.linear_index());
+					GUTIL_ABORT("elements and mask are out of sync. check that the element to/from linear index is computed correctly");
+				}
+
+				uint8_t expected;
+				if (is_active_stable(el)) {
+					expected = depth;
+				}
+				else {
+					expected = 0;
+					for (Elem_t c : el.children()) {
+						if (c.exists() && c.depth()<=max_depth) {
+							expected = std::max(expected, read_depth_field_stable(c));
+						}
+					}
+				}
+
+				if (actual != expected) {
+					GUTIL_ERROR(el, " depth field mismatch: stored=", actual, " expected=", expected);
+					++count;
+				}
+			}
+		}
+		is_depth_explicitly_correct_.store(count==0);
+		GV_END_STABLE
+		GUTIL_LOG(count, "/", max_possible_elements, " elements have inconsistent depth field");
+		return count==0;
+	}
+}//GV
 	
 
 

@@ -72,12 +72,12 @@ namespace Keys{
 		}
 
 		GUTIL_DECLARE_SIMD()
-		[[nodiscard]] constexpr uint64_t decode_simd() noexcept {
+		[[nodiscard]] constexpr uint64_t decode_simd() const noexcept {
 			GUTIL_ASSERT(is_valid());
 			return is_encoded() ? Mesh3D::DecodeElement_SIMD(key) : key;
 		}
 		
-		[[nodiscard]] constexpr VoxelElement decode() noexcept {
+		[[nodiscard]] constexpr VoxelElement decode() const noexcept {
 			return VoxelElement{decode_simd()};
 		}
 

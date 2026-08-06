@@ -10,7 +10,7 @@ INCLUDE = -I../include -I/usr/include/eigen3 -I../external/gutil/include
 
 #default build
 CXX     = g++ -std=c++23 -Wall -march=native
-CXX    += -fsanitize=address
+# CXX    += -fsanitize=address
 # CXX    += -fsanitize=thread
 
 #explicit defines
@@ -24,8 +24,8 @@ endif
 ifdef GUTIL_N_OCTREE_THREADS
 	DEFINES += -DGUTIL_N_OCTREE_THREADS=$(GUTIL_N_OCTREE_THREADS)
 endif
-ifdef GUTIL_ENABLE_THREAD_POOL
-	DEFINES += -DGUTIL_ENABLE_THREAD_POOL=$(GUTIL_ENABLE_THREAD_POOL)
+ifdef GUTIL_DISABLE_THREAD_POOL
+	DEFINES += -DGUTIL_DISABLE_THREAD_POOL=$(GUTIL_DISABLE_THREAD_POOL)
 endif
 ifdef GV_TEST_DOMAIN_PERIOD
 	DEFINES += -DGV_DOMAIN_PERIOD=$(GV_DOMAIN_PERIOD)

@@ -43,7 +43,7 @@
 //////////////////////////////////////////////////////////////////////
 #define GV_BEGIN_MASK_UNSTABLE						\
 	GV_ASSERT_KEY_MASK_STABLE_STATE					\
-	auto gv_key_mask_lock = start_key_mask_unstable();
+	auto gv_key_mask_lock = begin_key_mask_unstable();
 
 #define GV_END_MASK_UNSTABLE						\
 	GV_ASSERT_KEY_MASK_UNSTABLE_STATE				\
@@ -51,7 +51,7 @@
 
 #define GV_BEGIN_MASK_STABLE						\
 	GV_ASSERT_KEY_MASK_STABLE_STATE					\
-	auto gv_key_mask_lock = start_key_mask_stable();
+	auto gv_key_mask_lock = begin_key_mask_stable();
 
 #define GV_END_MASK_STABLE							\
 	GV_ASSERT_KEY_MASK_STABLE_STATE 				\
@@ -59,7 +59,7 @@
 
 #define GV_BEGIN_ACTIVE_UNSTABLE					\
 	GV_ASSERT_ACTIVE_KEYS_STABLE_STATE				\
-	auto gv_active_keys_lock = start_active_keys_unstable();
+	auto gv_active_keys_lock = begin_active_keys_unstable();
 
 #define GV_END_ACTIVE_UNSTABLE						\
 	GV_ASSERT_ACTIVE_KEYS_UNSTABLE_STATE 			\
@@ -67,7 +67,7 @@
 
 #define GV_BEGIN_ACTIVE_STABLE						\
 	GV_ASSERT_ACTIVE_KEYS_STABLE_STATE 				\
-	auto gv_active_keys_lock = start_active_keys_stable();
+	auto gv_active_keys_lock = begin_active_keys_stable();
 
 #define GV_END_ACTIVE_STABLE						\
 	GV_ASSERT_ACTIVE_KEYS_STABLE_STATE 				\
@@ -109,6 +109,7 @@ namespace Keys {
 		using unique_lock_t = std::unique_lock<std::shared_mutex>;
 		using shared_lock_t = std::shared_lock<std::shared_mutex>;
 		using lock_guard_t  = std::lock_guard<std::shared_mutex>;
+
 
 		/////////////////////////////////////////////////////////////////////////
 		/// Aliases and constants
@@ -254,13 +255,12 @@ namespace Keys {
 		}
 
 		void clear() noexcept {
-			GV_BEGIN_UNSTABLE
+			GV_ASSERT_KEY_MASK_UNSTABLE_STATE
+			GV_ASSERT_ACTIVE_KEYS_UNSTABLE_STATE
 
 			std::fill(key_mask.begin(), key_mask.end(), 0);
 			active_keys.clear();
 			mark_stale();
-
-			GV_END_UNSTABLE
 		}
 
 		void init_key_mask(size_t total_possible_keys) noexcept {
@@ -291,7 +291,7 @@ namespace Keys {
 			return !is_mutating_key_mask.load();
 		}
 
-		[[nodiscard]] shared_lock_t start_key_mask_stable() const noexcept {
+		[[nodiscard]] shared_lock_t begin_key_mask_stable() const noexcept {
 			GV_ASSERT_KEY_MASK_STABLE_STATE
 			is_mutating_key_mask.store(false);
 			return shared_lock_t{key_mask_mutex};
@@ -301,7 +301,7 @@ namespace Keys {
 			GV_ASSERT_KEY_MASK_STABLE_STATE
 		}
 		
-		[[nodiscard]] unique_lock_t start_key_mask_unstable() const noexcept {
+		[[nodiscard]] unique_lock_t begin_key_mask_unstable() const noexcept {
 			GV_ASSERT_KEY_MASK_STABLE_STATE
 			is_mutating_key_mask.store(true);
 			return unique_lock_t{key_mask_mutex};
@@ -325,7 +325,7 @@ namespace Keys {
 			return !is_mutating_active_keys.load();
 		}
 
-		[[nodiscard]] shared_lock_t start_active_keys_stable() const noexcept {
+		[[nodiscard]] shared_lock_t begin_active_keys_stable() const noexcept {
 			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
 			GUTIL_ASSERT(is_current());
 			is_mutating_active_keys.store(false);
@@ -333,10 +333,11 @@ namespace Keys {
 		}
 
 		void end_active_keys_stable() const noexcept {
+			GUTIL_ASSERT(is_current());
 			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
 		}
 
-		[[nodiscard]] unique_lock_t start_active_keys_unstable() const noexcept {
+		[[nodiscard]] unique_lock_t begin_active_keys_unstable() const noexcept {
 			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
 			is_mutating_active_keys.store(true);
 			return unique_lock_t{active_keys_mutex};
@@ -358,7 +359,7 @@ namespace Keys {
 		/// Note that the mask is mutable and we may wish to expose some number
 		/// of its bits to external classes, so this interface is all marked const.
 		/////////////////////////////////////////////////////////////////////////
-		protected:
+		public:
 		GUTIL_DECLARE_SIMD()
 		[[nodiscard]] uint8_t get_mask_no_check(uint64_t idx) const noexcept {
 			GUTIL_ASSERT(idx<key_mask.size());
@@ -407,27 +408,27 @@ namespace Keys {
 			return key_mask[idx];
 		}
 
-		[[nodiscard]] std::span<const uint8_t> get_mask(uint64_t start, uint64_t end) const noexcept {
+		[[nodiscard]] std::span<const uint8_t> get_mask_span(uint64_t start, uint64_t end) const noexcept {
 			GV_ASSERT_KEY_MASK_STABLE_STATE
 			GUTIL_ASSERT(start<end && end<=key_mask.size());
 			return std::span<const uint8_t>(key_mask.begin()+start, key_mask.begin()+end);
 		}
 
-		[[nodiscard]] std::span<const uint8_t> get_mask_stable(uint64_t start, uint64_t end) const noexcept {
+		[[nodiscard]] std::span<const uint8_t> get_mask_span_stable(uint64_t start, uint64_t end) const noexcept {
 			GV_ASSERT_KEY_MASK_STABLE_STATE
 			//get a range of masks
 			GUTIL_ASSERT(start<end && end<=key_mask.size());
 			return std::span<const uint8_t>(key_mask.begin()+start, key_mask.begin()+end);
 		}
 
-		[[nodiscard]] std::span<uint8_t> get_mask_ref(uint64_t start, uint64_t end) const noexcept {
+		[[nodiscard]] std::span<uint8_t> get_mask_span_ref(uint64_t start, uint64_t end) noexcept {
 			GV_ASSERT_KEY_MASK_UNSTABLE_STATE
 			//get a range of masks
 			GUTIL_ASSERT(start<end && end<=key_mask.size());
 			return std::span<uint8_t>(key_mask.begin()+start, key_mask.begin()+end);
 		}
 
-		[[nodiscard]] std::span<uint8_t> get_mask_ref_pseudo_const(uint64_t start, uint64_t end) const noexcept {
+		[[nodiscard]] std::span<uint8_t> get_mask_span_ref_pseudo_const(uint64_t start, uint64_t end) const noexcept {
 			GV_ASSERT_KEY_MASK_UNSTABLE_STATE
 			//get a range of masks
 			GUTIL_ASSERT(start<end && end<=key_mask.size());
@@ -438,6 +439,7 @@ namespace Keys {
 		//////////////////////////////////////////////////////////////////////////////
 		/// Utility methods for interacting with the mask.
 		//////////////////////////////////////////////////////////////////////////////
+		public:
 		GUTIL_DECLARE_SIMD()
 		template<uint8_t BIT_MASK> requires (std::popcount(BIT_MASK)==1)
 		[[nodiscard]] bool check_bit(uint64_t idx) const noexcept {
@@ -577,8 +579,8 @@ namespace Keys {
 		/// Deduplicating is standard and usefull
 		/////////////////////////////////////////////////////////////////////////
 		template<typename T, typename Less_t=std::nullptr_t, typename Equal_t=std::nullptr_t>
-		static constexpr void sort_and_unique(std::vector<T>& list, 
-					Less_t&& less=nullptr, Equal_t&& equal=nullptr) noexcept {
+		static constexpr void sort_and_unique(std::vector<T>& list, Less_t&& less=nullptr,
+									Equal_t&& equal=nullptr) noexcept {
 			if constexpr (std::same_as<Less_t,std::nullptr_t>) {
 				std::sort(list.begin(), list.end());
 			}
@@ -603,7 +605,42 @@ namespace Keys {
 		/////////////////////////////////////////////////////////////////////////
 		/// A few methods to help with viewing the active list as a particular type
 		/////////////////////////////////////////////////////////////////////////
-		template<typename KeyTypeOut, typename KeyTypeIn> 
+		template<typename Container_A, typename Container_B>
+		[[nodiscard]] static bool are_spans_same_data(const Container_A& A, const Container_B& B) noexcept {
+			using A_t = typename Container_A::value_type;
+			using B_t = typename Container_B::value_type;
+			if constexpr (sizeof(A_t) != sizeof(B_t)) {return false;}
+			if constexpr (alignof(A_t) != alignof(B_t)) {return false;}
+
+			if (A.size() != B.size()) {return false;}
+			if (reinterpret_cast<uintptr_t>(A.data()) != reinterpret_cast<uintptr_t>(B.data())) {return false;}
+			if (reinterpret_cast<uintptr_t>(A.data()+A.size()) != reinterpret_cast<uintptr_t>(B.data()+B.size())) {return false;}
+			return true; 
+		}
+
+		template<typename KeyTypeOut, typename Container_A> 
+				requires( 	sizeof(KeyTypeOut) == sizeof(typename Container_A::value_type) &&
+							alignof(KeyTypeOut) == alignof(typename Container_A::value_type) &&
+							std::contiguous_iterator<typename Container_A::iterator> )
+		[[nodiscard]] static std::span<KeyTypeOut> reinterpret_key_span(Container_A& list) noexcept {
+			using KeyTypeIn = typename Container_A::value_type;
+			std::span<KeyTypeOut> view = reinterpret_key_span<KeyTypeOut,KeyTypeIn>(std::span<KeyTypeIn>(list));
+			GUTIL_ASSERT(are_spans_same_data(view,list));
+			return view;
+		}
+
+		template<typename KeyTypeOut, typename Container_A> 
+				requires( 	sizeof(KeyTypeOut) == sizeof(typename Container_A::value_type) &&
+							alignof(KeyTypeOut) == alignof(typename Container_A::value_type) &&
+							std::contiguous_iterator<typename Container_A::iterator> )
+		[[nodiscard]] static std::span<const KeyTypeOut> reinterpret_key_span(const Container_A& list) noexcept {
+			using KeyTypeIn = typename Container_A::value_type;
+			std::span<KeyTypeOut> view = reinterpret_key_span<KeyTypeOut,KeyTypeIn>(std::span<const KeyTypeIn>(list));
+			GUTIL_ASSERT(are_spans_same_data(view,list));
+			return view;
+		}
+
+		template<typename KeyTypeOut, typename KeyTypeIn>
 			requires(sizeof(KeyTypeIn)==8 && sizeof(KeyTypeOut)==8 && alignof(KeyTypeOut)==alignof(KeyTypeIn))
 		[[nodiscard]] static std::span<KeyTypeOut> reinterpret_key_span(std::span<KeyTypeIn> list) noexcept {
 			if constexpr (std::same_as<KeyTypeIn, KeyTypeOut>) {return list;}
@@ -611,11 +648,7 @@ namespace Keys {
 				std::span<KeyTypeOut> view {reinterpret_cast<KeyTypeOut*>(list.data()), list.size()};
 				#ifndef NDEBUG
 					//make sure that the span is correctly interprets the raw values
-					GUTIL_ASSERT(list.size() == view.size());
-					GUTIL_ASSERT(reinterpret_cast<uintptr_t>(list.data()) == 
-									reinterpret_cast<uintptr_t>(view.data()) && "begin address does not match");
-					GUTIL_ASSERT(reinterpret_cast<uintptr_t>(list.data()+list.size()) == 
-									reinterpret_cast<uintptr_t>(view.data()+view.size()) && "end address does not match");
+					GUTIL_ASSERT(are_spans_same_data(view,list));
 					for (size_t i=0; i<std::min(size_t{100},view.size()); ++i) {
 						uint64_t raw  = static_cast<uint64_t>(list[i]);
 						GUTIL_ASSERT(raw == static_cast<uint64_t>(view[i]) && "raw bytes changed");
@@ -627,6 +660,8 @@ namespace Keys {
 			}
 		}
 
+
+
 		template<typename KeyTypeOut, typename KeyTypeIn> requires(sizeof(KeyTypeIn)==8 && sizeof(KeyTypeOut)==8)
 		[[nodiscard]] static std::span<const KeyTypeOut> reinterpret_key_span(std::span<const KeyTypeIn> list) noexcept {
 			if constexpr (std::same_as<KeyTypeIn, KeyTypeOut>) {return list;}
@@ -634,11 +669,7 @@ namespace Keys {
 				std::span<const KeyTypeOut> view {reinterpret_cast<const KeyTypeOut*>(list.data()), list.size()};
 				#ifndef NDEBUG
 					//make sure that the span is correctly interprets the raw values
-					GUTIL_ASSERT(list.size() == view.size());
-					GUTIL_ASSERT(reinterpret_cast<uintptr_t>(list.data()) == 
-									reinterpret_cast<uintptr_t>(view.data()) && "begin address does not match");
-					GUTIL_ASSERT(reinterpret_cast<uintptr_t>(list.data()+list.size()) == 
-									reinterpret_cast<uintptr_t>(view.data()+view.size()) && "end address does not match");
+					GUTIL_ASSERT(are_spans_same_data(view,list));
 					for (size_t i=0; i<std::min(size_t{100},view.size()); ++i) {
 						uint64_t raw  = static_cast<uint64_t>(list[i]);
 						GUTIL_ASSERT(raw == static_cast<uint64_t>(view[i]) && "raw bytes changed");
@@ -649,6 +680,7 @@ namespace Keys {
 				return view;
 			}
 		}
+
 
 		/////////////////////////////////////////////////////////////////////////
 		/// A few methods to dispatch threaded processes to either each mask or each active key.
@@ -706,6 +738,7 @@ namespace Keys {
 					GUTIL_ABORT("Arguments did not match what was expected");
 				}
 			}
+			threads.wait_idle();
 		}
 
 		template<typename Task, typename...Args>
@@ -738,6 +771,7 @@ namespace Keys {
 					GUTIL_ABORT("Arguments did not match what was expected");
 				}
 			}
+			threads.wait_idle();
 		}
 
 		template<typename Task, typename...Args>
@@ -768,6 +802,7 @@ namespace Keys {
 					GUTIL_ABORT("Arguments did not match what was expected");
 				}
 			}
+			threads.wait_idle();
 		}
 
 		template<typename Task, typename...Args>
@@ -806,6 +841,7 @@ namespace Keys {
 					GUTIL_ABORT("Arguments did not match what was expected");
 				}
 			}
+			threads.wait_idle();
 		}
 
 
@@ -834,7 +870,6 @@ namespace Keys {
 
 			dispatch_parallel_key_mask(job);
 			active_keys.clear();
-			
 			threads.wait_idle();
 			for (size_t tid=0; tid<n_threads; ++tid) {
 				active_keys.insert(active_keys.end(), std::make_move_iterator(thread_keys[tid].begin()),

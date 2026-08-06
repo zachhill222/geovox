@@ -74,7 +74,8 @@ namespace GV {
 		///////////////////////////////////////////////////////////////////
 		template<typename DofEval>
 		void init_coefs(uint8_t i, DofEval&& eval) noexcept {
-			auto lock = dofhandler.start_active_keys_stable();
+			GUTIL_ASSERT(dofhandler.is_current());
+			auto lock = dofhandler.begin_active_keys_stable();
 
 			dh_curr_dofs = dofhandler.active_dofs;
 			dofs.clear();
@@ -102,13 +103,16 @@ namespace GV {
 		/// Note that we can only do one layer of refinement at a time
 		///////////////////////////////////////////////////////////////////
 		void update_coefs() noexcept {
-			auto lock1 = dofhandler.start_active_keys_stable();
-			
-			dh_curr_dofs = dofhandler.active_dofs;
+			GUTIL_ASSERT(dofhandler.is_current());
 			GUTIL_TIMER("updating coefficients (", dofs.size(), " -> ", dh_curr_dofs.size(), ")");
 			{
+				auto lock = dofhandler.begin_active_keys_stable();
+				dh_curr_dofs = dofhandler.active_dofs;
+			}
+			
+			{
 				//mark all dof masks with which ones are in the current batch
-				auto lock = dofhandler.start_key_mask_unstable();
+				auto lock = dofhandler.begin_key_mask_unstable();
 				dofhandler.unconditional_bitwise_and_all_masks(~COEF_MARKED_BIT);
 				GUTIL_OMP(parallel for schedule(static, 1024))
 				for (uint64_t idx=0; idx<dofs.size(); ++idx) {
@@ -119,15 +123,17 @@ namespace GV {
 
 			{
 				//compute new coefficients
-				auto lock2 = dofhandler.start_key_mask_stable();
+				auto lock1 = dofhandler.begin_key_mask_stable();
+				auto lock2 = dofhandler.begin_active_keys_stable();
 				std::array<std::vector<Scalar_t>,N> new_coefs;
 				auto job = [&](uint8_t i) { update_coefs(i,new_coefs[i]); };
 				for (uint8_t i=0; i<N; ++i) {
 					threads.submit(job, i);
 				}
 				threads.wait_idle();
-				dofhandler.end_key_mask_stable();
 				coefs = std::move(new_coefs);
+				dofhandler.end_active_keys_stable();
+				dofhandler.end_key_mask_stable();
 			}
 
 			//finalize
@@ -152,12 +158,10 @@ namespace GV {
 				for (size_t idx=0; idx<old_size; ++idx) {
 					DOF_t dof = dofs[idx];
 
-					//determine if the dof is still present and what it's new index is
-					//note that this will only be touched once, so there is no
-					//race condition here
 					size_t n_idx = dofhandler.global_number(dof);
 					if (n_idx < new_size) {
-						new_coefs[n_idx] = coefs[i][idx];
+						GUTIL_OMP(atomic)
+						new_coefs[n_idx] += coefs[i][idx];
 						continue;
 					}
 					GUTIL_ASSERT(!dofhandler.is_active_stable(dof))
@@ -226,38 +230,6 @@ namespace GV {
 			}
 		}
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 	public:
 		////////////////////////////////////////////////////////////////////////
 		/// Evaluate at mesh vertices for visualizations
@@ -283,13 +255,9 @@ namespace GV {
 
 			GUTIL_OMP(parallel)
 			{
-				#ifdef _OPENMP
-				const uint64_t n_threads = static_cast<uint64_t>(omp_get_num_threads());
-				const uint64_t tid       = static_cast<uint64_t>(omp_get_thread_num());
-				#else
-				const uint64_t n_threads = 1;
-				const uint64_t tid       = 0;
-				#endif
+				
+				const uint64_t n_threads 	= GUTIL_OMP_TERNARY(omp_get_num_threads(), 1);
+				const uint64_t tid       	= GUTIL_OMP_TERNARY(omp_get_thread_num(),  0);
 				const uint64_t n_per_thread = n_verts/n_threads;
 				const uint64_t start        = tid*n_per_thread;
 				const uint64_t end          = (tid==n_threads-1) ? n_verts : start+n_per_thread;
@@ -298,7 +266,7 @@ namespace GV {
 				size_t idx = start; I it_end = v_begin+end;
 				auto action = [&](DOF_t dof, uint8_t local_n, Scalar_t x, Scalar_t y, Scalar_t z, uint64_t global_n) {
 					Scalar_t val{0};
-					dof.evaluate_simd(local_n,&val,&x,&y,&z,1);
+					dof.evaluate_simd(local_n, &val, &x, &y, &z, 1);
 					vals[idx] += coefs[i][global_n] * val;
 				};
 

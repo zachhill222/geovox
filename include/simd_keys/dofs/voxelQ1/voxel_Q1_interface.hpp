@@ -142,6 +142,19 @@ namespace DOFS {
 		}
 
 		GUTIL_DECLARE_SIMD()
+		[[nodiscard]] constexpr uint64_t pairity_simd() const noexcept {
+			//for general dofs, pairity must partition the dofs into [0,n_dofs_per_elem)
+			return Mesh3D::CartesianIndexPairity_SIMD(key);
+		}
+
+		GUTIL_DECLARE_SIMD()
+		static constexpr void dofs_on_elem_simd_raw(uint64_t s, uint64_t* dof) noexcept {
+			GUTIL_ASSERT(dof);
+			GUTIL_ASSERT(DofElem_t{s}.is_valid());
+			LagrangeQ1::GetDofsOnElement_SIMD<Period>(s, dof);
+		}
+
+		GUTIL_DECLARE_SIMD()
 		[[maybe_unused]] static VoxelQ1* dofs_on_elem_simd(uint64_t s, VoxelQ1* dof) noexcept {
 			GUTIL_ASSERT(dof);
 			GUTIL_ASSERT(DofElem_t{s}.is_valid())

@@ -57,8 +57,8 @@ struct TestConfig {
 	double      min_r        = 0.1;
 	double      max_r        = 0.5;
 	size_t      initial_depth= 2;
-	double      refine_tol   = 0.1;   	// signed-distance tolerance for boundary refinement
-	double      unrefine_x   = 0.5;  	// normalized-x threshold for the unrefinement demo region
+	double      refine_tol   = 0.25;   	// signed-distance tolerance for boundary refinement
+	double      unrefine_x   = 0.25;  	// normalized-x threshold for the unrefinement demo region
 	uint8_t		max_depth    = 6;		// max depth of the mesh
 	uint8_t     n_refine     = 1;       // target number of refinements
 };
@@ -143,7 +143,7 @@ void setup_mesh_and_dofs(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_h
 std::vector<MeshElem_t> collect_near_boundary(const Mesh_t& mesh, const Assembly_t& assembly, double tol) {
 	std::vector<MeshElem_t> elems;
 	for (auto it=mesh.element_begin(); it!=mesh.element_end(); ++it) {
-		if (gutil::norm2(it->normalized_center()) < 0.5 ) {
+		if (gutil::norm2(it->normalized_center()) < tol ) {
 		// if (it->normalized_center()[0] < 0.5 || it->normalized_center()[1]<0.5) {
 		// if (std::abs(assembly.signed_distance(mesh.geo_center(*it))) < tol) {
 			elems.push_back(*it);
@@ -177,17 +177,8 @@ void refine_near_boundary(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_
 		GUTIL_LOG("  -> ", n_refined, " dofs refined");
 
 		mesh.process_refine();
-		mesh.collect_elements();
 		coef_handler.update_coefs();
 	}
-
-	// final pass: also grow the mesh itself slightly ahead of the boundary,
-	// so the last refined dof level has proper 2-1 support
-	mesh.process_refine([&](MeshElem_t el) {
-		return assembly.signed_distance(mesh.geo_center(el)) < 2*cfg.refine_tol;
-	});
-	mesh.collect_elements();
-	coef_handler.update_coefs();
 
 	for (DOF_t dof : handler.active_dofs) {
 		if (!mesh.is_conformal(DofVert_t{dof.key})) {
@@ -211,7 +202,7 @@ void unrefine_demo_region(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_
 	std::vector<MeshElem_t> region;
 	for (auto it=mesh.element_begin(); it!=mesh.element_end(); ++it) {
 		GUTIL_ASSERT(mesh.is_active(*it));
-		if (it->normalized_center()[0] > cfg.unrefine_x) {
+		if (gutil::norm2(it->normalized_center()) < cfg.unrefine_x) {
 			region.push_back(*it);
 		}
 	}
@@ -371,8 +362,8 @@ void test_dof_handler(const TestConfig& cfg, const Assembly_t& assembly) {
 
 	refine_near_boundary(mesh, handler, coef_handler, assembly, cfg);
 
-	// unrefine_demo_region(mesh, handler, coef_handler, cfg);
-	// remove_unsupported_elements(mesh, handler);
+	unrefine_demo_region(mesh, handler, coef_handler, cfg);
+	remove_unsupported_elements(mesh, handler);
 
 	evaluate_and_save(mesh, handler, coef_handler, assembly, cfg);
 }
