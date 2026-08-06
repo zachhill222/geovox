@@ -252,6 +252,17 @@ namespace Keys{
 			return ptr;
 		}
 
+		GUTIL_DECLARE_SIMD()
+		[[nodiscard]] constexpr uint64_t siblings_simd() const noexcept {
+			return Mesh3D::GetElementSiblingsMorton_SIMD(key);
+		}
+
+		[[nodiscard]] constexpr VoxelElement siblings() const noexcept {
+			GUTIL_ASSERT(is_valid());
+			GUTIL_ASSERT(is_encoded());
+			return VoxelElement{Mesh3D::GetElementSiblingsMorton_SIMD(key)};
+		}
+
 
 		/////////////////////////////////////////////////////////////
 		/// Coordinates

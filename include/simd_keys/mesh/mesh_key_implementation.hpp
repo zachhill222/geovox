@@ -620,9 +620,8 @@ namespace GV {
 
 		GUTIL_DECLARE_SIMD()
 		[[nodiscard]] inline constexpr uint64_t ReducedVertex_SIMD(uint64_t key) noexcept {
-			GUTIL_ASSERT(Exists(key));
-			GUTIL_ASSERT(IsVertex(key));
-			GUTIL_ASSERT(IsCartesian(key));
+			//it is useful to have a method to call on vertices that don't exist
+			//for uniform simd operations
 			for (uint64_t dd=0; dd<MAX_DEPTH; ++dd) {
 				uint64_t parent = VertexParent(key);
 				key = Exists(parent) ? parent : key;
@@ -709,6 +708,14 @@ namespace GV {
 		/// Adapt the im/p1 values for periodicity as needed.
 		/// Invalid neighbors will overflow and return 0.
 		///////////////////////////////////////////////////////////
+		GUTIL_DECLARE_SIMD()
+		constexpr uint64_t GetElementSiblingsMorton_SIMD(uint64_t key) {
+			//just clear the last three bits, then the result and the next 7 are siblings
+			constexpr uint64_t mask = ~uint64_t(0b111);
+			return key&mask;
+		}
+
+
 		template<typename T=uint64_t, uint8_t Period=0> requires (Period<8)
 		[[nodiscard]] constexpr std::array<T,26> GetElementNeighbors(uint64_t key) noexcept {
 			GUTIL_ASSERT(Exists(key));

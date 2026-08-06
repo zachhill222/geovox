@@ -34,7 +34,7 @@ namespace Keys {
 			std::fill(ptr, ptr+8, VoxelVertex<Period>{uint64_t(-1)});
 		#endif
 
-		Mesh3D::GetVerticesOfElement_SIMD<Period>(key, reinterpret_cast<uint64_t*>(ptr));
+		Mesh3D::GetVerticesOfElement_SIMD<Period>(Mesh3D::DecodeElement(key), reinterpret_cast<uint64_t*>(ptr));
 
 		#ifndef NDEBUG
 			GUTIL_ASSERT(std::find(ptr, ptr+8, VoxelVertex<Period>{uint64_t(-1)})==ptr+8);

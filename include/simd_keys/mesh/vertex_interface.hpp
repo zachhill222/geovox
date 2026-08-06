@@ -203,6 +203,11 @@ namespace Keys{
 			return Mesh3D::ReducedVertex_SIMD(key);
 		}
 
+		GUTIL_DECLARE_SIMD()
+		constexpr void reduced_key_simd_in_place() noexcept {
+			key = Mesh3D::ReducedVertex_SIMD(key);
+		}
+
 		[[nodiscard]] constexpr bool is_same_coord(VoxelVertex other) const noexcept {
 			GUTIL_ASSERT(is_valid() && other.is_valid());
 			return reduced_key() == other.reduced_key();

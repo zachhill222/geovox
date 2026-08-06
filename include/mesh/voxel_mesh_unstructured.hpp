@@ -2,935 +2,1012 @@
 
 #include "gutil.hpp"
 
-#include "mesh/keys/voxel_key.hpp"
-#include "mesh/vtk_file_io.hpp"
-#include "mesh/voxel_mesh.hpp"
 #include "util/concepts.hpp"
 #include "util/macros.hpp"
+
+#include "simd_keys/containers.hpp"
+#include "simd_keys/mesh/mesh_keys.hpp"
+#include "mesh/vtk_file_io.hpp"
+#include "mesh/voxel_mesh_structured.hpp"
 
 #include <cstdint>
 #include <algorithm>
 #include <vector>
 #include <array>
 #include <span>
-#include <bitset>
+#include <mutex>
+#include <atomic>
 
 #include <iostream>
 #include <sstream>
 #include <fstream>
 
-
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 namespace GV {
-	//forward declare iterator classes
-	template<uint64_t MAX_DEPTH, typename Element_t, bool CONST_FLAG>
-	struct IteratorBase;
 
-	template<uint64_t MAX_DEPTH_=10>
-	struct UnstructuredVoxelMesh {
-		//mesh features are never periodic
-		static constexpr uint64_t MAX_DEPTH = MAX_DEPTH_;
-		using VoxelElement = VoxelElementKey<MAX_DEPTH,0>;
-		using VoxelVertex  = VoxelVertexKey<MAX_DEPTH,0>;
-		using VoxelFace    = VoxelFaceKey<MAX_DEPTH,0>;
-		using Mesh_t       = UnstructuredVoxelMesh<MAX_DEPTH>; //this mesh type
-		using GeoPoint_t   = gutil::Point<3,double>;
 
-		//random access iterator class to loop through the elements
-		//this wraps the individual vector iterators but wraps to the next depth if possible
-		using Iterator  = IteratorBase<MAX_DEPTH,VoxelElement,false>;
-		using CIterator = IteratorBase<MAX_DEPTH,VoxelElement,true>;
-	
-		//check if OPENMP is enabled
-		#ifdef _OPENMP
-		static constexpr bool OPENMP = true;
-		#else
-		static constexpr bool OPENMP = false;
-		#endif
-	private:
-		//allocate storage:
-		// one vector of active elements per possible depth
-		// each vector is maintained so that the elements are sorted
-		// by default, vectors are sorted by their linear index first, but
-		// in some circumstances it is good to have elements sorted by color first then by linear index
-		//Note that the term "linear index" is the index of the element in the largest feasible mesh (i.e., an octree mesh with depth MAX_DEPTH)
-		//The linear index determines the vertices. The location that the element is stored in the allocated vectors determines its index within the 
-		//current mesh.
-		std::array<std::vector<VoxelElement>,MAX_DEPTH+1> elements;
+	/////////////////////////////////////////////////////////////////////////////////////////////////////
+	/// An unstructured voxel mesh. Uses 'layers' of structured meshes at each depth.
+	/// The initial mesh is assumed to satisfy a 2-1 refinement constraint. Using the request refine/coarsen
+	/// will maintain the 2-1 invariant.
+	///
+	/// Each layer contains a vector<uint8_t> with one entry for each possible element at that layer.
+	/// One bit is reserved for an active flag and four bits are reserved for a refined depth field tracker.
+	///
+	/// Suppose D is the depth field that corresponds to some element E. If E is active, then D=E.depth.
+	/// If E is not active but has active descendants, then D=max(C.depth) over all active descendants C.
+	/// If E is not active and has no active descendants, then D=0.
+	/////////////////////////////////////////////////////////////////////////////////////////////////////
+	template<typename T=double>
+	struct UnstructuredVoxelMesh : public Keys::HybridKeyTracker {
+		
 
-		//In addition to tracking each of the active elements as element objects (so that color can be tracket
-		//and elements looped over in a contiguous manner), we keep a bitset of all possible elements over all depths
-		//to make querries easier. This bitset tracks which elements are active by their linear index.
-		static constexpr uint64_t TOTAL_POSSIBLE_ELEMENTS = total_possible<VoxelElement>(MAX_DEPTH);
-		std::bitset<TOTAL_POSSIBLE_ELEMENTS>* active_elem = new std::bitset<TOTAL_POSSIBLE_ELEMENTS>(0);
+		/////////////////////////////////////////////////////////////////////////////////////////////////
+		/// Aliases and masks
+		/////////////////////////////////////////////////////////////////////////////////////////////////
+		using BASE         	= Keys::HybridKeyTracker;
 
-		//for saving solutions, it is nice to have access to de-duplicated vertices
-		//to get the index of a vertex on an element, use element.vertex(k).reduced_key() to get the coarsest vertex at that location.
-		//this will be sorted by vertex linear index for easier lookup and consistency
-		//marked as mutable so that classes with a const reference to the mesh can still save data.
-		mutable std::vector<VoxelVertex> vertices;
+		using Mesh_t       	= UnstructuredVoxelMesh<T>;
+		using Elem_t   		= Keys::VoxelElement<0>;
+		using Vert_t   		= Keys::VoxelVertex<0>;
+		using Face_t   		= void;
+		using Edge_t   		= void;
 
-		//comparators to help sort elements
-		static inline bool compare_index(const VoxelElement left, const VoxelElement right) {return left<right;}
-		static bool compare_color(const VoxelElement left, const VoxelElement right) {
-			if (left.color() < right.color()) {return true;}
-			if (left.color() == right.color()) {return compare_index(left,right);} //call the compare_index for consistency
-			return false;
+		using GeoPoint_t	= gutil::Point<3,T>;
+		using Box_t        	= gutil::Box<3,T>;
+		using Scalar_t     	= T;
+
+		using BASE::ACTIVE_BIT; 					//0b00000001;	
+		static constexpr uint8_t DEPTH_BITS 		= 0b00011110;
+		static constexpr uint8_t FREE_BITS 	        = 0b11100000;
+
+
+		/////////////////////////////////////////////////////////////////////////////////////////////////
+		/// Data
+		/////////////////////////////////////////////////////////////////////////////////////////////////
+		const uint8_t				max_depth;
+		const uint64_t				max_possible_elements;
+		
+		const Box_t 				box;							//physical extents of the domain
+		const GeoPoint_t 			diag;							//diagonal/sidelength of the domain
+		const GeoPoint_t 			inv_diag;						//reciprocal of the sidelength
+		
+		std::vector<Vert_t> 		tracked_vertices;				//a compressed list of 'active' vertices, primarily used for visualization. reduced keys are stored.
+		gutil::BinSort<Vert_t>		vertex_sorter;					//sort the vertices for better lookup and deduplication
+		mutable std::atomic<bool>	is_vertices_collected_{false};	
+
+		protected:
+		std::span<Elem_t>			active_elements;				//a view into BASE::active_keys (std::vector<uint64_t>) re-interpreted as Elem_t
+		using BASE::key_mask;										//vector<uint8_t> of size max_possible_elements
+		using BASE::threads;
+		using BASE::sorter;											//the bins of this sorter will correspond to each depth in the mesh, will need to re-interpret the spans
+
+		mutable std::mutex							request_mutex{};			//sync refine requests. TODO: make requests per-thread-per-depth if it's slow
+		mutable std::vector<std::vector<Elem_t>> 	request_refine_list{};		//allow classes with const-ref to request refinement
+		mutable std::vector<std::vector<Elem_t>>	request_unrefine_list{};	//allow classes with const-ref to request unrefinement
+
+		public:
+		using BASE::is_key_mask_unstable;									//synchronization tools used in macros
+		using BASE::is_key_mask_stable;										//exposing to external classes can be helpul
+		using BASE::start_key_mask_stable;
+		using BASE::end_key_mask_stable;
+		using BASE::start_key_mask_unstable;
+		using BASE::end_key_mask_unstable;
+		
+		using BASE::is_active_keys_unstable;
+		using BASE::is_active_keys_stable;
+		using BASE::start_active_keys_stable;
+		using BASE::end_active_keys_stable;
+		using BASE::start_active_keys_unstable;
+		using BASE::end_active_keys_unstable;
+
+
+		//a few helper methods to check that we haven't forgot to call something like collect_vertices etc.
+		[[nodiscard]] bool is_vertices_collected() const noexcept {return is_vertices_collected_.load();}
+		[[nodiscard]] bool is_active_elements_linked() const noexcept {
+			return reinterpret_cast<uintptr_t>(active_elements.data())==reinterpret_cast<uintptr_t>(BASE::active_keys.data()) &&
+					reinterpret_cast<uintptr_t>(active_elements.data()+active_elements.size())==reinterpret_cast<uintptr_t>(BASE::active_keys.data()+BASE::active_keys.size());
+		}
+		[[nodiscard]] bool is_current() const noexcept {	//for most processes we only care about the elements
+			return BASE::is_current() && is_active_elements_linked();
 		}
 
-		//various flags for sanity checks
-		mutable bool _vertices_found_ = false;
-		bool _sort_by_index_  = true;
-		bool _sort_by_color_  = false;
-		bool _colored_		  = false;
-		uint64_t _n_colors_   = 0;
-
-		//store first index of each color (and one past end) for easier looping by color
-		std::array<std::vector<uint64_t>,MAX_DEPTH+1> color_block_index;
-
-		//store a list of elements that classes with a const reference to the mesh can use to request
-		//element refinement or unrefinement
-		//TODO: we could make a vector per omp thread
-		mutable std::vector<VoxelElement> request_active;
-		mutable std::vector<VoxelElement> request_deactive;
-	public:
-		//store the extents of the mesh
-		const GeoPoint_t low;
-		const GeoPoint_t high;
-
-		//////////////////////////////////////////////////////////
+		/////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Constructors
-		UnstructuredVoxelMesh() : low{0,0,0}, high{1,1,1} {}
-		UnstructuredVoxelMesh(const GeoPoint_t& low_, const GeoPoint_t& high_) : low(low_), high(high_) {}
-		explicit UnstructuredVoxelMesh(const VoxelMesh<MAX_DEPTH>& structured) : low(structured.low), high(structured.high) {
-			auto get_active = [&](VoxelElement el) {
-				if (structured.is_active(el)) {
-					elements[el.depth()].push_back(el);
+		/////////////////////////////////////////////////////////////////////////////////////////////////
+		UnstructuredVoxelMesh(const Box_t& box = Box_t{{0,0,0},{1,1,1}}, uint8_t max_depth_ = 8) : 
+			BASE(Elem_t::total_possible(std::min(max_depth_,(uint8_t)BASE::KEY_MAX_DEPTH))),
+			max_depth{std::min(max_depth_, (uint8_t)BASE::KEY_MAX_DEPTH)},
+			max_possible_elements{Elem_t::total_possible(max_depth)},
+			box{box}, 
+			diag{box.sidelength()}, 
+			inv_diag{Scalar_t{1}/diag} {
+				if (max_depth_>BASE::KEY_MAX_DEPTH) {
+					GUTIL_LOG("Depth ", max_depth_, " was requested, but the data type only support up to ", BASE::KEY_MAX_DEPTH);
 				}
+
+				request_refine_list.resize(max_depth+1);		//index max_depth is valid
+				request_unrefine_list.resize(max_depth+1);
+			}
+		
+		UnstructuredVoxelMesh(const UnstructuredVoxelMesh&) = delete;
+		UnstructuredVoxelMesh(UnstructuredVoxelMesh&& other) = default;
+		UnstructuredVoxelMesh& operator=(const UnstructuredVoxelMesh&) = delete;
+		UnstructuredVoxelMesh& operator=(UnstructuredVoxelMesh&&) = delete;
+		~UnstructuredVoxelMesh() {std::lock_guard<std::mutex> lock(request_mutex);}
+
+
+		/////////////////////////////////////////////////////////////////////////////////////////////////
+		/// Adapt masking function to VoxelElements and this classes's masks
+		/////////////////////////////////////////////////////////////////////////////////////////////////
+		[[nodiscard]] uint8_t get_mask(Elem_t el) const noexcept {
+			GUTIL_ASSERT(el.is_valid()); return BASE::get_mask(el.linear_index());
+		}
+		[[nodiscard]] uint8_t& get_mask_ref(Elem_t el) noexcept {
+			GUTIL_ASSERT(el.is_valid()); return BASE::get_mask_ref(el.linear_index());
+		}
+		[[nodiscard]] uint8_t get_mask_stable(Elem_t el) const noexcept {
+			GUTIL_ASSERT(el.is_valid()); return BASE::get_mask_stable(el.linear_index());
+		}
+		[[nodiscard]] uint8_t get_mask_unstable(Elem_t el) const noexcept {
+			GUTIL_ASSERT(el.is_valid()); return BASE::get_mask_unstable(el.linear_index());
+		}
+		[[nodiscard]] uint8_t& get_mask_ref_pseudo_const(Elem_t el) const noexcept {
+			GUTIL_ASSERT(el.is_valid()); return BASE::get_mask_ref_pseudo_const(el.linear_index());
+		}
+
+
+		[[nodiscard]] bool is_active(Elem_t el) const noexcept {
+			GUTIL_ASSERT(el.is_valid()); return BASE::is_active(el.linear_index());
+		}
+		[[nodiscard]] bool is_active_no_check(Elem_t el) const noexcept {
+			GUTIL_ASSERT(el.is_valid()); return BASE::is_active_no_check(el.linear_index());
+		}
+		[[nodiscard]] bool is_active_stable(Elem_t el) const noexcept {
+			GUTIL_ASSERT(el.is_valid()); return BASE::is_active_stable(el.linear_index());
+		}
+		[[nodiscard]] bool is_active_unstable(Elem_t el) const noexcept {
+			GUTIL_ASSERT(el.is_valid()); return BASE::is_active_unstable(el.linear_index());
+		}
+		[[nodiscard]] bool set_active_check_changed(Elem_t el, bool val) noexcept {
+			GUTIL_ASSERT(el.is_valid()); return BASE::set_active_check_changed(el.linear_index(), val);
+		}
+		void set_active(Elem_t el, bool val) noexcept {
+			GUTIL_ASSERT(el.is_valid()); BASE::set_active(el.linear_index(), val);
+		}
+
+		[[nodiscard]] uint8_t read_depth_field(Elem_t el) const noexcept {
+			GUTIL_ASSERT(el.is_valid()); return (get_mask(el)&DEPTH_BITS)>>1;
+		}
+		[[nodiscard]] uint8_t read_depth_field_stable(Elem_t el) const noexcept {
+			GUTIL_ASSERT(el.is_valid()); return (get_mask_stable(el)&DEPTH_BITS)>>1;
+		}
+		[[nodiscard]] uint8_t read_depth_field_unstable(Elem_t el) const noexcept {
+			GUTIL_ASSERT(el.is_valid()); return (get_mask_unstable(el)&DEPTH_BITS)>>1;
+		}
+		[[nodiscard]] bool set_depth_field_check_changed(Elem_t el, uint8_t val) noexcept {
+			GUTIL_ASSERT(el.is_valid()); 
+			uint8_t& byte = get_mask_ref(el);
+			uint8_t old = (byte&DEPTH_BITS)>>1;
+			byte&=~DEPTH_BITS;
+			byte|=(DEPTH_BITS&(val<<1));
+			return val!=old;
+		}
+		void set_depth_field(Elem_t el, uint8_t val) noexcept {
+			GUTIL_ASSERT(el.is_valid()); 
+			uint8_t& byte = get_mask_ref(el);
+			byte&=~DEPTH_BITS;
+			byte|=(DEPTH_BITS&(val<<1));
+		}
+
+
+		/////////////////////////////////////////////////////////////////////////////////////////////////
+		/// Bin functions for sorting elements and vertices
+		/////////////////////////////////////////////////////////////////////////////////////////////////
+		GUTIL_DECLARE_SIMD()
+		static constexpr int element_key_bin(uint64_t key) noexcept {
+			return static_cast<int>(Elem_t{key}.depth());
+		}
+
+		GUTIL_DECLARE_SIMD()
+		static constexpr int vertex_key_bin(uint64_t key) noexcept {
+			GUTIL_ASSERT(Vert_t{key}.is_valid());
+			key = Keys::Mesh3D::ReducedVertex_SIMD(key);
+			return static_cast<int>(Keys::Mesh3D::Depth(key));
+		}
+
+		static constexpr int vertex_bin(Vert_t vtx) noexcept {
+			return static_cast<int>(vtx.reduced_key().depth());
+		}
+
+		/////////////////////////////////////////////////////////////////////////////////////////////////
+		/// Simple queries and commands
+		/////////////////////////////////////////////////////////////////////////////////////////////////
+		void set_depth(uint8_t depth) noexcept {
+			BASE::clear();
+			{
+				GV_BEGIN_UNSTABLE
+
+				uint64_t start = Elem_t::elements_below_depth(depth);
+				uint64_t end   = Elem_t::elements_below_depth(depth+1);
+				std::fill(key_mask.begin()+start, key_mask.begin()+end, ACTIVE_BIT);
+				is_vertices_collected_.store(false);
+				GV_END_UNSTABLE
+			}
+			collect_elements();
+		}
+
+		void collect_elements() noexcept {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GV_ASSERT_KEY_MASK_STABLE_STATE
+			GUTIL_TIMER("collecting active elements");
+			BASE::collect_active_keys<Elem_t>();
+			active_elements = BASE::reinterpret_key_span<Elem_t,uint64_t>(std::span<uint64_t>(BASE::active_keys));
+			BASE::sort_active_keys(max_depth, &UnstructuredVoxelMesh::element_key_bin);
+		}
+
+		void collect_vertices() noexcept {
+			GV_BEGIN_STABLE  	//The base class+elements must be stable, we are only altering the vertices
+			GUTIL_TIMER("Collecting active vertices");
+			GUTIL_ASSERT(is_current());
+			is_vertices_collected_.store(false);
+
+			const size_t n_threads = threads.n_threads()==0 ? 1 : threads.n_threads();
+			std::vector<std::vector<Vert_t>> thread_verts(n_threads);
+
+			auto job = [&thread_verts](std::span<const uint64_t> el_keys, size_t tid) {
+				auto& verts = thread_verts[tid];
+				verts.resize(8*el_keys.size());
+				#ifndef NDEBUG
+					std::fill(verts.begin(), verts.end(), Vert_t{uint64_t(-1)});
+				#endif
+
+				GUTIL_SIMD()
+				for (size_t i=0; i<el_keys.size(); ++i) {
+					Elem_t{el_keys[i]}.vertices_simd(verts.data() + 8*i);
+					for (size_t j=0; j<8; ++j) {
+						verts[8*i + j].reduced_key_simd_in_place();
+					}
+				}
+
+				#ifndef NDEBUG
+					GUTIL_ASSERT(std::find(verts.begin(), verts.end(), Vert_t{uint64_t(-1)})==verts.end());
+				#endif
+
+				BASE::sort_and_unique(verts);
+				verts.shrink_to_fit();
 			};
 
-			#ifdef _OPENMP
-			#pragma omp parallel for
-			#endif
-			for (uint64_t dd=0; dd<=MAX_DEPTH; ++dd) {
-				structured.template for_each_depth<VoxelElement>(dd, get_active);
+			BASE::dispatch_parallel_active_keys_const(job);
+			tracked_vertices.clear();
+			threads.wait_idle();
+
+			for(size_t i=0; i<n_threads; ++i) {
+				tracked_vertices.insert(tracked_vertices.end(), std::make_move_iterator(thread_verts[i].begin()),
+								std::make_move_iterator(thread_verts[i].end()));
 			}
+			thread_verts.clear();
 
-			//each loop was in increasing linear index, so the elements are already sorted by index
-			_sort_by_index_ = true;
+			vertex_sorter = gutil::BinSort<Vert_t>(tracked_vertices, max_depth);
+			vertex_sorter.dispatch_sort(&vertex_bin, &threads);
+			threads.wait_idle();
+
+			for (int n=0; n<vertex_sorter.n_bins(); ++n) {
+				threads.submit([](auto a, auto b){std::sort(a,b);}, vertex_sorter.begin(n), vertex_sorter.end(n));
+			}
+			threads.wait_idle();
+			is_vertices_collected_.store(true);
+			GV_END_STABLE
 		}
 
-		// explicit UnstructuredVoxelMesh(const StructuredVoxelMesh<MAX_DEPTH>& structured) : low(structured.low), high(structured.high) {
-		// 	for (uint64_t i=0; i<structured.TOTAL_POSSIBLE_ELEMENTS; ++i) {
-		// 		VoxelElement el(structured.DEPTH, i);
-		// 		if (structured.is_active(el)) {
-		// 			elements[el.depth()].push_back(el);
-		// 		}
-		// 	}
 
-		// 	//each loop was in increasing linear index, so the elements are already sorted by index
-		// 	_sort_by_index_ = true;
-		// }
-		//////////////////////////////////////////////////////////
+		//find the active element that the point belongs to and transform to the reference coordinate in [-1,1]^3
+		GUTIL_DECLARE_SIMD()
+		uint64_t find_element_raw_key(Scalar_t* x, Scalar_t* y, Scalar_t* z) const noexcept {
+			GV_ASSERT_KEY_MASK_STABLE_STATE
 
-		//////////////////////////////////////////////////////////
-		/// Destructor
-		~UnstructuredVoxelMesh() {delete active_elem;}
-		//////////////////////////////////////////////////////////
+			uint64_t result{0};
 
-		//////////////////////////////////////////////////////////
-		/// Methods primarily for simple queries
-		inline uint64_t n_colors() const {return _n_colors_;}
-		inline bool is_colored() const {return _colored_;}
-		inline bool is_color_sorted() const { if (_sort_by_color_) {assert(_colored_);} return _sort_by_color_;}
-		inline bool is_index_sorted() const {return _sort_by_index_;}
-		inline uint64_t n_vertices() const {assert(_vertices_found_); return vertices.size();}
-		
-		uint64_t n_elements_below(const uint64_t depth) const {
-			uint64_t count=0;
-			for (uint64_t dd=0; dd<std::min(depth,MAX_DEPTH+1); ++dd) {count+=elements[dd].size();}
-			return count;
-		}
-		inline uint64_t n_elements() const {return n_elements_below(MAX_DEPTH+1);}
-		inline GeoPoint_t geo_coord(const VoxelVertex vtx) const {return low + (high-low)*vtx.normalized_coordinate();}
-		//////////////////////////////////////////////////////////
+			//get normalized coordinate at depth 0 as local values
+			Scalar_t lx = Scalar_t{2}*( *x - box.low[0])*inv_diag[0] - Scalar_t{1};
+			Scalar_t ly = Scalar_t{2}*( *y - box.low[1])*inv_diag[1] - Scalar_t{1};
+			Scalar_t lz = Scalar_t{2}*( *z - box.low[2])*inv_diag[2] - Scalar_t{1};
+			GUTIL_ASSERT(Scalar_t{-1} <= x && x <= Scalar_t{1});
+			GUTIL_ASSERT(Scalar_t{-1} <= y && y <= Scalar_t{1});
+			GUTIL_ASSERT(Scalar_t{-1} <= z && z <= Scalar_t{1});
 
-		//////////////////////////////////////////////////////////
-		/// Methods primarily for accessing data arbitrarily and some standard container interfaces
-		inline size_t size() const {return static_cast<size_t>(n_elements());}
-		void clear() {
-			active_elem->reset();
-			vertices.clear();
-			for (auto& list : elements) {list.clear();}
-			_vertices_found_ = false;
-			_sort_by_index_  = true;
-			_colored_        = false;
-			_sort_by_color_  = false;
-		}
-		void shrink_to_fit() {{for (auto& list : elements) {list.shrink_to_fit();}}}
+			//get the element at each depth that contains the point
+			//the x,y,z values should not correspond to a vertex for predicable results
+			Elem_t el{0,0};						//current element, morton encoded
+			for (uint8_t dd=0; dd<=max_depth; ++dd) {
+				
+				if (is_active_stable(el)) {
+					result = el.key;
+					*x     = lx;
+					*y     = ly;
+					*z     = lz;
+				}
+				
 
-		//methods to find or access elements
-		uint64_t find_element(const VoxelElement el) const;
-		uint64_t find_colored_element(const VoxelElement el) const;
-		inline VoxelElement  get_element(const uint64_t idx) const {assert(idx<n_elements()); return *celement(idx);}
-		inline VoxelElement& get_element(const uint64_t idx) {assert(idx<n_elements()); return *element(idx);};
-		CIterator get_element(const VoxelElement el) const;
-		Iterator get_element(const VoxelElement el);
+				//get the child/octant the point belongs to
+				uint64_t idx = 0;
+				if (lx>Scalar_t{0}) {idx|=0b001;}
+				if (ly>Scalar_t{0}) {idx|=0b010;}
+				if (lz>Scalar_t{0}) {idx|=0b100;}
 
-		//local topolgy querries
-		void collect_neighbors(std::vector<VoxelElement>& nbrs, const VoxelElement el) const;
-
-		//check if elements are active (present in the mesh)
-		inline bool is_active(const VoxelElement el) const {return is_active_impl<VoxelElement>(el);}
-		inline bool is_active(const VoxelVertex vtx) const {return is_active_impl<VoxelVertex>(vtx);}
-		inline bool is_active(const VoxelFace face) const {return is_active_impl<VoxelFace>(face);}
-		bool is_any_active(std::span<const VoxelElement> els) const {
-			bool result=false;
-			for (const auto el : els) {result |= is_active(el);}
+				//go to new element (get the distance to the new center and re-scale)
+				el = el.children_simd() + idx;
+				lx = Scalar_t{2}*( lx - ((idx&0b001) ? Scalar_t{0.5} : -Scalar_t{0.5}) );
+				ly = Scalar_t{2}*( ly - ((idx&0b010) ? Scalar_t{0.5} : -Scalar_t{0.5}) );
+				lz = Scalar_t{2}*( lz - ((idx&0b100) ? Scalar_t{0.5} : -Scalar_t{0.5}) );
+			}
 			return result;
 		}
 
 
-		//check if features are conformal or hanging
-		//a feature is hanging if it has a corresponding element that exists but is not active
-		inline bool is_hanging(const VoxelVertex vtx) const {return is_hanging_impl<VoxelVertex>(vtx);}
-		inline bool is_hanging(const VoxelFace face) const {return is_hanging_impl<VoxelFace>(face);}
 
-		//get iterators to start of elements
-		inline Iterator  begin() {return Iterator::begin(elements);}
-		inline CIterator cbegin() const {return CIterator::begin(elements);}
-		inline CIterator begin() const {return cbegin();}
+		/////////////////////////////////////////////////////////////////////////////////////////////////
+		/// Methods for assigning DOFs to features
+		///
+		/// A conformal vertex can only be contained in the closure of an active element if it is one of 
+		/// its vertices (i.e., it cannot lay on an edge, face, or interior of an active element)
+		/////////////////////////////////////////////////////////////////////////////////////////////////
+		template<uint8_t Period> requires(Period<8)
+		[[nodiscard]] bool is_conformal(Keys::VoxelVertex<Period> vtx) const noexcept {
+		    GV_ASSERT_KEY_MASK_STABLE_STATE
 
-		//get iterators to arbitrary elements
-		inline Iterator  element(const uint64_t idx) {return Iterator{elements, idx};}
-		inline CIterator celement(const uint64_t idx) const {return CIterator{elements, idx};}
-		inline CIterator element(const uint64_t idx) const {return celement(idx);}
+		    using P_Elem_t = Keys::VoxelElement<Period>;
+		    using P_Vert_t = Keys::VoxelVertex<Period>;
 
-		//get iterators to end of elements
-		inline Iterator  end() {return Iterator::end(elements);}
-		inline CIterator cend() const {return CIterator::end(elements);}
-		inline CIterator end() const {return cend();}
+		    P_Vert_t native = vtx.reduced_key();
+		    const uint8_t native_depth = native.depth_u8();
+		    if (native_depth==0) {return true;}
 
-		//get iterators to start of depth
-		inline auto depth_begin(const uint64_t dd) {assert(dd<=MAX_DEPTH); return elements[dd].begin();}
-		inline auto depth_cbegin(const uint64_t dd) const {assert(dd<=MAX_DEPTH); return elements[dd].cbegin();}
-		inline auto depth_begin(const uint64_t dd) const {return depth_cbegin(dd);}
+		    const uint64_t par  = native.kji_pairity_simd();
+		    const uint64_t bi   = (par&0b001) ? 0 : 1;
+		    const uint64_t bj   = (par&0b010) ? 0 : 1;
+		    const uint64_t bk   = (par&0b100) ? 0 : 1;
 
-		//get iterators to end of depth
-		inline auto depth_end(const uint64_t dd) {assert(dd<=MAX_DEPTH); return elements[dd].end();}
-		inline auto depth_cend(const uint64_t dd) const {assert(dd<=MAX_DEPTH); return elements[dd].cend();}
-		inline auto depth_end(const uint64_t dd) const {return depth_cend(dd);}
-		//////////////////////////////////////////////////////////
+		    const uint64_t dd   = native_depth-1;
+		    const uint64_t n_el = uint64_t{1} << dd;
 
-		//////////////////////////////////////////////////////////
-		/// Methods primarily for mesh coloring and parallelism 
-		//sort the elements by linear index or color
-		void sort_by_color();
-		void sort_by_index();
+		    //el_idx[0]/[2]/[4] = the LOW candidate (q-1 when bi=1, else q); [1]/[3]/[5] = the HIGH (q)
+		    int64_t el_idx[6];
+		    el_idx[0] = static_cast<int64_t>(native.i()/2) - static_cast<int64_t>(bi);
+		    el_idx[2] = static_cast<int64_t>(native.j()/2) - static_cast<int64_t>(bj);
+		    el_idx[4] = static_cast<int64_t>(native.k()/2) - static_cast<int64_t>(bk);
+		    el_idx[1] = el_idx[0] + bi;
+		    el_idx[3] = el_idx[2] + bj;
+		    el_idx[5] = el_idx[4] + bk;
 
-		void color() {};
-		void color_by_index();
+		    //periodic wrap: only relevant when bi=1 (the low candidate was actually computed) and it went negative
+		    if constexpr (Period&0b001) {if (bi==1 && el_idx[0]<0) {el_idx[0]=n_el-1;} }
+		    if constexpr (Period&0b010) {if (bj==1 && el_idx[2]<0) {el_idx[2]=n_el-1;} }
+		    if constexpr (Period&0b100) {if (bk==1 && el_idx[4]<0) {el_idx[4]=n_el-1;} }
 
-		//get the span of elements of a given color at a given depth
-		//note that the elements must be sorted by color
-		inline std::span<const VoxelElement> color_block(const uint64_t dd, const uint64_t clr) const {
-			assert(dd<=MAX_DEPTH);
-			assert(clr+1 < color_block_index[dd].size());
-			assert(_sort_by_color_);
-			const uint64_t start = color_block_index[dd][clr];
-			const uint64_t end   = color_block_index[dd][clr+1];
-			return {elements[dd].data()+start, end-start};
+		    for (uint64_t di=0; di<=bi; ++di) {
+		        if (el_idx[di]<0) { continue; }
+		        for (uint64_t dj=0; dj<=bj; ++dj) {
+		            if (el_idx[2+dj]<0) { continue; }
+		            for (uint64_t dk=0; dk<=bk; ++dk) {
+		                if (el_idx[4+dk]<0) { continue; }
+		                P_Elem_t elem{dd, static_cast<uint64_t>(el_idx[di]),
+		                                  static_cast<uint64_t>(el_idx[2+dj]),
+		                                  static_cast<uint64_t>(el_idx[4+dk])};
+		                if (!elem.exists()) { continue; }
+		                if (is_active(Elem_t{elem})) {return false; }
+		            }
+		        }
+		    }
+		    return true;
 		}
-		//////////////////////////////////////////////////////////
 
-		//////////////////////////////////////////////////////////
+
+		[[nodiscard]] uint8_t min_active_depth() const noexcept {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GUTIL_ASSERT(is_current());
+			GUTIL_ASSERT(n_elements()>0);
+			for (int dd=0; dd<=(int)max_depth; ++dd) {
+				if (sorter.bin_size(dd) > 0) {return (uint8_t)dd;}
+			}
+			GUTIL_ERROR("there were no elements in the sorter");
+			return 0;
+		}
+
+		[[nodiscard]] uint8_t max_active_depth() const noexcept {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GUTIL_ASSERT(is_current());
+			GUTIL_ASSERT(n_elements()>0);
+			for (int dd= (int)max_depth; dd>=0; --dd) {
+				if (sorter.bin_size((int)dd) > 0) {return (uint8_t)dd;}
+			}
+			GUTIL_ERROR("there were no elements in the sorter");
+			return 0;
+		}
+
+		template<uint8_t Period> requires(Period<8)
+		[[nodiscard]] Keys::VoxelVertex<Period> lowest_with_active_element(Keys::VoxelVertex<Period> vtx) const noexcept {
+			GV_ASSERT_KEY_MASK_STABLE_STATE
+			//descend to root, check for active elements on the way up
+			
+			GUTIL_ASSERT(vtx.is_valid());
+			const uint8_t min_depth = min_active_depth();
+			const uint8_t max_depth = max_active_depth();
+			while(vtx.depth()>min_depth) {vtx = vtx.parent();}
+			GUTIL_ASSERT(vtx.is_valid() && vtx.depth()<=min_depth);
+
+			Keys::VoxelElement<Period> els[8];
+			while (vtx.depth()>=max_depth) {
+				vtx.elements_simd(els);
+				for (int i=0; i<8; ++i) {
+					if (is_active_stable(static_cast<Elem_t>(els[i]))) { return vtx;}
+				}
+				vtx = vtx.child();
+			}
+			return Keys::VoxelVertex<Period>::None();
+		}
+
+
+		/////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Methods primarily for writing to vtk files
-		void collect_vertices() const;
-		uint64_t vertex_index(VoxelVertex vtx) const {
-			auto it = std::lower_bound(vertices.begin(), vertices.end(), vtx);
-			if (it == vertices.end() || *it!=vtx) {return uint64_t(-1);}
-			return std::distance(vertices.begin(), it);
+		/////////////////////////////////////////////////////////////////////////////////////////////////
+		[[nodiscard]] GeoPoint_t geo_coord(const Vert_t vtx) const noexcept {return box.low + (box.high-box.low)*vtx.normalized_coordinate();}
+		[[nodiscard]] GeoPoint_t geo_center(const Elem_t el) const noexcept {return box.low + (box.high-box.low)*el.normalized_center();}
+		
+		[[nodiscard]] size_t n_elements() const noexcept {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GUTIL_ASSERT(is_current());
+			return active_elements.size();
 		}
 
-		//get elements and vertices for easier writing to vtk files
-		inline CIterator element_begin() const {return cbegin();}
-		inline CIterator element_end() const {return cend();}
-		inline auto vertex_begin() const {return vertices.cbegin();}
-		inline auto vertex_end() const {return vertices.cend();}
-		inline std::span<const VoxelVertex> get_vertices() const {return vertices;}
-		void save_as_ascii(const std::string& filename, const std::string& description = "") const {print_topology_vtk<Mesh_t,true>(filename, *this, description);}
-		void save_as_binary(const std::string& filename, const std::string& description = "") const {print_topology_vtk<Mesh_t,false>(filename, *this, description);}
+		[[nodiscard]] size_t n_vertices() const noexcept {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GUTIL_ASSERT(is_current());
+			GUTIL_ASSERT(is_vertices_collected());
+			return tracked_vertices.size();
+		}
+
+		[[nodiscard]] size_t vertex_index(Vert_t vtx) const noexcept {
+			//the unstructured layers must be up to date and the vertices collected
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GUTIL_ASSERT(is_current());
+			GUTIL_ASSERT(is_vertices_collected());
+			GUTIL_ASSERT(vtx.is_valid());
+			vtx.reduced_key_simd_in_place();
+			int bn = static_cast<int>(vtx.depth());
+			std::span<const Vert_t> list = vertex_sorter.get_bin(bn);
+			auto it = std::lower_bound(list.begin(), list.end(), vtx);
+			return (it==list.end() || *it!=vtx) ? size_t(-1) : vertex_sorter.bin_start(bn) + static_cast<size_t>(std::distance(list.begin(), it));
+		}
+
+
+
+		/////////////////////////////////////////////////////////////////////////////////////////////////
+		/// Methods for manipulating the mesh
+		/////////////////////////////////////////////////////////////////////////////////////////////////
+		void request_refine(Elem_t el) const noexcept {
+			//this is only a request and does not alter the mesh
+			//we only care about the safety of adding to the request list
+			GUTIL_ASSERT(el.is_valid());
+			GUTIL_ASSERT(el.depth()<max_depth);
+			el = el.encode();
+			std::lock_guard<std::mutex> lock(request_mutex);
+			request_refine_list[el.depth()].push_back(el);
+		}
+		
+		template<typename Predicate = std::nullptr_t>
+		void request_unrefine(Elem_t el, Predicate&& pred=nullptr) const noexcept {
+			//this is only a request and does not alter the mesh
+			//we only care about the safety of adding to the request list
+			GUTIL_ASSERT(el.is_valid());
+			GUTIL_ASSERT(el.depth()>0);
+			
+			//no sibling may have an active descendant
+			//all active siblings must satisfy the predicate
+			const uint8_t dd = el.depth_u8();
+			el = el.encode();
+			Elem_t sib = Elem_t{el.siblings_simd()};
+			for (int i=0; i<8; ++i, ++sib) {
+				if (read_depth_field(sib) > dd) {return;}
+				if constexpr (!NULLPTR_T<Predicate>) {
+					if (is_active(sib) && !pred(sib)) {return;}
+				}
+			}
+			//the cell that we want to be active is tracked
+			std::lock_guard<std::mutex> lock(request_mutex);
+			request_unrefine_list[dd-1].push_back(el.parent());
+		}
+
+		template<typename Predicate>
+		void request_refine(Predicate&& pred) const noexcept {
+			std::lock_guard<std::mutex> lock(request_mutex);
+			auto job = [pred,this](std::span<const uint64_t> list, uint8_t dd) {
+				std::span<const Elem_t> e_list = BASE::reinterpret_key_span<Elem_t,uint64_t>(list);
+				for (Elem_t el : e_list) {
+					if (pred(el)) {request_refine_list[dd].push_back(el);}
+				}
+			};
+
+			for (uint8_t dd=0; dd<max_depth; ++dd) {
+				threads.submit(job, sorter.get_bin(dd), dd);
+			}
+			threads.wait_idle();
+		}
+
+		template<typename Predicate>
+		void request_unrefine(Predicate&& pred) const noexcept {
+			std::lock_guard<std::mutex> lock(request_mutex);
+			auto job = [pred,this](std::span<const Elem_t> list, uint8_t dd) {
+				for (Elem_t el : list) {
+					el = el.encode();
+					Elem_t sib = el.siblings_simd();
+					for (int i=0; i<8; ++i, ++sib) {
+						if (read_depth_field_stable(sib) > dd) {continue;}
+						if (is_active_stable(sib) && !pred(sib)) {continue;}
+					}
+					request_unrefine_list[dd-1].push_back(el.parent());
+				}
+			};
+
+			for (uint8_t dd=1; dd<=max_depth; ++dd) {
+				threads.submit(job, sorter.get_bin(dd), dd);
+			}
+			threads.wait_idle();
+		}
+
+		void synchronize_depth_field() noexcept;
+		void propagate_depth_field(Elem_t el) noexcept;
+		void process_unrefine() noexcept;
+
+		template<typename Predicate = std::nullptr_t>
+		void process_refine(Predicate&& pred = nullptr) noexcept;
+
+
+		[[nodiscard]] std::vector<Elem_t> neighbors(Elem_t el) const noexcept {
+			GUTIL_ASSERT(el.is_valid())
+			GUTIL_ASSERT(is_active_no_check(el))
+
+			const uint64_t dd = el.depth();
+			if (!is_active_no_check(el)) { return {}; }
+
+			//a coarse cell at depth dd surrounded by cells at depth dd+1 will have 54 neighbors
+			std::vector<Elem_t> list;
+			list.reserve(54);
+
+			for (Elem_t nbr : el.neighbors()) {
+				if (!nbr.is_valid()) { continue; }
+
+				if ( is_active_no_check(nbr) ) { list.push_back(nbr); }
+				else if ( dd>0 && is_active_no_check(nbr.parent())) { list.push_back(nbr.parent()); }
+				else if ( dd<max_depth ) {
+					
+					//to only get the correct fine neighbors, we need to be careful
+					//for each axis, if el's index is even (low), then the low depth-dd-neighbor's children
+					//must have an odd (high) axis index. Similar rules apply to corner and other neighbors.
+					
+					//track if the nbr child needs low/high/any bits for each axis
+					//note that el.i/j/k and nbr.i/j/k are at most one apart
+					const int64_t di = static_cast<int64_t>(nbr.i()) - static_cast<int64_t>(el.i());
+					const int64_t dj = static_cast<int64_t>(nbr.j()) - static_cast<int64_t>(el.j());
+					const int64_t dk = static_cast<int64_t>(nbr.k()) - static_cast<int64_t>(el.k());
+
+					for (Elem_t c : nbr.children()) {
+						if (!is_active_no_check(c)) {continue;}
+
+						//check if each axis index is ok (any/low/high)
+						if ( (di>0 && static_cast<bool>(c.i()&1)) || (di<0 && !static_cast<bool>(c.i()&1)) ) {continue;}
+						if ( (dj>0 && static_cast<bool>(c.j()&1)) || (dj<0 && !static_cast<bool>(c.j()&1)) ) {continue;}
+						if ( (dk>0 && static_cast<bool>(c.k()&1)) || (dk<0 && !static_cast<bool>(c.k()&1)) ) {continue;}
+						list.push_back(c);
+					}
+				}
+			}
+			return list;
+		}
+
+
+		///////////////////////////////////////////////////////////////////////
+		/// Some convenient methods for writing to vtk files.
+		/// See /mesh/vtk_file_io.hpp for factories to make the lookup functions
+		///////////////////////////////////////////////////////////////////////
+		void save_as_ascii(const std::string& filename, const std::string& description = "") const {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GUTIL_ASSERT(is_current());
+			GUTIL_ASSERT(is_vertices_collected());
+			print_topology_vtk<Mesh_t,true>(filename, *this, description);
+		}
+		void save_as_binary(const std::string& filename, const std::string& description = "") const {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GUTIL_ASSERT(is_current());
+			GUTIL_ASSERT(is_vertices_collected());
+			print_topology_vtk<Mesh_t,false>(filename, *this, description);
+		}
 
 		template<typename... Lookup_ts>
-		inline void append_cell_data_field_ascii(const std::string& filename, const std::string field_name, const Lookup_ts&... lookups) const {
+		void append_cell_data_field_ascii(const std::string& filename, const std::string field_name, const Lookup_ts&... lookups) const {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GUTIL_ASSERT(is_current());
+			GUTIL_ASSERT(is_vertices_collected());
 			append_cell_data_field_vtk<Mesh_t,true>(filename, *this, field_name, lookups...);
 		}
 		template<typename... Lookup_ts>
-		inline void append_cell_data_field_binary(const std::string& filename, const std::string field_name, const Lookup_ts&... lookups) const {
+		void append_cell_data_field_binary(const std::string& filename, const std::string field_name, const Lookup_ts&... lookups) const {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GUTIL_ASSERT(is_current());
+			GUTIL_ASSERT(is_vertices_collected());
 			append_cell_data_field_vtk<Mesh_t,false>(filename, *this, field_name, lookups...);
 		}
 		template<typename... Lookup_ts>
-		inline void append_point_data_field_ascii(const std::string& filename, const std::string field_name, const Lookup_ts&... lookups) const {
+		void append_point_data_field_ascii(const std::string& filename, const std::string field_name, const Lookup_ts&... lookups) const {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GUTIL_ASSERT(is_current());
+			GUTIL_ASSERT(is_vertices_collected());
 			append_point_data_field_vtk<Mesh_t,true>(filename, *this, field_name, lookups...);
 		}
 		template<typename... Lookup_ts>
-		inline void append_point_data_field_binary(const std::string& filename, const std::string field_name, const Lookup_ts&... lookups) const {
+		void append_point_data_field_binary(const std::string& filename, const std::string field_name, const Lookup_ts&... lookups) const {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GUTIL_ASSERT(is_current());
+			GUTIL_ASSERT(is_vertices_collected());
 			append_point_data_field_vtk<Mesh_t,false>(filename, *this, field_name, lookups...);
 		}
-		//////////////////////////////////////////////////////////
 
-		//////////////////////////////////////////////////////////
-		/// Methods primarily for mesh manipulation
-		template<typename Predicate>
-		void remove_elements(Predicate&& pred) const requires (OPENMP);
 
-		template<typename Predicate>
-		void remove_elements(Predicate&& pred) const requires (!OPENMP);
-
-		void make_disjoint();
-		void set_depth(const uint64_t dd);
-		inline void activate(const VoxelElement el) const {request_active.push_back(el);}
-		inline void deactivate(const VoxelElement el) const {request_deactive.push_back(el);}
-		inline void activate(std::span<const VoxelElement> els) const {request_active.insert(request_active.end(), els.begin(), els.end());}
-		inline void deactivate(std::span<const VoxelElement> els) const {request_deactive.insert(request_deactive.end(), els.begin(), els.end());}
-		void process_requests();
-		//////////////////////////////////////////////////////////
-
-		//////////////////////////////////////////////////////////
-		/// Methods for looping over active elements
-		template<typename Action>
-		void for_each_active_element(Action&& action);
-		template<typename Action>
-		void for_each_active_element(Action&& action) const;
-		template<typename Action>
-		void for_each_active_element_omp(Action&& action) requires OPENMP;
-		template<typename Action>
-		void for_each_active_element_omp(Action&& action) const requires OPENMP;
-		template<typename Action>
-		void for_each_active_element_color_omp(Action&& action) const requires OPENMP;
-		template<typename Action>
-		void for_each_active_element_color_omp(const uint64_t clr, Action&& action) const requires OPENMP;
-		//////////////////////////////////////////////////////////
-
-		//////////////////////////////////////////////////////////
-		/// Methods for looping over all possible features
-		template<typename Key_t, typename Action, typename Predicate = std::nullptr_t> 
-		inline void for_each_depth(const uint64_t depth, Action&& action, Predicate&& pred = nullptr) const requires (MeshFeatureType<Key_t,Mesh_t>) {
-			for_each_depth_impl<Key_t>(depth, std::forward<Action>(action), std::forward<Predicate>(pred));
+		/////////////////////////////////////////////////////////////////////////////////////////////////
+		/// Iterators for element access
+		/////////////////////////////////////////////////////////////////////////////////////////////////
+		auto element_begin() 			 const {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GUTIL_ASSERT(is_current());
+			return active_elements.cbegin();
+		}
+		auto element_end()   			 const {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GUTIL_ASSERT(is_current());
+			return active_elements.cend();
+		}
+		auto element_begin(uint8_t dd)  const {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GUTIL_ASSERT(is_current());
+			GUTIL_ASSERT(dd<=max_depth);
+			return sorter.begin(static_cast<int>(dd));
+		}
+		auto element_end(uint8_t dd)    const {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GUTIL_ASSERT(is_current());
+			GUTIL_ASSERT(dd<=max_depth);
+			return sorter.end(static_cast<int>(dd));
 		}
 
-		template<typename Key_t, typename Action, typename Predicate = std::nullptr_t> 
-		inline void for_each_depth_omp(const uint64_t depth, Action&& action, Predicate&& pred = nullptr) const requires (MeshFeatureType<Key_t,Mesh_t> && OPENMP) {
-			for_each_depth_impl_omp<Key_t>(depth, std::forward<Action>(action), std::forward<Predicate>(pred));
+		auto element_begin() 			 {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GUTIL_ASSERT(is_current());
+			return active_elements.begin();
 		}
-		//////////////////////////////////////////////////////////
-
-	private:
-		//////////////////////////////////////////////////////////
-		/// Some generic feature implementation methods
-		template<typename Key_t> 
-		bool is_active_impl(const Key_t key) const requires (MeshFeatureType<Key_t,Mesh_t>);
-		template<typename Key_t> 
-		bool is_hanging_impl(const Key_t key) const requires (MeshFeatureType<Key_t,Mesh_t>);
-		template<typename Key_t, typename Action, typename Predicate = std::nullptr_t>
-		void for_each_depth_impl(const uint64_t depth, Action&& action, Predicate&& pred = nullptr) const requires (MeshFeatureType<Key_t,Mesh_t>);
-		template<typename Key_t, typename Action, typename Predicate = std::nullptr_t>
-		void for_each_depth_impl_omp(const uint64_t depth, Action&& action, Predicate&& pred = nullptr) const requires (MeshFeatureType<Key_t,Mesh_t> && OPENMP);
-		//////////////////////////////////////////////////////////
-
-		//////////////////////////////////////////////////////////
-		/// Some convenient manipulation tools
-		inline void set_bitset_active(const uint64_t start, const uint64_t end);
-		//////////////////////////////////////////////////////////
-	};
-
-
-
-	template<uint64_t MAX_DEPTH>
-	template<typename Key_t>
-	bool UnstructuredVoxelMesh<MAX_DEPTH>::is_hanging_impl(const Key_t key) const requires (MeshFeatureType<Key_t,Mesh_t>) {
-		assert(key.is_valid());
-		assert(is_active(key));
-		for (const VoxelElement el : key.elements()) {
-			if (el.exists() && !is_active(el)) {return true;}
+		auto element_end()   			 {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GUTIL_ASSERT(is_current());
+			return active_elements.end();
 		}
-		return false;
-	}
-
-	template<uint64_t MAX_DEPTH>
-	template<typename Key_t> 
-	bool UnstructuredVoxelMesh<MAX_DEPTH>::is_active_impl(const Key_t key) const requires (MeshFeatureType<Key_t,Mesh_t>) {
-		assert(key.is_valid());
-		if constexpr (std::same_as<Key_t,VoxelElement>) {return active_elem->test(key.linear_index());}
-		else {
-			for (const VoxelElement el : key.elements()) {
-				if (el.exists() && active_elem->test(el.linear_index)) {return true;}
-			}
-			return false;
+		auto element_begin(uint8_t dd)  {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GUTIL_ASSERT(is_current());
+			GUTIL_ASSERT(dd<=max_depth);
+			return sorter.begin(static_cast<int>(dd));
 		}
-	}
-
-	template<uint64_t MAX_DEPTH>
-	uint64_t UnstructuredVoxelMesh<MAX_DEPTH>::find_element(const VoxelElement el) const {
-		auto& list = elements[el.depth()];
-		if (is_index_sorted()) {
-			auto it = std::lower_bound(list.begin(), list.end(), el);
-			if (it == list.end() || *it != el) {return uint64_t(-1);}
-			return n_elements_below(el.depth()) + std::distance(list.begin(), it);
+		auto element_end(uint8_t dd)    {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GUTIL_ASSERT(is_current());
+			GUTIL_ASSERT(dd<=max_depth);
+			return sorter.end(static_cast<int>(dd));
 		}
-		else if (is_color_sorted()) {
-			return find_colored_element(el);
-		}
-		else {
-			auto it = std::find(list.begin(), list.end(), el);
-			if (it==list.end()) {return uint64_t(-1);}
-			return n_elements_below(el.depth()) + std::distance(list.begin(), it);
-		}
-	}
-
-	template<uint64_t MAX_DEPTH>
-	uint64_t UnstructuredVoxelMesh<MAX_DEPTH>::find_colored_element(const VoxelElement el) const {
-		assert(is_color_sorted());
-		auto block = color_block(el.depth(), el.color());
-		auto it = std::lower_bound(block.begin(), block.end(), el);
-		if (it == block.end() || *it != el) {return uint64_t(-1);}
-		return n_elements_below(el.depth()) + color_block_index[el.depth()][el.color()] + std::distance(block.begin(), it);
-	}
-
-	template<uint64_t MAX_DEPTH>
-	typename UnstructuredVoxelMesh<MAX_DEPTH>::CIterator UnstructuredVoxelMesh<MAX_DEPTH>::get_element(const VoxelElement el) const {
-		//get the actual stored element (including color data) given it's location in the hypothetical mesh
-		//return the defualt (does not exist) element if the element is not active
-		const uint64_t idx = find_element(el);
-		if (idx != uint64_t(-1)) {return celement(idx);}
-		return cend();
-	}
-
-	template<uint64_t MAX_DEPTH>
-	typename UnstructuredVoxelMesh<MAX_DEPTH>::Iterator UnstructuredVoxelMesh<MAX_DEPTH>::get_element(const VoxelElement el) {
-		//get the actual stored element (including color data) given it's location in the hypothetical mesh
-		//return the defualt (does not exist) element if the element is not active
-		const uint64_t idx = find_element(el);
-		if (idx != uint64_t(-1)) {return element(idx);}
-		return end();
-	}
-
-	template<uint64_t MAX_DEPTH>
-	template<typename Action>
-	void UnstructuredVoxelMesh<MAX_DEPTH>::for_each_active_element_color_omp(Action&& action) const requires OPENMP {
-		assert(is_colored());
-		assert(is_color_sorted());
-		//process each color up to n_colors
-		for (uint64_t clr=0; clr<n_colors(); ++clr) {
-			for_each_active_element_color_omp(clr, std::forward<Action>(action));
-		}
-	}
-
-	template<uint64_t MAX_DEPTH>
-	template<typename Action>
-	void UnstructuredVoxelMesh<MAX_DEPTH>::for_each_active_element_color_omp(const uint64_t clr, Action&& action) const requires OPENMP {
-		assert(is_colored());
-		assert(is_color_sorted());
-		assert(clr<n_colors());
-
-		//process each color block per depth
-		#pragma omp parallel if(!omp_in_parallel())
-		{
-			for (uint64_t dd=0; dd<=MAX_DEPTH; ++dd) {
-				const auto block = color_block(dd, clr);
-				const uint64_t N = block.size();
-				#pragma omp for schedule(static, 512)
-				for (uint64_t i=0; i<N; ++i) {
-					action(block[i]);
-				}
-			}
-		}
-	}
-
-	template<uint64_t MAX_DEPTH> //TODO: add a predicate for activation
-	void UnstructuredVoxelMesh<MAX_DEPTH>::process_requests() {
-		if (request_active.empty() && request_deactive.empty()) {return;}
-
-		//if we change the structure, we will have to re-compute vertices
-		vertices.clear();
-		_vertices_found_ = false;
-		_sort_by_index_  = false;
-		_sort_by_color_  = false;
-
-		//clean up request lists
-		std::sort(request_active.begin(), request_active.end());
-		auto last = std::unique(request_active.begin(), request_active.end());
-		request_active.erase(last, request_active.end());
-		std::erase_if(request_active, [&](VoxelElement el){return is_active(el);});
-
-		std::sort(request_deactive.begin(), request_deactive.end());
-		last = std::unique(request_deactive.begin(), request_deactive.end());
-		request_deactive.erase(last, request_deactive.end());
-		std::erase_if(request_deactive, [&](VoxelElement el){return !is_active(el);});
-
-		//update the bitset
-		for (VoxelElement el : request_active) {active_elem->set(el.linear_index(),true);}
-		for (VoxelElement el : request_deactive) {active_elem->set(el.linear_index(),false);}
-
-		//add the requested elements
-		//TODO: the elements to insert are sorted in blocks by depth (lowest to highest)
-		//insert each block at once.
-		for (VoxelElement el : request_active) {
-			elements[el.depth()].push_back(el);
-		}
-		request_active.clear();
-
-		//to remove elements, the mesh must be sorted by index
-		sort_by_index();
-
-		GEOVOX_OMP(parallel for)
-		for (uint64_t dd=0; dd<MAX_DEPTH; ++dd) {
-			const VoxelElement first_element{dd,0};
-			const VoxelElement last_element{dd+1,0};
-			auto rem_begin = std::lower_bound(request_deactive.begin(), request_deactive.end(), first_element);
-			auto rem_end   = std::lower_bound(request_deactive.begin(), request_deactive.end(), last_element);
-			
-			if (rem_begin==rem_end) {continue;}
-
-			auto& list = elements[dd];
-			std::vector<VoxelElement> new_list;
-			new_list.reserve(list.size());
-			std::set_difference(list.begin(), list.end(), rem_begin, rem_end, std::back_inserter(new_list));
-			list = std::move(new_list);
-		}
-		request_deactive.clear();
-
-		make_disjoint();
-	}
-
-	template<uint64_t MAX_DEPTH> //TODO: add a predicate for activation
-	void UnstructuredVoxelMesh<MAX_DEPTH>::make_disjoint() {
-		for (uint64_t dd=0; dd<MAX_DEPTH; ++dd) {
-			const auto& list = elements[dd];
-			for (const VoxelElement el : list) {
-				const auto children = el.children();
-				if (is_any_active(children)) {
-					deactivate(el);
-					for (const auto child : children) {
-						activate(child);
-					}
-				}
-			}
-		}
-
-		//the process_requests -> make_disjoint may recurse one or two times.
-		process_requests();
-	}
-
-	template<uint64_t MAX_DEPTH>
-	template<typename Predicate>
-	void UnstructuredVoxelMesh<MAX_DEPTH>::remove_elements(Predicate&& pred) const requires (!OPENMP) {
-		auto action = [&](VoxelElement el) {if (pred(el)) {deactivate(el);}};
-		for_each_active_element(action);
-	}
-
-	template<uint64_t MAX_DEPTH>
-	template<typename Predicate>
-	void UnstructuredVoxelMesh<MAX_DEPTH>::remove_elements(Predicate&& pred) const requires (OPENMP) {
-		const uint64_t omp_threads = omp_get_max_threads();
-		std::vector<std::vector<VoxelElement>> remove_lists(omp_threads);
-		auto action = [&](VoxelElement el) {if (pred(el)) {remove_lists[omp_get_thread_num()].push_back(el);}};
-		for_each_active_element_omp(action);
-		for (auto& list : remove_lists) {deactivate(list);}
-	}
-
-	template<uint64_t MAX_DEPTH>
-	template<typename Action>
-	void UnstructuredVoxelMesh<MAX_DEPTH>::for_each_active_element(Action&& action) {
-		for (Iterator it=begin(); it!=end(); ++it){
-			action(*it);
-		}
-	}
-
-	template<uint64_t MAX_DEPTH>
-	template<typename Action>
-	void UnstructuredVoxelMesh<MAX_DEPTH>::for_each_active_element(Action&& action) const {
-		for (CIterator it=cbegin(); it!=cend(); ++it){
-			action(*it);
-		}
-	}
-
-	template<uint64_t MAX_DEPTH>
-	template<typename Action>
-	void UnstructuredVoxelMesh<MAX_DEPTH>::for_each_active_element_omp(Action&& action) requires OPENMP {
-		const uint64_t N_ELS      = n_elements();
-		const uint64_t CHUNK_SIZE = 512; //number of elements to process at once
 		
-		#pragma omp parallel for schedule(static)
-		for (uint64_t start=0; start<N_ELS; start+=CHUNK_SIZE)
-		{
-			const uint64_t end = std::min(start+CHUNK_SIZE, N_ELS);
-			Iterator it = element(start);
-			for (uint64_t i=start; i<end; ++i) {
-				action(*it);
-				++it;
-			}
+
+		/////////////////////////////////////////////////////////////////////////////////////////////////
+		/// Iterators for vertex access
+		/////////////////////////////////////////////////////////////////////////////////////////////////
+		auto vertex_begin() 			 const {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GUTIL_ASSERT(is_current());
+			return tracked_vertices.cbegin();
 		}
-	}
-
-	template<uint64_t MAX_DEPTH>
-	template<typename Action>
-	void UnstructuredVoxelMesh<MAX_DEPTH>::for_each_active_element_omp(Action&& action) const requires OPENMP {
-		const uint64_t N_ELS      = n_elements();
-		const uint64_t CHUNK_SIZE = 512; //number of elements to process at once
-		
-		#pragma omp parallel for schedule(static)
-		for (uint64_t start=0; start<N_ELS; start+=CHUNK_SIZE)
-		{
-			const uint64_t end = std::min(start+CHUNK_SIZE, N_ELS);
-			CIterator it = celement(start);
-			for (uint64_t i=start; i<end; ++i) {
-				action(*it);
-				++it;
-			}
+		auto vertex_end()   			 const {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GUTIL_ASSERT(is_current());
+			return tracked_vertices.cend();
 		}
-	}
-
-
-	template<uint64_t MAX_DEPTH>
-	void UnstructuredVoxelMesh<MAX_DEPTH>::set_depth(const uint64_t dd) {
-		clear();
-
-		const uint64_t N = uint64_t{1}<<(3*dd); //2^dd elements per side, 3d array
-		elements[dd].resize(N); 
-
-		#pragma omp simd
-		for (uint64_t i=0; i<N; ++i) {
-			elements[dd][i] = VoxelElement{dd,i};
+		auto vertex_begin(uint64_t dd)  const {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GUTIL_ASSERT(is_current());
+			GUTIL_ASSERT(dd<=max_depth);
+			return vertex_sorter.begin(static_cast<int>(dd));
+		}
+		auto vertex_end(uint64_t dd)    const {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GUTIL_ASSERT(is_current());
+			GUTIL_ASSERT(dd<=max_depth);
+			return vertex_sorter.end(static_cast<int>(dd));
 		}
 
-		set_bitset_active(VoxelElement::depth_linear_start(dd), VoxelElement::depth_linear_start(dd+1));
-	}
-
-
-	template<uint64_t MAX_DEPTH>
-	void UnstructuredVoxelMesh<MAX_DEPTH>::sort_by_index() {
-		GEOVOX_OMP(parallel for)
-		for (uint64_t k=0; k<=MAX_DEPTH; ++k) {
-			auto& list = elements[k];
-			std::sort(list.begin(), list.end(), compare_index);
+		auto vertex_begin() 			 {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GUTIL_ASSERT(is_current());
+			return tracked_vertices.begin();
 		}
-
-		_sort_by_index_ = true;
-		_sort_by_color_ = false;
-	}
-
-	template<uint64_t MAX_DEPTH>
-	void UnstructuredVoxelMesh<MAX_DEPTH>::sort_by_color() {
-		assert(is_colored() && "call color_mesh before sorting by color");
-		if(is_color_sorted()) {return;}
-
-		//sort by color
-		uint64_t max_color = 0;
-		#ifdef _OPENMP
-		#pragma omp parallel for reduction(max:max_color)
-		#endif
-		for (uint64_t k=0; k<=MAX_DEPTH; ++k) {
-			auto& list = elements[k];
-			std::sort(list.begin(), list.end(), compare_color);
-			if (!list.empty()) {
-				max_color = std::max(max_color, list.back().color());
-			}
+		auto vertex_end()   			 {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GUTIL_ASSERT(is_current());
+			return tracked_vertices.end();
 		}
-
-		//update convenient data members
-		_sort_by_index_ = false;
-		_sort_by_color_ = true;
-		_n_colors_      = max_color + 1;
-
-		//set color boundaries
-		GEOVOX_OMP(parallel for)
-		for (uint64_t k=0; k<=MAX_DEPTH; ++k) {
-			const auto& list = elements[k];
-			auto& clr_block = color_block_index[k];
-
-			clr_block.assign(_n_colors_+1,0);
-			uint64_t clr = 0;
-			for (uint64_t idx=0; idx<list.size() && clr<=_n_colors_; ++idx) {
-				const uint64_t el_color = list[idx].color();
-				while (clr <= el_color) {
-					clr_block[clr] = idx;
-					++clr;
-				}
-			}
-
-			//all color blocks were found, the rest are empty
-			std::fill(clr_block.begin()+clr, clr_block.end(), list.size());
+		auto vertex_begin(uint64_t dd)  {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GUTIL_ASSERT(is_current());
+			GUTIL_ASSERT(dd<=max_depth);
+			return vertex_sorter.begin(static_cast<int>(dd));
 		}
-	}
-
-	template<uint64_t MAX_DEPTH>
-	void UnstructuredVoxelMesh<MAX_DEPTH>::color_by_index() {
-		//assign a color 0-7 based on the parity of i,j,k
-		//if the mesh elements are disjoint, this guarantees that no two elements
-		//with the same color will intersect at their boundaries.
-		for (uint64_t dd=0; dd<=MAX_DEPTH; ++dd) {
-			#pragma omp simd
-			for (uint64_t i=0; i<elements[dd].size(); ++i) {
-				VoxelElement& el = elements[dd][i];
-				const uint64_t clr = (el.depth()*8) + ((el.i()&1) | ((el.j()&1)<<1) | ((el.k()&1)<<2));
-				el.set_color(clr);
-			}
-		}
-		_colored_  = true;
-	}
-
-	template<uint64_t MAX_DEPTH>
-	void UnstructuredVoxelMesh<MAX_DEPTH>::collect_neighbors(std::vector<VoxelElement>& nbrs, const VoxelElement el) const {
-		assert(is_active(el));
-
-		//an element is a neighbor if it is an active neighbor at the same depth
-		//or an active ancestor of any neigbor (even inactive) at that depth
-		//note that if element A is at a coarser/lower depth than element B, then A may be a neighbor of B, but B cannot be a neigbor of A
-		//so long as we color from the top to the bottom, this is ok.
-		for (VoxelElement nbr : el.neighbors()) {
-			if (is_active(nbr)) {
-				nbrs.push_back(nbr);
-				continue;
-			}
-
-			//see if nbr has an active ancestor
-			while (nbr.depth() > 0) {
-				nbr = nbr.parent();
-				if (is_active(nbr)) {
-					nbrs.push_back(nbr);
-					break;
-				}
-			}
-		}
-	}
-
-	template<uint64_t MAX_DEPTH>
-	void UnstructuredVoxelMesh<MAX_DEPTH>::collect_vertices() const {
-		vertices.clear();
-		for (const VoxelElement el : *this) {
-			for (VoxelVertex vtx : el.vertices()) {
-				const VoxelVertex r_vtx = vtx.reduced_key();
-				vertices.emplace_back(r_vtx);
-			}
-		}
-		std::sort(vertices.begin(), vertices.end());
-		auto last = std::unique(vertices.begin(), vertices.end());
-		vertices.erase(last, vertices.end());
-		_vertices_found_ = true;
-	}
-
-	template<uint64_t MAX_DEPTH>
-	template<typename Key_t, typename Action, typename Predicate>
-	void UnstructuredVoxelMesh<MAX_DEPTH>::for_each_depth_impl_omp(const uint64_t depth, Action&& action, Predicate&& pred) const 
-				requires (MeshFeatureType<Key_t,Mesh_t> && OPENMP) {
-		const uint64_t start = Key_t::depth_linear_start(depth);
-		const uint64_t end   = Key_t::depth_linear_start(depth+1);
-		const uint64_t n     = end - start;
-		const uint64_t chunk = 512;
-		const uint64_t n_chk = (n+chunk-1) / chunk;
-
-		//each thread gets one contiguous sequence of chunks.
-		//for example, thread 0 may get chunks [0,5), thread 1 chunks [5,10), and thread 2 chunks [10,12)
-		//with the size of each range of chunks split evenly with the remainder sent to the last thread.
-		//action(key,0) will always be called on the lowest index features and action(key,1) the next lowest block, and so on.
-		#pragma omp parallel for schedule(static)
-		for (uint64_t c=0; c<n_chk; ++c) {
-			const int tid = omp_get_thread_num();
-			const uint64_t c_start = start + c*chunk;
-			const uint64_t c_end   = std::min(c_start+chunk, end);
-			
-			Key_t key(depth, c_start - start);
-			for (uint64_t idx=c_start; idx<c_end; ++idx, ++key) {
-				assert(key.linear_index() == idx);
-				if constexpr (!NULLPTR_T<Predicate>) {
-					if (!pred(key)) {
-						continue;
-					}
-				}
-				//if the action can accept the thread id, pass that along
-				if constexpr (std::is_invocable_v<Action, Key_t, int>) {
-					action(key, tid);
-				}
-				else {
-					action(key);
-				}
-			}
-		}
-	}
-	
-	template<uint64_t MAX_DEPTH>
-	template<typename Key_t, typename Action, typename Predicate> 
-	void UnstructuredVoxelMesh<MAX_DEPTH>::for_each_depth_impl(const uint64_t depth, Action&& action, Predicate&& pred) const
-				requires (MeshFeatureType<Key_t,Mesh_t>) {
-		const uint64_t start = Key_t::depth_linear_start(depth);
-		const uint64_t end   = Key_t::depth_linear_start(depth+1);
-		Key_t key(depth,0); //element/vertex/face object (acts as an iterator)
-
-		for (uint64_t idx=start; idx<end; ++idx, ++key) {
-			assert(key.linear_index() == idx);
-			if constexpr (!NULLPTR_T<Predicate>) {
-				if (!pred(key)) {
-					continue;
-				}
-			}
-			action(key);
-		}
-	}
-
-	template<uint64_t MAX_DEPTH>
-	void UnstructuredVoxelMesh<MAX_DEPTH>::set_bitset_active(const uint64_t start, const uint64_t end) {
-		assert(start<end);
-		assert(end<TOTAL_POSSIBLE_ELEMENTS);
-
-		for (uint64_t idx = start; idx<end; ++idx) {
-			active_elem->set(idx);
-		}
-	}
-
-	//Implement the Iterator class over all elements
-	template<uint64_t MAX_DEPTH, typename Element_t, bool CONST_FLAG>
-	struct IteratorBase	{
-		//necessary aliases for the standard library
-		using iterator_category = std::forward_iterator_tag;
-		using value_type		= Element_t;
-		using difference_type	= std::ptrdiff_t;
-		using pointer			= std::conditional_t<CONST_FLAG, Element_t const*, Element_t*>;
-		using reference			= std::conditional_t<CONST_FLAG, const Element_t&, Element_t&>;
-
-		//convenient aliases
-		using container_type	= std::array<std::vector<Element_t>,MAX_DEPTH+1>;
-		using container_ref		= std::conditional_t<CONST_FLAG, const container_type&, container_type&>;
-		using container_ptr 	= std::conditional_t<CONST_FLAG, container_type const*, container_type*>;
-
-		//current position: elements[depth][idx]
-		container_ptr elements;
-		uint64_t depth;
-		uint64_t idx;
-		
-		//constructor
-		IteratorBase(container_ref els, uint64_t dd, uint64_t ii) : elements(&els), depth(dd), idx(ii) {advance_to_valid();}
-		IteratorBase(container_ref els, uint64_t n) : elements(&els), depth(0), idx(0) {(*this)+=n; advance_to_valid();}
-
-		//implicit conversion from non-const to const
-		IteratorBase(const IteratorBase<MAX_DEPTH,Element_t,false>& it) requires (CONST_FLAG) 
-			: elements(it.elements), depth(it.depth), idx(it.idx) {}
-
-		//begin/end iterators
-		static IteratorBase end(container_ref els) {return IteratorBase{els, MAX_DEPTH+1, 0};}
-		static IteratorBase begin(container_ref els) {return IteratorBase{els,0,0};}
-
-		//random access operations
-		reference operator[](uint64_t n) const {return *(*this+n);}
-
-		//advance to the next valid depth/index pair (if the current is valid, they aren't changed)
-		//this should just skip over any empty depths
-		void advance_to_valid() {
-			while (depth<=MAX_DEPTH && idx>= (*elements)[depth].size()) {
-				++depth;
-				idx = 0;
-			}
-		}
-
-		uint64_t total_length() const {
-			uint64_t len=0;
-			for (const auto& list : *elements) {len+=list.size();}
-			return len;
-		}
-
-		uint64_t index() const {
-			if (depth>MAX_DEPTH) {return total_length();}
-
-			uint64_t el_idx = 0;
-			for (uint64_t dd=0; dd<depth; ++dd) {
-				el_idx += (*elements)[dd].size();
-			}
-			el_idx += idx;
-			return el_idx;
-		}
-
-		//access data
-		reference operator*() const {
-			assert(depth <= MAX_DEPTH);
-			assert(idx < (*elements)[depth].size());
-			return (*elements)[depth][idx];
-		}
-
-		pointer operator->() const {
-			assert(depth <= MAX_DEPTH);
-			assert(idx < (*elements)[depth].size());
-			return &(*elements)[depth][idx];
-		}
-
-		IteratorBase& operator++() {
-			++idx;
-			advance_to_valid();
-			return *this;
-		}
-
-		IteratorBase operator++(int) {
-			IteratorBase tmp = *this;
-			++(*this);
-			return tmp;
-		}
-
-		IteratorBase& operator+=(uint64_t n) {
-			//move to the correct depth and update the increment
-			while (n>0 && depth<=MAX_DEPTH) {
-				const uint64_t remaining_in_depth = (*elements)[depth].size() - idx;
-				if (n<remaining_in_depth) {idx += n; n=0;}
-				else {
-					n -= remaining_in_depth;
-					++depth;
-					idx = 0;
-				}
-			}
-			advance_to_valid();
-			return *this;
-		}
-
-		IteratorBase operator+(uint64_t n) const {
-			IteratorBase tmp = *this;
-			tmp+=n;
-			return tmp;
-		}
-
-		friend IteratorBase operator+(uint64_t n, const IteratorBase& it) {
-			return it+n;
-		}
-
-		IteratorBase& operator-=(uint64_t n) {
-			uint64_t flat = index();
-			assert(n<=flat);
-			*this = IteratorBase(*elements, flat-n);
-			return *this;
-		}
-
-		IteratorBase operator-(uint64_t n) const {
-			IteratorBase tmp = *this;
-			tmp-=n;
-			return tmp;
-		}
-
-		//implement ordering and comparisons
-		difference_type operator-(const IteratorBase& other) const {
-			return static_cast<difference_type>(index()) - static_cast<difference_type>(other.index());
-		}
-
-		bool operator<(const IteratorBase& other) const {return (*this - other) < 0;}
-		bool operator>(const IteratorBase& other) const {return (*this - other) > 0;}
-		bool operator<=(const IteratorBase& other) const {return (*this - other) <= 0;}
-		bool operator>=(const IteratorBase& other) const {return (*this - other) >= 0;}
-
-		bool operator==(const IteratorBase& other) const {
-			return depth==other.depth && idx==other.idx;
-		}
-
-		bool operator!=(const IteratorBase& other) const {
-			return depth!=other.depth || idx!=other.idx;
+		auto vertex_end(uint64_t dd)    {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GUTIL_ASSERT(is_current());
+			GUTIL_ASSERT(dd<=max_depth);
+			return vertex_sorter.end(static_cast<int>(dd));
 		}
 	};
 
 
+	//////////////////////////////////////////////////////////////////////////////////////////////////////
+	/// Implementations
+	//////////////////////////////////////////////////////////////////////////////////////////////////////
+	template<typename T>
+	void UnstructuredVoxelMesh<T>::process_unrefine() noexcept {
+		GUTIL_ASSERT(is_current());
+		GUTIL_TIMER("process_unrefine : ", n_elements(), " current elements");
+		{
+			GV_BEGIN_UNSTABLE
+			is_vertices_collected_.store(false);
+			std::lock_guard<std::mutex> lock(request_mutex);	//don't allow incoming requests
+			{
+				//ensure the unrefine lists don't contain duplicates
+				//additionally, add elements to unrefine so that the 2-1 refinement rule is respected
+				//note that elements marked as 'unrefine' are elements that should be activated and
+				//if they have no active descendant, the request is removed.
+				auto job = [&](uint8_t dd) {
+					BASE::sort_and_unique(request_unrefine_list[dd]);
+					//this is only a valid unrefinement target if it is not active and its depth field is greater
+					//than its own depth. The latter guarantees the former as the elements are disjoint.
+					//additionally, rather than adding cells to unrefine, we only refine cells that will still
+					//satisfy the 2-1 rule.
+					std::erase_if(request_unrefine_list[dd], [&,dd](Elem_t el) {
+						if (read_depth_field(el) <= dd) {return true;}
+						for (Elem_t c : el.children()) {
+							if (!is_active(c)) { continue; }
+							for (Elem_t nbr : neighbors(c)) {
+								if (nbr.depth() > static_cast<uint64_t>(dd+1)) {
+									return true; //activating will break 2-1	
+								}
+							}
+						}
+						return false; //we are ok to activate
+					});
+				};
 
+				for (uint8_t dd=0; dd<=max_depth; ++dd) {
+					threads.submit(job, dd);
+				}
+				threads.wait_idle();
+			}
+			
+			
+			const int n_threads = GUTIL_OMP_TERNARY(omp_get_max_threads()/2, 1);
+			
+			//we can process in 2 parallel batches due to the 2-1 rule
+			//deactivate specified elements and its siblings at level dd,
+			//then activate its parent at level dd-1
+
+			//In order to update the depth field, track which elements were newely activated/deactivated.
+			std::vector<std::vector<std::vector<Elem_t>>> updated(n_threads);	//thread_index -> depth_index -> element_index
+			for (auto& list : updated) {list.resize(max_depth+1);}
+			{
+				auto job = [&](uint64_t dd) {
+					GUTIL_OMP(parallel num_threads(n_threads))
+					{
+						auto& list = updated[omp_get_thread_num()][dd];
+						GUTIL_OMP(for schedule(guided,512))
+						for (size_t i=0; i<request_unrefine_list[dd].size(); ++i) {
+							Elem_t el = request_unrefine_list[dd][i];
+							auto chi = el.children();
+							for (Elem_t c : chi) {set_active(c, false);}
+							set_active(el, true);
+							list.push_back(el);
+							list.insert(list.end(), chi.begin(), chi.end());
+						}
+					}
+					request_unrefine_list[dd].clear();
+				};
+
+				for (uint8_t dd=0; dd<max_depth; dd+=2) {threads.submit(job,dd);}
+				threads.wait_idle();
+
+				for (uint8_t dd=1; dd<max_depth; dd+=2) {threads.submit(job,dd);}
+				threads.wait_idle();
+			}
+
+			//join per-thread activation results
+			for (uint8_t dd=0; dd<=max_depth; ++dd) {
+				for (int tid=1; tid<n_threads; ++tid) {
+					updated[0][dd].insert(updated[0][dd].end(), 
+						std::make_move_iterator(updated[tid][dd].begin()), std::make_move_iterator(updated[tid][dd].end()));
+				}
+			}
+
+			// update depth field
+			for (int8_t dd=max_depth; dd>=0; --dd) {
+				for (Elem_t el : updated[0][dd]) {
+					propagate_depth_field(el);
+				}
+			}
+
+			GV_END_UNSTABLE
+		}
+		collect_elements();
+	}
+
+	template<typename T>
+	template<typename Predicate>
+	void UnstructuredVoxelMesh<T>::process_refine(Predicate&& pred) noexcept {
+		GUTIL_ASSERT(is_current());
+		GUTIL_TIMER("process_refine : ", n_elements(), " current elements");
+		{
+			GV_BEGIN_UNSTABLE
+			is_vertices_collected_.store(false);
+			std::lock_guard<std::mutex> lock(request_mutex);	//don't allow incoming requests
+
+			//ensure the refine lists don't contain duplicates
+			//additionally, add elements to refine so that the 2-1 refinement rule is respected
+			//note that elements at the max_depth cannot be refined and elements at depth 0
+			//cannot have neighbors that are 'too coarse'
+			for (uint8_t dd=max_depth-1; dd>=1; --dd) {
+				BASE::sort_and_unique(request_refine_list[dd]);
+				for (Elem_t el : request_refine_list[dd]) {
+					for (Elem_t nbr : neighbors(el)) {
+						if (nbr.depth_u8() == dd-1) {
+							request_refine_list[dd-1].push_back(nbr);
+						}
+					}
+				}
+			}
+			BASE::sort_and_unique(request_refine_list[0]);
+
+			//we can process in 2 parallel batches due to the 2-1 rule
+			//deactivate specified elements at level dd,
+			//then activate its children that satisfy the predicate at level dd+1
+			//
+			//In order to update the depth field, track which elements were newely activated/deactivated.
+			const int n_threads = GUTIL_OMP_TERNARY(omp_get_max_threads()/2, 1);
+			std::vector<std::vector<std::vector<Elem_t>>> updated(n_threads);
+			for (auto& list : updated) {list.resize(max_depth+1);}
+			auto job = [&](uint8_t dd) {
+				GUTIL_OMP(parallel num_threads(n_threads))
+				{	
+					const int tid = GUTIL_OMP_TERNARY(omp_get_thread_num(),1);
+
+					auto& list_d0 = updated[tid][dd];
+					auto& list_d1 = updated[tid][dd+1];
+					GUTIL_OMP(for schedule(guided,512))
+					for (size_t i=0; i<request_refine_list[dd].size(); ++i) {
+						Elem_t el = request_refine_list[dd][i];
+						set_active(el, false);
+						list_d0.push_back(el);
+
+						if constexpr (NULLPTR_T<Predicate>) {
+							auto chi = el.children();
+							for (Elem_t c : chi) {set_active(c, true);}
+							list_d1.insert(list_d1.end(), chi.begin(), chi.end());
+						}
+						else {
+							for (Elem_t chi : el.children()) {
+								if (pred(chi)) {
+									set_active(chi,true);
+									list_d1.push_back(chi);
+								}
+							}
+						}
+					}
+				}
+				request_refine_list[dd].clear();
+			};
+
+			for (uint8_t dd=0; dd<max_depth; dd+=2) {threads.submit(job, dd);}
+			threads.wait_idle();
+
+			for (uint8_t dd=1; dd<max_depth; dd+=2) {threads.submit(job,dd);}
+			threads.wait_idle();
+
+			//join per-thread activation results
+			for (uint8_t dd=0; dd<=max_depth; ++dd) {
+				for (int tid=1; tid<n_threads; ++tid) {
+					updated[0][dd].insert(updated[0][dd].end(), 
+						std::make_move_iterator(updated[tid][dd].begin()), std::make_move_iterator(updated[tid][dd].end()));
+				}
+			}
+
+			// update depth field
+			for (int8_t dd=max_depth; dd>=0; --dd) {
+				for (Elem_t el : updated[0][dd]) {
+					propagate_depth_field(el);
+				}
+			}
+
+		GV_END_UNSTABLE
+		}
+		collect_elements();
+	}
+
+	template<typename T>
+	void UnstructuredVoxelMesh<T>::synchronize_depth_field() noexcept {
+		GV_ASSERT_ACTIVE_KEYS_UNSTABLE_STATE
+		GUTIL_TIMER("synchronize_depth_field : ", max_possible_elements, " elements to check");
+
+		auto action = [&](auto idx, auto dd) {
+			if (dd==max_depth) {
+				set_depth_field(idx, is_active(idx) ? dd : 0);
+				return;
+			}
+
+			if (is_active(idx)) {set_depth_field(idx,dd);}
+			else {
+				uint8_t cd = 0;
+				for (Elem_t c : Elem_t{static_cast<uint64_t>(dd),idx}.children()) {
+					cd = std::max(cd, read_depth_field(c));
+				}
+				set_depth_field(idx,cd);
+			}
+		};
+
+		for (uint8_t dd=max_depth+1; dd>0; --dd) {
+			for_each_index_simd(action, dd-1);
+		}
+	}
+
+	template<typename T>
+	void UnstructuredVoxelMesh<T>::propagate_depth_field(Elem_t el) noexcept {
+		GV_ASSERT_ACTIVE_KEYS_UNSTABLE_STATE
+		const bool now_active = is_active_unstable(el);
+		const uint8_t dd = el.depth_u8();
+		uint8_t new_depth = now_active ? dd : 0;
+		if (!now_active) {
+			for (Elem_t c : el.children()) {
+				if (c.exists() && c.depth()<=max_depth) {
+					new_depth = std::max(new_depth, read_depth_field_unstable(c));
+				}
+			}
+		}
+		set_depth_field(el, new_depth);
+
+		Elem_t cur = el;
+		while (cur.depth() > 0) {
+			Elem_t parent = cur.parent();
+			uint8_t pd = parent.depth_u8();
+			uint8_t old_val = read_depth_field_unstable(parent);
+			uint8_t new_val = is_active_unstable(parent) ? pd : 0;
+			if (!is_active_unstable(parent)) {
+				for (Elem_t c : parent.children()) { new_val = std::max(new_val, read_depth_field_unstable(c)); }
+			}
+			if (new_val == old_val) break;   // nothing above this can change either
+			set_depth_field(parent, new_val);
+			cur = parent;
+		}
+	}
 }
+	
+
+
+
+
+
+
+
+
+

@@ -113,9 +113,9 @@ namespace Keys {
 		/////////////////////////////////////////////////////////////////////////
 		/// Aliases and constants
 		/////////////////////////////////////////////////////////////////////////
-		static constexpr uint8_t ACTIVE_BIT 			= 0b00000001;	//the mask that all classes must agree is the active marker
-		static constexpr uint8_t FREE_BITS 	            = 0b11111110;	//each class may use these themselves
-
+		static constexpr uint8_t  	ACTIVE_BIT 			= 0b00000001;			//the mask that all classes must agree is the active marker
+		static constexpr uint8_t 	FREE_BITS 	        = 0b11111110;			//each class may use these themselves
+		static constexpr uint64_t 	KEY_MAX_DEPTH		= Mesh3D::MAX_DEPTH;	//the maximum depth that the key type can support
 
 		/////////////////////////////////////////////////////////////////////////
 		/// Storage. Store a vector<uint8_t> for O(1) active queries.
@@ -474,7 +474,7 @@ namespace Keys {
 
 		GUTIL_DECLARE_SIMD()
 		template<uint8_t BIT_MASK> requires (std::popcount(BIT_MASK)==1)
-		[[nodiscard]] bool set_bit_compare_exchange(uint64_t idx, bool val) const noexcept {
+		[[nodiscard]] bool set_bit_check_changed(uint64_t idx, bool val) const noexcept {
 			GV_ASSERT_KEY_MASK_UNSTABLE_STATE
 			//set the specified bit and return true if it was changed
 			uint8_t& byte  = get_mask_ref(idx);
@@ -513,8 +513,8 @@ namespace Keys {
 		}
 
 		GUTIL_DECLARE_SIMD()
-		[[nodiscard]] bool set_active_compare_exchange(uint64_t idx, bool val) noexcept {
-			return set_bit_compare_exchange<ACTIVE_BIT>(idx, val);
+		[[nodiscard]] bool set_active_check_changed(uint64_t idx, bool val) noexcept {
+			return set_bit_check_changed<ACTIVE_BIT>(idx, val);
 		}
 
 
@@ -526,7 +526,7 @@ namespace Keys {
 		/////////////////////////////////////////////////////////////////////////
 		void conditional_bitwise_and_all_masks(uint8_t condition_mask, uint8_t mask) const noexcept {
 			GV_ASSERT_KEY_MASK_UNSTABLE_STATE
-			dispatch_parallel_key_mask_write( 
+			dispatch_parallel_key_mask_const( 
 				[](std::span<uint8_t> mask_span, uint8_t condition_mask, uint8_t mask) {
 					GUTIL_SIMD()
 					for (size_t i=0; i<mask_span.size(); ++i) {
@@ -538,7 +538,7 @@ namespace Keys {
 
 		void conditional_bitwise_or_all_masks(uint8_t condition_mask, uint8_t mask) const noexcept {
 			GV_ASSERT_KEY_MASK_UNSTABLE_STATE
-			dispatch_parallel_key_mask_write( 
+			dispatch_parallel_key_mask_const( 
 				[](std::span<uint8_t> mask_span, uint8_t condition_mask, uint8_t mask) {
 					GUTIL_SIMD()
 					for (size_t i=0; i<mask_span.size(); ++i) {
@@ -550,7 +550,7 @@ namespace Keys {
 
 		void unconditional_bitwise_and_all_masks(uint8_t mask) const noexcept {
 			GV_ASSERT_KEY_MASK_UNSTABLE_STATE
-			dispatch_parallel_key_mask_write( 
+			dispatch_parallel_key_mask_const( 
 				[](std::span<uint8_t> mask_span, uint8_t mask) {
 					GUTIL_SIMD()
 					for (size_t i=0; i<mask_span.size(); ++i) {
@@ -562,7 +562,7 @@ namespace Keys {
 
 		void unconditional_bitwise_or_all_masks(uint8_t mask) const noexcept {
 			GV_ASSERT_KEY_MASK_UNSTABLE_STATE
-			dispatch_parallel_key_mask_write( 
+			dispatch_parallel_key_mask_const( 
 				[](std::span<uint8_t> mask_span, uint8_t mask) {
 					GUTIL_SIMD()
 					for (size_t i=0; i<mask_span.size(); ++i) {
@@ -571,6 +571,34 @@ namespace Keys {
 				}, mask);
 			threads.wait_idle();
 		}
+
+
+		/////////////////////////////////////////////////////////////////////////
+		/// Deduplicating is standard and usefull
+		/////////////////////////////////////////////////////////////////////////
+		template<typename T, typename Less_t=std::nullptr_t, typename Equal_t=std::nullptr_t>
+		static constexpr void sort_and_unique(std::vector<T>& list, 
+					Less_t&& less=nullptr, Equal_t&& equal=nullptr) noexcept {
+			if constexpr (std::same_as<Less_t,std::nullptr_t>) {
+				std::sort(list.begin(), list.end());
+			}
+			else {
+				static_assert(std::is_invocable_r_v<bool,Less_t,const T&, const T&>);
+				std::sort(list.begin(), list.end(), std::forward<Less_t>(less));
+			}
+
+			if constexpr (std::same_as<Equal_t,std::nullptr_t>) {
+				auto last = std::unique(list.begin(), list.end());
+				list.erase(last, list.end());
+			}
+			else {
+				static_assert(std::is_invocable_r_v<bool,Equal_t,const T&, const T&>);
+				auto last = std::unique(list.begin(), list.end(), std::forward<Equal_t>(equal));
+				list.erase(last, list.end());
+			}
+		}
+
+
 
 		/////////////////////////////////////////////////////////////////////////
 		/// A few methods to help with viewing the active list as a particular type
@@ -649,8 +677,7 @@ namespace Keys {
 		/// Ideally, you can use the full number of hardware threads and use SIMD within each task.
 		/////////////////////////////////////////////////////////////////////////
 		template<typename Task, typename...Args>
-		void dispatch_parallel_active_keys_write(Task&& action, Args&&... args) const noexcept {
-			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+		void dispatch_parallel_active_keys(Task&& action, Args&&... args) noexcept {
 			GUTIL_ASSERT(is_current() && "the active keys are stale");
 			GUTIL_ASSERT(active_keys.size()>0 && "HybridKeyTracker - no keys found. Did you forget to collect them?");
 			
@@ -682,8 +709,7 @@ namespace Keys {
 		}
 
 		template<typename Task, typename...Args>
-		void dispatch_parallel_active_keys_stable(Task&& action, Args&&... args) const noexcept {
-			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+		void dispatch_parallel_active_keys_const(Task&& action, Args&&... args) const noexcept {
 			GUTIL_ASSERT(is_current() && "the active keys are stale");
 			GUTIL_ASSERT(active_keys.size()>0 && "HybridKeyTracker - no keys found. Did you forget to collect them?");
 			
@@ -700,11 +726,11 @@ namespace Keys {
 				const size_t end = (tid==n_threads-1) ? n_keys : start + dof_per_thread;
 
 				if constexpr (std::is_invocable_r_v<void, Task, std::span<uint64_t>, int, Args...>) {
-					std::span<uint64_t> list(active_keys.begin()+start, active_keys.begin()+end);
+					std::span<const uint64_t> list(active_keys.begin()+start, active_keys.begin()+end);
 					threads.submit(action, list, tid, std::forward<Args>(args)...);
 				}
 				else if constexpr (std::is_invocable_r_v<void, Task, std::span<uint64_t>, Args...>) {
-					std::span<uint64_t> list(active_keys.begin()+start, active_keys.begin()+end);
+					std::span<const uint64_t> list(active_keys.begin()+start, active_keys.begin()+end);
 					threads.submit(action, list, std::forward<Args>(args)...);
 				}
 				else {
@@ -715,8 +741,7 @@ namespace Keys {
 		}
 
 		template<typename Task, typename...Args>
-		void dispatch_parallel_key_mask_write(Task&& action, Args&&... args) const noexcept {
-			GV_ASSERT_KEY_MASK_UNSTABLE_STATE
+		void dispatch_parallel_key_mask(Task&& action, Args&&... args) noexcept {
 			GUTIL_ASSERT(key_mask.size()>0 && "HybridKeyTracker - key_mask is not initialized");
 			
 			//the first argument of action must be a span of DOFs
@@ -746,11 +771,9 @@ namespace Keys {
 		}
 
 		template<typename Task, typename...Args>
-		void dispatch_parallel_key_mask_stable(Task&& action, Args&&... args) const noexcept {
-			GV_ASSERT_KEY_MASK_STABLE_STATE
+		void dispatch_parallel_key_mask_const(Task&& action, Args&&... args) const noexcept {
 			GUTIL_ASSERT(key_mask.size()>0 && "HybridKeyTracker - key_mask is not initialized");
 			
-
 			//the first argument of action must be a span of DOFs
 			//if the thread number is a required argument, it must be the second argument.
 			//note that the gutil::ThreadPool with n_threads==0 will have the submitting thread run
@@ -768,6 +791,14 @@ namespace Keys {
 				}
 				else if constexpr (std::is_invocable_r_v<void, Task, std::span<const uint8_t>, Args...>) {
 					std::span<const uint8_t> list(key_mask.begin()+start, key_mask.begin()+end);
+					threads.submit(action, list, std::forward<Args>(args)...);
+				}
+				else if constexpr (std::is_invocable_r_v<void, Task, std::span<uint8_t>, int, Args...>) {
+					std::span<uint8_t> list(key_mask.begin()+start, key_mask.begin()+end);
+					threads.submit(action, list, tid, std::forward<Args>(args)...);
+				}
+				else if constexpr (std::is_invocable_r_v<void, Task, std::span<uint8_t>, Args...>) {
+					std::span<uint8_t> list(key_mask.begin()+start, key_mask.begin()+end);
 					threads.submit(action, list, std::forward<Args>(args)...);
 				}
 				else {
@@ -801,7 +832,7 @@ namespace Keys {
 				}
 			};
 
-			dispatch_parallel_key_mask_write(job);
+			dispatch_parallel_key_mask(job);
 			active_keys.clear();
 			
 			threads.wait_idle();
@@ -826,21 +857,24 @@ namespace Keys {
 			return Mesh3D::IndexPairity_SIMD(key);
 		}
 
-		template<typename BinFun = decltype(&HybridKeyTracker::default_key_bin)>
-		void sort_active_keys(int N=8, BinFun&& fun = &HybridKeyTracker::default_key_bin) noexcept {
+		template<typename BinFun = decltype(&HybridKeyTracker::default_key_bin), typename Less_t=std::nullptr_t>
+		void sort_active_keys(int N=8, BinFun&& fun = &HybridKeyTracker::default_key_bin, Less_t&& less=nullptr) noexcept {
 			GV_BEGIN_ACTIVE_UNSTABLE
 
 			GUTIL_ASSERT(is_collected_ && "The keys were not collected. Call collect_active_keys<KeyType>() to collect them.");
 			GUTIL_TIMER("sorting ", active_keys.size(), " keys into ", N, " bins");
-			sorter = sort_keys(std::span<uint64_t>{active_keys}, N, std::forward<BinFun>(fun));
+			sorter = sort_keys(std::span<uint64_t>{active_keys}, N, std::forward<BinFun>(fun), &threads, std::forward<Less_t>(less));
 			is_sorted_.store(true);
 
 			GV_END_ACTIVE_UNSTABLE
 		}
 
-		template<typename BinFun, typename T> requires( std::is_invocable_r_v<int, BinFun, T>)
+		template<typename BinFun, typename T, typename Less_t=std::nullptr_t> requires( std::is_invocable_r_v<int, BinFun, T>)
 		[[maybe_unused]] gutil::BinSort<T> static sort_keys(std::span<T> list, int N, BinFun&& fun, 
-																		gutil::ThreadPool* tp=nullptr) noexcept {
+														gutil::ThreadPool* tp=nullptr, Less_t&& less=nullptr) noexcept {
+			constexpr bool USER_LESS = std::is_invocable_r_v<bool, Less_t, const T&, const T&>;
+			static_assert(USER_LESS || std::same_as<Less_t,std::nullptr_t>);
+
 			//link the current active keys to the sorter
 			gutil::BinSort<T> local_sorter{list, N};
 			GUTIL_ASSERT(local_sorter.n_bins() == N);
@@ -851,14 +885,22 @@ namespace Keys {
 
 				//sort within bins
 				for (int i=0; i<local_sorter.n_bins(); ++i) {
-					tp->submit([](auto a, auto b){std::sort(a, b);}, local_sorter.begin(i), local_sorter.end(i));
+					if constexpr (USER_LESS) {
+						tp->submit([less](auto a, auto b){std::sort(a, b, less);}, local_sorter.begin(i), local_sorter.end(i));
+					} else {
+						tp->submit([](auto a, auto b){std::sort(a, b);}, local_sorter.begin(i), local_sorter.end(i));
+					}
 				}
 				tp->wait_idle();
 			}
 			else {
 				local_sorter.sort(std::forward<BinFun>(fun));
 				for (int i=0; i<local_sorter.n_bins(); ++i) {
-					std::sort(local_sorter.begin(i), local_sorter.end(i));
+					if constexpr (USER_LESS) {
+						std::sort(local_sorter.begin(i), local_sorter.end(i), less);
+					} else {
+						std::sort(local_sorter.begin(i), local_sorter.end(i));
+					}
 				}
 			}
 

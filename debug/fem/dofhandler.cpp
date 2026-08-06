@@ -1,10 +1,9 @@
 #include "gutil.hpp"
 
 #include "simd_keys/dofs/voxelQ1/voxel_Q1_interface.hpp"
-#include "mesh/voxel_mesh_unstructured(NEW).hpp"
+#include "mesh/voxel_mesh_unstructured.hpp"
 #include "diffuse_domain/signed_distance.hpp"
 #include "fem/handlers/dofhandler.hpp"
-#include "fem/dofs/voxel_dof_Q1.hpp"
 #include "fem/handlers/coef_handler.hpp"
 
 /////////////////////////////////////////////////////////////////
@@ -32,9 +31,9 @@ using Point_t       = gutil::Point<3,double>;
 using Box_t         = gutil::Box<3,double>;
 using Sphere_t      = gutil::Sphere<3,double>;
 
-using Mesh_t        = GV::UnstructuredVoxelMesh<6>;
-using MeshVert_t    = typename Mesh_t::VoxelVertex;
-using MeshElem_t    = typename Mesh_t::VoxelElement;
+using Mesh_t        = GV::UnstructuredVoxelMesh<double>;
+using MeshVert_t    = typename Mesh_t::Vert_t;
+using MeshElem_t    = typename Mesh_t::Elem_t;
 using Assembly_t    = GV::SignedDistanceSpheres<double,GV_TEST_DOMAIN_PERIOD>;
 
 using DOF_t         = GV::Keys::DOFS::VoxelQ1<GV_TEST_DOF_PERIOD>;
@@ -45,7 +44,6 @@ using DofElem_t     = typename Handler_t::DofElem_t;
 using CoefHandler_t = GV::CoefHandler<Handler_t,double,1>;
 
 inline constexpr double DOMAIN_SIZE = GV_TEST_DOMAIN_SIZE;
-inline constexpr size_t MAX_DEPTH   = Mesh_t::MAX_DEPTH;
 inline constexpr Box_t domain{ {-DOMAIN_SIZE,-DOMAIN_SIZE,-DOMAIN_SIZE},
 							   { DOMAIN_SIZE, DOMAIN_SIZE, DOMAIN_SIZE} };
 
@@ -58,7 +56,7 @@ struct TestConfig {
 	size_t      seed         = 0;
 	double      min_r        = 0.1;
 	double      max_r        = 0.5;
-	size_t      initial_depth= MAX_DEPTH/3;
+	size_t      initial_depth= 2;
 	double      refine_tol   = 0.1;   	// signed-distance tolerance for boundary refinement
 	double      unrefine_x   = 0.5;  	// normalized-x threshold for the unrefinement demo region
 	uint8_t		max_depth    = 6;		// max depth of the mesh
@@ -122,7 +120,7 @@ Assembly_t generate_assembly(const TestConfig& cfg) {
 void setup_mesh_and_dofs(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_handler) {
 	GUTIL_TIMER("initializing mesh");
 
-	mesh.update_unstructured();
+	mesh.collect_elements();
 	handler.init_dofs();
 	handler.collect_dofs();
 
@@ -179,7 +177,7 @@ void refine_near_boundary(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_
 		GUTIL_LOG("  -> ", n_refined, " dofs refined");
 
 		mesh.process_refine();
-		mesh.update_unstructured();
+		mesh.collect_elements();
 		coef_handler.update_coefs();
 	}
 
@@ -188,11 +186,11 @@ void refine_near_boundary(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_
 	mesh.process_refine([&](MeshElem_t el) {
 		return assembly.signed_distance(mesh.geo_center(el)) < 2*cfg.refine_tol;
 	});
-	mesh.update_unstructured();
+	mesh.collect_elements();
 	coef_handler.update_coefs();
 
 	for (DOF_t dof : handler.active_dofs) {
-		if (!mesh.is_geometrically_conformal(DofVert_t{dof.key})) {
+		if (!mesh.is_conformal(DofVert_t{dof.key})) {
 			GUTIL_ERROR("\tERROR: ", dof, " is not conformal");
 		}
 	}
@@ -226,7 +224,7 @@ void unrefine_demo_region(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_
 	coef_handler.update_coefs();
 
 	for (DOF_t dof : handler.active_dofs) {
-		if (!mesh.is_geometrically_conformal(DofVert_t{dof.key})) {
+		if (!mesh.is_conformal(DofVert_t{dof.key})) {
 			GUTIL_ERROR(dof, " is not conformal");
 		}
 	}
@@ -245,14 +243,14 @@ void remove_unsupported_elements(Mesh_t& mesh, Handler_t& handler) {
 		std::vector<DOF_t> dofs;
 		std::vector<size_t> numbers;
 		handler.get_active_dofs_quasi_hierarchical(*it, dofs, numbers);
-		if (dofs.empty()) { mesh.unrefine(*it); }
+		if (dofs.empty()) { mesh.request_unrefine(*it); }
 	}
 
 	handler.collect_dofs();
 	mesh.process_unrefine();
-	mesh.update_unstructured();
+	mesh.collect_elements();
 	for (DOF_t dof : handler.active_dofs) {
-		if (!mesh.is_geometrically_conformal(DofVert_t{dof.key})) {
+		if (!mesh.is_conformal(DofVert_t{dof.key})) {
 			GUTIL_ERROR(dof, " is not conformal");
 		}
 	}
@@ -363,7 +361,9 @@ void evaluate_and_save(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_han
 void test_dof_handler(const TestConfig& cfg, const Assembly_t& assembly) {
 	GUTIL_LOG("test_dof_handler");
 
-	Mesh_t mesh(domain, cfg.initial_depth);
+	Mesh_t mesh(domain, cfg.max_depth);
+	mesh.set_depth(cfg.initial_depth);
+	
 	Handler_t handler(mesh);
 	CoefHandler_t coef_handler(handler);
 

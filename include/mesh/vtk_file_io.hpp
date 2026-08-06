@@ -126,7 +126,7 @@ namespace GV
 	void append_cell_data_field_vtk(const std::string& filename, const Mesh_t& mesh, const std::string field_name, const Lookups&... lookups) {
 		//sanity check
 		static_assert(sizeof...(lookups)>0, "no data lookup provided");
-		static_assert( ((std::same_as<typename Mesh_t::VoxelElement, typename Lookups::MeshFeature_t> || std::same_as<void, typename Lookups::MeshFeature_t>)&& ... ), "all lookups must be for mesh elements");
+		static_assert( ((std::same_as<typename Mesh_t::Elem_t, typename Lookups::MeshFeature_t> || std::same_as<void, typename Lookups::MeshFeature_t>)&& ... ), "all lookups must be for mesh elements");
 
 		//open file
 		constexpr auto mode = ASCII ? std::ios::app : (std::ios::app | std::ios::binary);
@@ -193,7 +193,7 @@ namespace GV
 	void append_point_data_field_vtk(const std::string& filename, const Mesh_t& mesh, const std::string field_name, const Lookups&... lookups) {
 		//sanity check
 		static_assert(sizeof...(lookups)>0, "no data lookup provided");
-		static_assert( ((std::same_as<typename Mesh_t::VoxelVertex, typename Lookups::MeshFeature_t> || std::same_as<void, typename Lookups::MeshFeature_t>)&& ... ), "all lookups must be for mesh vertices");
+		static_assert( ((std::same_as<typename Mesh_t::Vert_t, typename Lookups::MeshFeature_t> || std::same_as<void, typename Lookups::MeshFeature_t>)&& ... ), "all lookups must be for mesh vertices");
 
 		//open file
 		constexpr auto mode = ASCII ? std::ios::app : (std::ios::app | std::ios::binary);
