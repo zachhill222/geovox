@@ -324,6 +324,16 @@ namespace GV {
 			return IsMorton(key) ? MortonIndexPairity_SIMD(key) : CartesianIndexPairity_SIMD(key);
 		}
 
+		GUTIL_DECLARE_SIMD()
+		[[nodiscard]] inline constexpr uint64_t CartesianColor54_SIMD(uint64_t key) noexcept {
+			GUTIL_ASSERT(IsElement(key) && IsCartesian(key));
+			const uint64_t d_par = Depth(key)&1;			//low color bit
+			const uint64_t i_par = IndexI_SIMD(key)%3;		//
+			const uint64_t j_par = IndexJ_SIMD(key)%3;		//	i_par + 3*j_par + 9*k_par are the high color bits
+			const uint64_t k_par = IndexK_SIMD(key)%3;		//
+			return  ((i_par + 3*(j_par + 3*k_par)) *2) + d_par;
+		}
+
 
 
 		///////////////////////////////////////////////////////////

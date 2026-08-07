@@ -47,7 +47,7 @@ namespace GV {
 		static constexpr uint8_t ACTIVE_BIT = 0b00000001;
 		static constexpr uint8_t DEPTH_MASK = 0b00011110;
 		static constexpr uint8_t FREE_MASK  = 0b11100000;
-
+		
 		//////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Storage
 		/// Allow storing the full mask of all possible elements or just a vector of active elements.

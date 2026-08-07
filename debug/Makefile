@@ -9,7 +9,8 @@ TARGETS = $(SRC:.cpp=)
 INCLUDE = -I../include -I/usr/include/eigen3 -I../external/gutil/include
 
 #default build
-CXX     = g++ -std=c++23 -Wall -march=native
+CXX     = g++ -std=c++23 -Wall -march=native -mtune=native
+CXX    += -pg -g
 # CXX    += -fsanitize=address
 # CXX    += -fsanitize=thread
 
@@ -39,6 +40,15 @@ endif
 ifdef GV_TEST_DOMAIN_SIZE
 	DEFINES += -DGV_TEST_DOMAIN_SIZE=$(GV_TEST_DOMAIN_SIZE)
 endif
+ifdef GUTIL_DISABLE_LOG
+	DEFINES += -DGUTIL_DISABLE_LOG=$(GUTIL_DISABLE_LOG)
+endif
+ifdef GUTIL_DISABLE_ERROR
+	DEFINES += -DGUTIL_DISABLE_ERROR=$(GUTIL_DISABLE_ERROR)
+endif
+ifdef GUTIL_DISABLE_TIMER
+	DEFINES += -DGUTIL_DISABLE_TIMER=$(GUTIL_DISABLE_TIMER)
+endif
 
 #optimization level
 ifdef OPTIMIZE
@@ -53,8 +63,6 @@ ifdef NDEBUG
 	ifneq ($(NDEBUG),0)
 	DEFINES += -DNDEBUG
 	endif
-else
-	CXX += -pg -g
 endif
 
 #link to libraries

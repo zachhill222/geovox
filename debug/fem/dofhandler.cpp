@@ -145,9 +145,12 @@ std::vector<MeshElem_t> collect_near_boundary(const Mesh_t& mesh, const Assembly
 	for (auto it=mesh.element_begin(); it!=mesh.element_end(); ++it) {
 		// if (gutil::norm2(it->normalized_center()) < tol ) {
 		// if (it->normalized_center()[0] < 0.5 || it->normalized_center()[1]<0.5) {
-		if (std::abs(assembly.signed_distance(mesh.geo_center(*it))) < tol) {
-			elems.push_back(*it);
-		}
+		// if (std::abs(assembly.signed_distance(mesh.geo_center(*it))) < tol) {
+		// 	elems.push_back(*it);
+		// }
+		auto v0 = mesh.geo_coord(it->vertex(0));
+		auto v1 = mesh.geo_coord(it->vertex(7));
+		if (assembly.collides(Box_t{v0,v1})) {elems.push_back(*it);}
 	}
 	return elems;
 }
@@ -177,8 +180,8 @@ void refine_near_boundary(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_
 		GUTIL_LOG("  -> ", n_refined, " dofs refined");
 
 		mesh.process_refine();
-		coef_handler.update_coefs();
 	}
+	coef_handler.update_coefs();
 
 	for (DOF_t dof : handler.active_dofs) {
 		if (!mesh.is_conformal(DofVert_t{dof.key})) {
@@ -196,15 +199,14 @@ void refine_near_boundary(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_
 /// using the batch handler.unrefine_quasi_hierarchical(span<const MeshElem_t>) directly.
 /////////////////////////////////////////////////////////////////
 void unrefine_demo_region(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_handler,
-						   const TestConfig& cfg) {
+						   const Assembly_t& assembly, const TestConfig& cfg) {
 	GUTIL_TIMER("unrefining dofs");
 
 	std::vector<MeshElem_t> region;
 	for (auto it=mesh.element_begin(); it!=mesh.element_end(); ++it) {
 		GUTIL_ASSERT(mesh.is_active(*it));
-		if (gutil::norm2(it->normalized_center()) < cfg.unrefine_x) {
-			region.push_back(*it);
-		}
+		// if (gutil::norm2(it->normalized_center()) < cfg.unrefine_x) {region.push_back(*it); }
+		if (std::abs(assembly.signed_distance(mesh.geo_center(*it))) > cfg.unrefine_x) { region.push_back(*it); }
 	}
 	GUTIL_LOG("unrefining ", region.size(), " elements in the demo region");
 
@@ -256,6 +258,7 @@ void remove_unsupported_elements(Mesh_t& mesh, Handler_t& handler) {
 void evaluate_and_save(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_handler,
 					   const Assembly_t& assembly, const TestConfig& cfg) {
 	mesh.collect_vertices();
+	mesh.sort_elements_by_color();
 	handler.collect_dofs();
 
 	std::vector<double> scalar_vals(mesh.n_vertices());
@@ -272,12 +275,12 @@ void evaluate_and_save(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_han
 	mesh.save_as_binary(filename);
 
 	auto pt_field_lookup = GV::make_index_lookup<double>(
-			[&](uint64_t idx){ return scalar_vals[idx]; }, "scalar_field");
+			[&](uint64_t idx){ return (float) scalar_vals[idx]; }, "scalar_field");
 
 	auto pt_coef_lookup = GV::make_feature_lookup<MeshVert_t>(
 			[&](MeshVert_t vtx) {
 				auto d_vtx = handler.get_dof_vertex(vtx);
-				return d_vtx.exists() && handler.is_active_stable(DOF_t{d_vtx}) ? (int64_t)coef_handler.coefs[0][handler.global_number(DOF_t{d_vtx})] : -1;
+				return d_vtx.exists() && handler.is_active_stable(DOF_t{d_vtx}) ? (int32_t)coef_handler.coefs[0][handler.global_number(DOF_t{d_vtx})] : -1;
 			}, "scalar_coef");
 
 	auto pt_sd_lookup = GV::make_feature_lookup<MeshVert_t>(
@@ -287,7 +290,7 @@ void evaluate_and_save(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_han
 	auto pt_dof_active_lookup = GV::make_feature_lookup<MeshVert_t>(
 			[&](MeshVert_t vtx) {
 				auto d_vtx = handler.get_dof_vertex(vtx);
-				return d_vtx.exists() && handler.is_active_stable(DOF_t{d_vtx}) ? (int64_t)handler.global_number(DOF_t{d_vtx}) : -1;
+				return d_vtx.exists() && handler.is_active_stable(DOF_t{d_vtx}) ? (int32_t)handler.global_number(DOF_t{d_vtx}) : -1;
 			}, "active_dof_index");
 
 	auto pt_dof_refinable_lookup = GV::make_feature_lookup<MeshVert_t>(
@@ -304,20 +307,13 @@ void evaluate_and_save(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_han
 			[&](MeshVert_t vtx) {
 				auto d_vtx = handler.get_dof_vertex(vtx);
 				return d_vtx.exists() && handler.is_active_stable(DOF_t{d_vtx}) ?
-							std::array<int64_t,4>{(int64_t)d_vtx.depth(), (int64_t)d_vtx.i(), (int64_t)d_vtx.j(), (int64_t)d_vtx.k()} :
-							std::array<int64_t,4>{-1,-1,-1,-1};
+							std::array<int32_t,4>{(int32_t)d_vtx.depth(), (int32_t)d_vtx.i(), (int32_t)d_vtx.j(), (int32_t)d_vtx.k()} :
+							std::array<int32_t,4>{-1,-1,-1,-1};
 			}, "dof_key");
-
-	auto pt_mesh_key_lookup = GV::make_feature_lookup<MeshVert_t>(
-			[&](MeshVert_t vtx) {
-				return vtx.exists() ?
-							std::array<int64_t,4>{(int64_t)vtx.depth(), (int64_t)vtx.i(), (int64_t)vtx.j(), (int64_t)vtx.k()} :
-							std::array<int64_t,4>{-1,-1,-1,-1};
-			}, "mesh_vtx_key");
 
 	auto pt_vtx_key_lookup = GV::make_feature_lookup<MeshVert_t>(
 		[&](MeshVert_t vtx) {
-			return std::array<int64_t,4>{(int64_t)vtx.depth(), (int64_t)vtx.i(), (int64_t)vtx.j(), (int64_t)vtx.k()};
+			return std::array<int32_t,4>{(int32_t)vtx.depth(), (int32_t)vtx.i(), (int32_t)vtx.j(), (int32_t)vtx.k()};
 		}, "viewed_vtx_key");
 
 	auto el_dof_count_lookup = GV::make_feature_lookup<MeshElem_t>(
@@ -328,22 +324,26 @@ void evaluate_and_save(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_han
 				return dofs.size();
 			}, "n_active_dofs");
 
-	auto el_idx_lookup = GV::make_feature_lookup<MeshElem_t>(
+	auto el_dijkm_lookup = GV::make_feature_lookup<MeshElem_t>(
 			[&](MeshElem_t el) {
-				return el.exists() ?
-						std::array<int64_t,4>{(int64_t)el.i(), (int64_t)el.j(), (int64_t)el.k(), (int64_t)el.depth_linear_index()} :
-						std::array<int64_t,4>{-1,-1,-1,-1};
+				return std::array<int32_t,5>{(int32_t)el.depth(), (int32_t)el.i(), (int32_t)el.j(), (int32_t)el.k(), (int32_t)el.depth_linear_index()};
 
-			}, "el_ijk_morton");
+			}, "d_ijk_morton");
 
-	auto el_depth_lookup = GV::make_feature_lookup<MeshElem_t>(
-			[](MeshElem_t el) { return el.depth(); }, "depth");
+	auto el_color_lookup = GV::make_feature_lookup<MeshElem_t>(
+			[&](MeshElem_t el) {
+				return (uint16_t)el.color();
+			}, "color54");
+
+	auto el_idx_lookup = GV::make_index_lookup<uint64_t>(
+			[&](uint64_t idx) {
+				return idx;
+			}, "element_number");
 
 	mesh.append_point_data_field_binary(filename, "point",
-			pt_sd_lookup, pt_dof_active_lookup, pt_dof_refinable_lookup,
-			pt_dof_key_lookup, pt_field_lookup, pt_coef_lookup, pt_vtx_key_lookup);
+			pt_sd_lookup, pt_dof_active_lookup, pt_dof_key_lookup, pt_field_lookup, pt_vtx_key_lookup);
 	mesh.append_cell_data_field_binary(filename, "element",
-			el_dof_count_lookup, el_idx_lookup, el_depth_lookup);
+			el_dof_count_lookup, el_idx_lookup, el_color_lookup, el_dijkm_lookup);
 }
 
 /////////////////////////////////////////////////////////////////
@@ -362,7 +362,7 @@ void test_dof_handler(const TestConfig& cfg, const Assembly_t& assembly) {
 
 	refine_near_boundary(mesh, handler, coef_handler, assembly, cfg);
 
-	unrefine_demo_region(mesh, handler, coef_handler, cfg);
+	unrefine_demo_region(mesh, handler, coef_handler, assembly, cfg);
 	remove_unsupported_elements(mesh, handler);
 
 	evaluate_and_save(mesh, handler, coef_handler, assembly, cfg);

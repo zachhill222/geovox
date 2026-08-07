@@ -61,27 +61,44 @@ namespace Keys{
 		/////////////////////////////////////////////////////////////
 		/// Convert between encodings.
 		/////////////////////////////////////////////////////////////
+		[[nodiscard]] constexpr VoxelElement encode() noexcept {
+			return VoxelElement{ is_encoded() ? key : Mesh3D::EncodeElement_SIMD(key)};
+		}
 		GUTIL_DECLARE_SIMD()
 		[[nodiscard]] constexpr uint64_t encode_simd() noexcept {
-			GUTIL_ASSERT(is_valid());
-			return is_encoded() ? key : Mesh3D::EncodeElement_SIMD(key);
+			return Mesh3D::EncodeElement_SIMD(key);
+		}
+		GUTIL_DECLARE_SIMD()
+		[[nodiscard]] static constexpr uint64_t encode_simd(uint64_t k) noexcept {
+			return Mesh3D::EncodeElement_SIMD(k);
 		}
 
-		[[nodiscard]] constexpr VoxelElement encode() noexcept {
-			return VoxelElement{encode_simd()};
+		//morton->cartesian
+		[[nodiscard]] constexpr VoxelElement decode() const noexcept {
+			return VoxelElement{ is_encoded() ? Mesh3D::DecodeElement_SIMD(key) : key };
 		}
-
 		GUTIL_DECLARE_SIMD()
 		[[nodiscard]] constexpr uint64_t decode_simd() const noexcept {
-			GUTIL_ASSERT(is_valid());
-			return is_encoded() ? Mesh3D::DecodeElement_SIMD(key) : key;
+			return Mesh3D::DecodeElement_SIMD(key);
 		}
-		
-		[[nodiscard]] constexpr VoxelElement decode() const noexcept {
-			return VoxelElement{decode_simd()};
+		GUTIL_DECLARE_SIMD()
+		[[nodiscard]] static constexpr uint64_t decode_simd(uint64_t k) noexcept {
+			return Mesh3D::DecodeElement_SIMD(k);
 		}
 
-
+		/// Color54 by pairity - no ring 1 colisions in a 2-1 mesh
+		[[nodiscard]] constexpr uint64_t color() const noexcept {
+			return is_encoded() ? Mesh3D::CartesianColor54_SIMD(Mesh3D::DecodeElement_SIMD(key)) :
+								  Mesh3D::CartesianColor54_SIMD(key);
+		}
+		GUTIL_DECLARE_SIMD()
+		[[nodiscard]] constexpr uint64_t color_simd() const noexcept {
+			return Mesh3D::CartesianColor54_SIMD(key);
+		}
+		GUTIL_DECLARE_SIMD()
+		[[nodiscard]] static constexpr uint64_t color_simd(uint64_t k) noexcept {
+			return Mesh3D::CartesianColor54_SIMD(k);
+		}
 
 		/////////////////////////////////////////////////////////////
 		/// Queries

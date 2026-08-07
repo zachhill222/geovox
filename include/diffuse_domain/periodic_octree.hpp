@@ -60,7 +60,7 @@ namespace GV {
 		/// Helper method to create the periodic images of an object
 		/////////////////////////////////////////////////
 		template<typename T>
-		std::vector<T> period_images(const T& val) requires (DIMENSION==3) {
+		std::vector<T> period_images(const T& val) const requires (DIMENSION==3) {
 			constexpr int s0_lo = IS_PERIODIC(0) ? -1 : 0;
 			constexpr int s0_hi = IS_PERIODIC(0) ?  1 : 0;
 			constexpr int s1_lo = IS_PERIODIC(1) ? -1 : 0;
@@ -102,7 +102,7 @@ namespace GV {
 		}
 
 		template<typename T>
-		[[nodiscard]] bool collides(const T& val) noexcept {
+		[[nodiscard]] bool collides(const T& val) const noexcept {
 			if (BASE::collides(val)) {return true;}
 			std::vector<T> images = period_images(val);
 			for (const T& val : images) {

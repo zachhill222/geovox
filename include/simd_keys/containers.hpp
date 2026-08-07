@@ -729,7 +729,6 @@ namespace Keys {
 					GUTIL_ABORT("Arguments did not match what was expected");
 				}
 			}
-			threads.wait_idle();
 		}
 
 		template<typename Task, typename...Args>
@@ -762,7 +761,6 @@ namespace Keys {
 					GUTIL_ABORT("Arguments did not match what was expected");
 				}
 			}
-			threads.wait_idle();
 		}
 
 		template<typename Task, typename...Args>
@@ -793,7 +791,6 @@ namespace Keys {
 					GUTIL_ABORT("Arguments did not match what was expected");
 				}
 			}
-			threads.wait_idle();
 		}
 
 		template<typename Task, typename...Args>
@@ -832,7 +829,6 @@ namespace Keys {
 					GUTIL_ABORT("Arguments did not match what was expected");
 				}
 			}
-			threads.wait_idle();
 		}
 
 

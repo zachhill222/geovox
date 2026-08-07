@@ -89,6 +89,7 @@ namespace GV {
 		mutable std::mutex							request_mutex{};			//sync refine requests. TODO: make requests per-thread-per-depth if it's slow
 		mutable std::vector<std::vector<Elem_t>> 	request_refine_list{};		//allow classes with const-ref to request refinement
 		mutable std::vector<std::vector<Elem_t>>	request_unrefine_list{};	//allow classes with const-ref to request unrefinement
+		std::atomic<bool>							is_elements_encoded_{true};	//track if the elements in active_keys are in morton(true) or cartesian(false) form.
 
 		public:
 		using BASE::is_key_mask_unstable;										//synchronization tools used in macros
@@ -107,9 +108,8 @@ namespace GV {
 
 		//a few helper methods to check that we haven't forgot to call something like collect_vertices etc.
 		[[nodiscard]] bool is_vertices_collected() const noexcept {return is_vertices_collected_.load();}
-		[[nodiscard]] bool is_active_elements_linked() const noexcept {
-			return are_spans_same_data(active_elements,BASE::active_keys);
-		}
+		[[nodiscard]] bool is_active_elements_linked() const noexcept {return are_spans_same_data(active_elements,BASE::active_keys);}
+		[[nodiscard]] bool is_encoded() const noexcept {return is_elements_encoded_.load();}
 		[[nodiscard]] bool is_current() const noexcept {	//for most processes we only care about the elements
 			return BASE::is_current() && is_active_elements_linked();
 		}
@@ -229,7 +229,12 @@ namespace GV {
 		/// Bin functions for sorting elements and vertices
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		GUTIL_DECLARE_SIMD()
-		static constexpr int element_key_bin(uint64_t key) noexcept {
+		static constexpr int element_key_color54_bin(uint64_t key) noexcept {
+			return static_cast<int>(Elem_t::color_simd(key));
+		}
+
+		GUTIL_DECLARE_SIMD()
+		static constexpr int element_key_depth_bin(uint64_t key) noexcept {
 			return static_cast<int>(Elem_t{key}.depth());
 		}
 
@@ -270,7 +275,6 @@ namespace GV {
 			return result;
 		}
 
-
 		void set_depth(uint8_t depth) noexcept {
 			if (depth>max_depth) {GUTIL_ABORT("depth too large");}
 			{
@@ -295,8 +299,16 @@ namespace GV {
 			GUTIL_TIMER("collecting active elements");
 			BASE::collect_active_keys<Elem_t>();
 			active_elements = BASE::reinterpret_key_span<Elem_t,uint64_t>(BASE::active_keys);
-			BASE::sort_active_keys(max_depth, &UnstructuredVoxelMesh::element_key_bin);
+			BASE::sort_active_keys(max_depth, &UnstructuredVoxelMesh::element_key_depth_bin);
 			GUTIL_ASSERT(is_current());
+		}
+
+		void sort_elements_by_color() noexcept {
+			GUTIL_ASSERT(is_current());
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GV_ASSERT_KEY_MASK_STABLE_STATE
+			GUTIL_TIMER("sorting elements by color");
+			BASE::sort_active_keys(54, &UnstructuredVoxelMesh::element_key_color54_bin);
 		}
 
 		void collect_vertices() noexcept {
@@ -329,7 +341,8 @@ namespace GV {
 					GUTIL_ASSERT(std::find(verts.begin(), verts.end(), Vert_t{uint64_t(-1)})==verts.end());
 				#endif
 
-				gutil::sort_and_unique(verts);
+				auto it = gutil::sort_and_unique(verts);
+				verts.erase(it, verts.end());
 				verts.shrink_to_fit();
 			};
 
@@ -342,7 +355,13 @@ namespace GV {
 								std::make_move_iterator(thread_verts[i].end()));
 			}
 			thread_verts.clear();
-			GUTIL_ASSERT(gutil::sort_and_unique(tracked_vertices)==tracked_vertices.end());
+
+			//ensure no duplicates from different threads
+			auto it = gutil::sort_and_unique(tracked_vertices, threads);
+			threads.wait_idle();
+			tracked_vertices.erase(it,tracked_vertices.end());
+
+			GUTIL_ASSERT(std::unique(tracked_vertices.begin(), tracked_vertices.end())==tracked_vertices.end());
 
 			vertex_sorter = gutil::BinSort<Vert_t>(tracked_vertices, max_depth+1);
 			GUTIL_ASSERT(vertex_sorter.n_bins() == max_depth+1);
@@ -401,6 +420,42 @@ namespace GV {
 			return result;
 		}
 
+		//change the encoding of the active elements
+		void set_encoded(bool val) noexcept {
+			GV_BEGIN_ACTIVE_UNSTABLE
+			
+			#ifndef NDEBUG
+				if (is_encoded() == val) {
+					for (size_t i=0; i<std::min(size_t{100}, n_elements()); ++i) {
+						GUTIL_ASSERT(active_elements[i].is_encoded() == val);
+					}
+				}
+			#endif
+
+			if (is_encoded() == val) {return;}
+
+			if (val) { //cartesian->morton
+				dispatch_parallel_active_keys(
+					[](std::span<uint64_t> keys) {
+					GUTIL_SIMD()
+					for (size_t i=0; i<keys.size(); ++i) {
+						keys[i] = Elem_t::encode_simd(keys[i]);
+					}
+				});
+			}
+			else {	//morton->cartesian
+				dispatch_parallel_active_keys(
+					[](std::span<uint64_t> keys) {
+					GUTIL_SIMD()
+					for (size_t i=0; i<keys.size(); ++i) {
+						keys[i] = Elem_t::decode_simd(keys[i]);
+					}
+				});
+			}
+
+			is_elements_encoded_.store(val);
+			GV_END_ACTIVE_UNSTABLE
+		}
 
 
 		/////////////////////////////////////////////////////////////////////////////////////////////////
