@@ -145,8 +145,6 @@ namespace Keys {
 		std::atomic<bool>				is_sorted_{false};		//  a flag to track when the active keys are up to date
 		std::atomic<bool>				is_collected_{false};	//  a flag to track when the active keys are ready to be sorted (managed by the derived class)
 		
-
-
 		//////////////////////////////////////////////////////////////////////////
 		/// Synchronization is primarily just handled by checking if a field
 		/// is marked as mutating or stable. Rather than have everything aquire a
@@ -575,111 +573,104 @@ namespace Keys {
 		}
 
 
-		/////////////////////////////////////////////////////////////////////////
-		/// Deduplicating is standard and usefull
-		/////////////////////////////////////////////////////////////////////////
-		template<typename T, typename Less_t=std::nullptr_t, typename Equal_t=std::nullptr_t>
-		static constexpr void sort_and_unique(std::vector<T>& list, Less_t&& less=nullptr,
-									Equal_t&& equal=nullptr) noexcept {
-			if constexpr (std::same_as<Less_t,std::nullptr_t>) {
-				std::sort(list.begin(), list.end());
-			}
-			else {
-				static_assert(std::is_invocable_r_v<bool,Less_t,const T&, const T&>);
-				std::sort(list.begin(), list.end(), std::forward<Less_t>(less));
-			}
-
-			if constexpr (std::same_as<Equal_t,std::nullptr_t>) {
-				auto last = std::unique(list.begin(), list.end());
-				list.erase(last, list.end());
-			}
-			else {
-				static_assert(std::is_invocable_r_v<bool,Equal_t,const T&, const T&>);
-				auto last = std::unique(list.begin(), list.end(), std::forward<Equal_t>(equal));
-				list.erase(last, list.end());
-			}
-		}
-
-
 
 		/////////////////////////////////////////////////////////////////////////
 		/// A few methods to help with viewing the active list as a particular type
 		/////////////////////////////////////////////////////////////////////////
 		template<typename Container_A, typename Container_B>
 		[[nodiscard]] static bool are_spans_same_data(const Container_A& A, const Container_B& B) noexcept {
-			using A_t = typename Container_A::value_type;
-			using B_t = typename Container_B::value_type;
-			if constexpr (sizeof(A_t) != sizeof(B_t)) {return false;}
-			if constexpr (alignof(A_t) != alignof(B_t)) {return false;}
-
-			if (A.size() != B.size()) {return false;}
-			if (reinterpret_cast<uintptr_t>(A.data()) != reinterpret_cast<uintptr_t>(B.data())) {return false;}
-			if (reinterpret_cast<uintptr_t>(A.data()+A.size()) != reinterpret_cast<uintptr_t>(B.data()+B.size())) {return false;}
-			return true; 
+			return gutil::containers_are_same_bytes(A,B);
 		}
 
-		template<typename KeyTypeOut, typename Container_A> 
-				requires( 	sizeof(KeyTypeOut) == sizeof(typename Container_A::value_type) &&
-							alignof(KeyTypeOut) == alignof(typename Container_A::value_type) &&
-							std::contiguous_iterator<typename Container_A::iterator> )
-		[[nodiscard]] static std::span<KeyTypeOut> reinterpret_key_span(Container_A& list) noexcept {
-			using KeyTypeIn = typename Container_A::value_type;
-			std::span<KeyTypeOut> view = reinterpret_key_span<KeyTypeOut,KeyTypeIn>(std::span<KeyTypeIn>(list));
-			GUTIL_ASSERT(are_spans_same_data(view,list));
-			return view;
+		template<typename KeyTypeOut, typename Container> requires(sizeof(KeyTypeOut)==sizeof(uint64_t) && alignof(KeyTypeOut)==alignof(uint64_t))
+		[[nodiscard]] static std::span<KeyTypeOut> reinterpret_key_span(Container& list) noexcept {
+			return gutil::reinterpret_as_span<KeyTypeOut, Container>(list);
 		}
 
-		template<typename KeyTypeOut, typename Container_A> 
-				requires( 	sizeof(KeyTypeOut) == sizeof(typename Container_A::value_type) &&
-							alignof(KeyTypeOut) == alignof(typename Container_A::value_type) &&
-							std::contiguous_iterator<typename Container_A::iterator> )
-		[[nodiscard]] static std::span<const KeyTypeOut> reinterpret_key_span(const Container_A& list) noexcept {
-			using KeyTypeIn = typename Container_A::value_type;
-			std::span<KeyTypeOut> view = reinterpret_key_span<KeyTypeOut,KeyTypeIn>(std::span<const KeyTypeIn>(list));
-			GUTIL_ASSERT(are_spans_same_data(view,list));
-			return view;
+		template<typename KeyTypeOut, typename Container> requires(sizeof(KeyTypeOut)==sizeof(uint64_t) && alignof(KeyTypeOut)==alignof(uint64_t))
+		[[nodiscard]] static std::span<const KeyTypeOut> reinterpret_key_span(const Container& list) noexcept {
+			return gutil::reinterpret_as_span<KeyTypeOut, Container>(list);
 		}
 
-		template<typename KeyTypeOut, typename KeyTypeIn>
-			requires(sizeof(KeyTypeIn)==8 && sizeof(KeyTypeOut)==8 && alignof(KeyTypeOut)==alignof(KeyTypeIn))
-		[[nodiscard]] static std::span<KeyTypeOut> reinterpret_key_span(std::span<KeyTypeIn> list) noexcept {
-			if constexpr (std::same_as<KeyTypeIn, KeyTypeOut>) {return list;}
-			else {
-				std::span<KeyTypeOut> view {reinterpret_cast<KeyTypeOut*>(list.data()), list.size()};
-				#ifndef NDEBUG
-					//make sure that the span is correctly interprets the raw values
-					GUTIL_ASSERT(are_spans_same_data(view,list));
-					for (size_t i=0; i<std::min(size_t{100},view.size()); ++i) {
-						uint64_t raw  = static_cast<uint64_t>(list[i]);
-						GUTIL_ASSERT(raw == static_cast<uint64_t>(view[i]) && "raw bytes changed");
-						GUTIL_ASSERT(KeyTypeIn{raw} == list[i] && "reconstructing in type failed");
-						GUTIL_ASSERT(KeyTypeOut{raw} == view[i] && "reconstructing out type failed");
-					}
-				#endif
-				return view;
-			}
+		template<typename KeyTypeOut, typename KeyTypeIn> requires(sizeof(KeyTypeOut)==sizeof(KeyTypeIn) && alignof(KeyTypeOut)==alignof(KeyTypeIn))
+		[[nodiscard]] static std::span<KeyTypeOut> reinterpret_key_span( std::span<KeyTypeIn> list) noexcept {
+			return gutil::reinterpret_as_span<KeyTypeOut, KeyTypeIn>(list);
+		}
+
+		template<typename KeyTypeOut, typename KeyTypeIn> requires(sizeof(KeyTypeOut)==sizeof(KeyTypeIn) && alignof(KeyTypeOut)==alignof(KeyTypeIn))
+		[[nodiscard]] static std::span<const KeyTypeOut> reinterpret_key_span( std::span<const KeyTypeIn> list) noexcept {
+			return gutil::reinterpret_as_span<KeyTypeOut, KeyTypeIn>(list);
+		}
+		
+		//allow explicit in/out type statements for better type safety in the generic container path
+		template<typename KeyTypeOut, typename KeyTypeIn, typename Container> requires(std::same_as<typename Container::value_type, KeyTypeIn>) 
+		[[nodiscard]] static std::span<const KeyTypeOut> reinterpret_key_span(const Container& list) noexcept {
+			return gutil::reinterpret_as_span<KeyTypeOut, Container>(list);
+		}
+
+		//allow explicit in/out type statements for better type safety
+		template<typename KeyTypeOut, typename KeyTypeIn, typename Container> requires(std::same_as<typename Container::value_type, KeyTypeIn>) 
+		[[nodiscard]] static std::span<KeyTypeOut> reinterpret_key_span(Container& list) noexcept {
+			return gutil::reinterpret_as_span<KeyTypeOut, Container>(list);
 		}
 
 
+		// template<typename Container_A, typename Container_B>
+		// [[nodiscard]] static bool are_spans_same_data(const Container_A& A, const Container_B& B) noexcept {
+		// 	using A_t = typename Container_A::value_type;
+		// 	using B_t = typename Container_B::value_type;
+		// 	if constexpr (sizeof(A_t) != sizeof(B_t)) {return false;}
+		// 	if constexpr (alignof(A_t) != alignof(B_t)) {return false;}
 
-		template<typename KeyTypeOut, typename KeyTypeIn> requires(sizeof(KeyTypeIn)==8 && sizeof(KeyTypeOut)==8)
-		[[nodiscard]] static std::span<const KeyTypeOut> reinterpret_key_span(std::span<const KeyTypeIn> list) noexcept {
-			if constexpr (std::same_as<KeyTypeIn, KeyTypeOut>) {return list;}
-			else {
-				std::span<const KeyTypeOut> view {reinterpret_cast<const KeyTypeOut*>(list.data()), list.size()};
-				#ifndef NDEBUG
-					//make sure that the span is correctly interprets the raw values
-					GUTIL_ASSERT(are_spans_same_data(view,list));
-					for (size_t i=0; i<std::min(size_t{100},view.size()); ++i) {
-						uint64_t raw  = static_cast<uint64_t>(list[i]);
-						GUTIL_ASSERT(raw == static_cast<uint64_t>(view[i]) && "raw bytes changed");
-						GUTIL_ASSERT(KeyTypeIn{raw} == list[i] && "reconstructing in type failed");
-						GUTIL_ASSERT(KeyTypeOut{raw} == view[i] && "reconstructing out type failed");
-					}
-				#endif
-				return view;
-			}
-		}
+		// 	if (A.size() != B.size()) {return false;}
+		// 	if (reinterpret_cast<uintptr_t>(A.data()) != reinterpret_cast<uintptr_t>(B.data())) {return false;}
+		// 	if (reinterpret_cast<uintptr_t>(A.data()+A.size()) != reinterpret_cast<uintptr_t>(B.data()+B.size())) {return false;}
+		// 	return true; 
+		// }
+
+		// template<typename KeyTypeOut, typename Container_A> 
+		// 		requires( 	sizeof(KeyTypeOut) == sizeof(typename Container_A::value_type) &&
+		// 					alignof(KeyTypeOut) == alignof(typename Container_A::value_type) &&
+		// 					std::contiguous_iterator<typename Container_A::iterator> )
+		// [[nodiscard]] static std::span<KeyTypeOut> reinterpret_key_span(Container_A& list) noexcept {
+		// 	using KeyTypeIn = typename Container_A::value_type;
+		// 	std::span<KeyTypeOut> view = reinterpret_key_span<KeyTypeOut,KeyTypeIn>(std::span<KeyTypeIn>(list));
+		// 	GUTIL_ASSERT(are_spans_same_data(view,list));
+		// 	return view;
+		// }
+
+		// template<typename KeyTypeOut, typename Container_A> 
+		// 		requires( 	sizeof(KeyTypeOut) == sizeof(typename Container_A::value_type) &&
+		// 					alignof(KeyTypeOut) == alignof(typename Container_A::value_type) &&
+		// 					std::contiguous_iterator<typename Container_A::iterator> )
+		// [[nodiscard]] static std::span<const KeyTypeOut> reinterpret_key_span(const Container_A& list) noexcept {
+		// 	using KeyTypeIn = typename Container_A::value_type;
+		// 	std::span<KeyTypeOut> view = reinterpret_key_span<KeyTypeOut,KeyTypeIn>(std::span<const KeyTypeIn>(list));
+		// 	GUTIL_ASSERT(are_spans_same_data(view,list));
+		// 	return view;
+		// }
+
+		// template<typename KeyTypeOut, typename KeyTypeIn>
+		// 	requires(sizeof(KeyTypeIn)==8 && sizeof(KeyTypeOut)==8 && alignof(KeyTypeOut)==alignof(KeyTypeIn))
+		// [[nodiscard]] static std::span<KeyTypeOut> reinterpret_key_span(std::span<KeyTypeIn> list) noexcept {
+		// 	if constexpr (std::same_as<KeyTypeIn, KeyTypeOut>) {return list;}
+		// 	else {
+		// 		std::span<KeyTypeOut> view {reinterpret_cast<KeyTypeOut*>(list.data()), list.size()};
+		// 		#ifndef NDEBUG
+		// 			//make sure that the span is correctly interprets the raw values
+		// 			GUTIL_ASSERT(are_spans_same_data(view,list));
+		// 			for (size_t i=0; i<std::min(size_t{100},view.size()); ++i) {
+		// 				uint64_t raw  = static_cast<uint64_t>(list[i]);
+		// 				GUTIL_ASSERT(raw == static_cast<uint64_t>(view[i]) && "raw bytes changed");
+		// 				GUTIL_ASSERT(KeyTypeIn{raw} == list[i] && "reconstructing in type failed");
+		// 				GUTIL_ASSERT(KeyTypeOut{raw} == view[i] && "reconstructing out type failed");
+		// 			}
+		// 		#endif
+		// 		return view;
+		// 	}
+		// }
+
+
 
 
 		/////////////////////////////////////////////////////////////////////////

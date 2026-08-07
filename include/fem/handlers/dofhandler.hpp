@@ -171,10 +171,10 @@ namespace GV {
 				
 		
 		DofHandler(const DofHandler& other) : BASE(other), mesh(other.mesh) {
-			active_dofs = BASE::reinterpret_key_span<DOF_t,uint64_t>(std::span<uint64_t>(BASE::active_keys));
+			active_dofs = BASE::reinterpret_key_span<DOF_t,uint64_t>(BASE::active_keys);
 		}
 		DofHandler(DofHandler&& other) : BASE(std::move(other)), mesh(other.mesh) {
-			active_dofs = BASE::reinterpret_key_span<DOF_t,uint64_t>(std::span<uint64_t>(BASE::active_keys));
+			active_dofs = BASE::reinterpret_key_span<DOF_t,uint64_t>(BASE::active_keys);
 		}
 
 		[[nodiscard]] DofHandler& operator=(const DofHandler& other) noexcept {
@@ -182,7 +182,7 @@ namespace GV {
 			if (this != &other) {
 				key_mask = other.key_mask;
 				BASE::active_keys = other.active_keys;
-				active_dofs = BASE::reinterpret_key_span<DOF_t,uint64_t>(std::span<uint64_t>(BASE::active_keys));
+				active_dofs = BASE::reinterpret_key_span<DOF_t,uint64_t>(BASE::active_keys);
 			}
 			return *this;
 		}
@@ -191,7 +191,7 @@ namespace GV {
 			if (this != &other) {
 				key_mask = std::move(other.key_mask);
 				BASE::active_keys = std::move(other.active_keys);
-				active_dofs = BASE::reinterpret_key_span<DOF_t,uint64_t>(std::span<uint64_t>(BASE::active_keys));
+				active_dofs = BASE::reinterpret_key_span<DOF_t,uint64_t>(BASE::active_keys);
 			}
 			return *this;
 		}
@@ -446,10 +446,10 @@ namespace GV {
 				GUTIL_ASSERT(std::find(BASE::active_keys.begin(), BASE::active_keys.end(), uint64_t(-1)) == BASE::active_keys.end());
 				#endif
 
-				BASE::sort_and_unique(BASE::active_keys, [](uint64_t a, uint64_t b) {return b<a;});	//large dofs on the left
-				std::erase_if(BASE::active_keys, [](uint64_t a){return !DOF_t{a}.is_valid();});				//cleanup any singleton bad dofs
+				gutil::sort_and_unique(BASE::active_keys, [](uint64_t a, uint64_t b) {return b<a;});	//large dofs on the left
+				std::erase_if(BASE::active_keys, [](uint64_t a){return !DOF_t{a}.is_valid();});			//cleanup any singleton bad dofs
 				BASE::active_keys.shrink_to_fit();
-				active_dofs = BASE::reinterpret_key_span<DOF_t,uint64_t>(std::span<uint64_t>(BASE::active_keys));
+				active_dofs = BASE::reinterpret_key_span<DOF_t,uint64_t>(BASE::active_keys);
 				BASE::is_collected_.store(true);
 
 				GUTIL_OMP(parallel for)
@@ -480,7 +480,7 @@ namespace GV {
 		void collect_dofs() noexcept {
 			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
 			BASE::collect_active_keys<DOF_t>();
-			active_dofs = BASE::reinterpret_key_span<DOF_t,uint64_t>(std::span<uint64_t>(BASE::active_keys));
+			active_dofs = BASE::reinterpret_key_span<DOF_t,uint64_t>(BASE::active_keys);
 			BASE::sort_active_keys(8, &DofHandler::dof_key_bin);
 			#ifndef NDEBUG
 				if (!mesh.has_pending_refine_requests()) {
@@ -678,7 +678,7 @@ namespace GV {
 				std::span<const DofElem_t> 	elems,
 				Predicate&& 				pred,
 				Action&& 					action,
-				uint8_t 					n_depths) noexcept 
+				uint8_t 					n_depths) noexcept
 		{	
 			GUTIL_TIMER("Gathering unique dofs on ", elems.size(), " elements");
 
@@ -727,9 +727,10 @@ namespace GV {
 
 				GUTIL_ASSERT(std::find(scratch.begin(),scratch.end(), DOF_t{uint64_t(-1)}) == scratch.end());
 
-				std::sort(scratch.begin(), scratch.end(),					//clean up this depth
-							[](DOF_t a, DOF_t b) {return b<a;});			//note that DOF_t{0} (the does not exist flag) will be the last element
-				auto it = std::unique(scratch.begin(), scratch.end());
+				// std::sort(scratch.begin(), scratch.end(),					//clean up this depth
+				// 			[](DOF_t a, DOF_t b) {return b<a;});			//note that DOF_t{0} (the does not exist flag) will be the last element
+				// auto it = std::unique(scratch.begin(), scratch.end());
+				auto it = gutil::sort_and_unique(scratch, threads);
 				scratch.erase(it, scratch.end());							//erases all but one non-existant dofs (there could be 1 non-existant element)
 				// if (!scratch.back().exists()) {scratch.pop_back();}			//all dofs exist now.
 				std::erase_if(scratch, [](DOF_t dof){ return !dof.exists() || !dof.is_valid();});
@@ -1064,7 +1065,7 @@ namespace GV {
 			GV_ASSERT_KEY_MASK_UNSTABLE_STATE
 			GUTIL_ASSERT(dof.is_valid());
 
-			if (!set_active_check_changed(dof,true)) {		//return if the dof was already active
+			if (!set_active_check_changed(dof,true)) {			//return if the dof was already active
 				return;
 			}
 																//when refining, it is essential to have the mesh be able to resolve the support
@@ -1212,26 +1213,63 @@ namespace GV {
 			{
 				GV_BEGIN_MASK_UNSTABLE
 				set_batch_start();
-				std::vector<DOF_t> dofs = get_dofs_impl(BASE::reinterpret_key_span<DofElem_t,Elem_t>(elems), 
-											std::move(pred), std::move(action), max_depth);
+				std::span<const DofElem_t> d_elems = BASE::reinterpret_key_span<DofElem_t,Elem_t>(elems);
+				std::vector<DOF_t> dofs = get_dofs_impl(d_elems, std::move(pred), std::move(action), max_depth);
+				GUTIL_TIMER("Processing ", dofs.size(), " dofs for refinement");
 				
-				// TODO use binsort so we recover the partition between depths. then refine in parallel at
-				// each depth. Refine coarse to fine.
-				std::sort(dofs.begin(), dofs.end(), [](DOF_t a, DOF_t b){return a.depth() < b.depth();});
+				gutil::BinSort<DOF_t> dof_depth_sorter(dofs, max_depth+1);
+				dof_depth_sorter.dispatch_sort([](DOF_t dof){return (int)dof.depth();}, &threads);
+				threads.wait_idle();
 
-				for (size_t i=0; i<dofs.size(); ++i) {
-					#ifndef NDEBUG
-						GUTIL_ASSERT(dofs[i].is_valid());
-						uint8_t byte = get_mask_unstable(dofs[i]);
-						GUTIL_ASSERT(byte&ACTIVE_BIT);
-						GUTIL_ASSERT((byte&REFINED_BIT)==0);
-						GUTIL_ASSERT((byte&BATCH_PROCESS_BIT)==0);
-					#endif
-					refine_quasi_hierarchical(dofs[i]);
+				for (int dd=0; dd<dof_depth_sorter.n_bins(); ++dd) {
+					auto list = dof_depth_sorter.get_bin(dd);
+					if (list.empty()) {continue;}
+
+					gutil::BinSort<DOF_t> child_sorter(list, DOF_t::N_CHILDREN);
+					child_sorter.dispatch_sort([](DOF_t dof) {
+						const uint64_t ii = dof.i()%3;
+						const uint64_t jj = dof.j()%3;
+						const uint64_t kk = dof.k()%3;
+
+						return (int) ii + 3*(jj + 3*kk);
+					}, &threads);
+					threads.wait_idle();
+					GUTIL_TIMER("Checking ", list.size(), " dofs for refinement at depth ", dd);
+					for (int cc=0; cc<child_sorter.n_bins(); ++cc) {
+						auto par_list = child_sorter.get_bin(cc);
+						GUTIL_OMP(parallel for)
+						for (size_t i=0; i<par_list.size(); ++i) {
+							#ifndef NDEBUG
+								GUTIL_ASSERT(par_list[i].is_valid());
+								uint8_t byte = get_mask_unstable(par_list[i]);
+								GUTIL_ASSERT(byte&ACTIVE_BIT);
+								GUTIL_ASSERT((byte&REFINED_BIT)==0);
+								GUTIL_ASSERT((byte&BATCH_PROCESS_BIT)==0);
+							#endif
+							refine_quasi_hierarchical(par_list[i]);
+						}
+					}
 				}
 
 				set_batch_end();
 				GV_END_MASK_UNSTABLE
+
+
+
+				// TODO use binsort so we recover the partition between depths. then refine in parallel at
+				// each depth. Refine coarse to fine.
+				// std::sort(dofs.begin(), dofs.end(), [](DOF_t a, DOF_t b){return a.depth() < b.depth();});
+
+				// for (size_t i=0; i<dofs.size(); ++i) {
+				// 	#ifndef NDEBUG
+				// 		GUTIL_ASSERT(dofs[i].is_valid());
+				// 		uint8_t byte = get_mask_unstable(dofs[i]);
+				// 		GUTIL_ASSERT(byte&ACTIVE_BIT);
+				// 		GUTIL_ASSERT((byte&REFINED_BIT)==0);
+				// 		GUTIL_ASSERT((byte&BATCH_PROCESS_BIT)==0);
+				// 	#endif
+				// 	refine_quasi_hierarchical(dofs[i]);
+				// }
 			}
 
 			collect_dofs();
@@ -1273,8 +1311,8 @@ namespace GV {
 			{
 				GV_BEGIN_MASK_UNSTABLE
 				set_batch_start();
-				std::vector<DOF_t> dofs = get_dofs_impl(BASE::reinterpret_key_span<DofElem_t,Elem_t>(elems), 
-											std::move(pred), std::move(action), max_depth);
+				std::span<const DofElem_t> d_elems = BASE::reinterpret_key_span<DofElem_t,Elem_t>(elems);
+				std::vector<DOF_t> dofs = get_dofs_impl(d_elems, std::move(pred), std::move(action), max_depth);
 
 
 				//unrefine from deepest to shallowest

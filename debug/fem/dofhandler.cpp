@@ -18,7 +18,7 @@
 	#define GV_TEST_DOMAIN_PERIOD 7
 #endif
 #ifndef GV_TEST_DOF_PERIOD
-	#define GV_TEST_DOF_PERIOD 0
+	#define GV_TEST_DOF_PERIOD 7
 #endif
 #ifndef GV_TEST_DOMAIN_SIZE
 	#define GV_TEST_DOMAIN_SIZE 1
@@ -71,7 +71,7 @@ TestConfig parse_args(int argc, char* argv[]) {
 		else if (args[i] == "-R0")   { cfg.min_r         = atof(args[++i].c_str()); }
 		else if (args[i] == "-R1")   { cfg.max_r         = atof(args[++i].c_str()); }
 		else if (args[i] == "-S")    { cfg.seed          = atoi(args[++i].c_str()); }
-		else if (args[i] == "-name") { cfg.test_name     = args[++i]; }
+		else if (args[i] == "-name") { cfg.test_name     = args[++i]; 				}
 		else if (args[i] == "-ID")   { cfg.initial_depth = atoi(args[++i].c_str()); }
 		else if (args[i] == "-TOL")  { cfg.refine_tol    = atof(args[++i].c_str()); }
 		else if (args[i] == "-UX")   { cfg.unrefine_x    = atof(args[++i].c_str()); }
@@ -143,9 +143,9 @@ void setup_mesh_and_dofs(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_h
 std::vector<MeshElem_t> collect_near_boundary(const Mesh_t& mesh, const Assembly_t& assembly, double tol) {
 	std::vector<MeshElem_t> elems;
 	for (auto it=mesh.element_begin(); it!=mesh.element_end(); ++it) {
-		if (gutil::norm2(it->normalized_center()) < tol ) {
+		// if (gutil::norm2(it->normalized_center()) < tol ) {
 		// if (it->normalized_center()[0] < 0.5 || it->normalized_center()[1]<0.5) {
-		// if (std::abs(assembly.signed_distance(mesh.geo_center(*it))) < tol) {
+		if (std::abs(assembly.signed_distance(mesh.geo_center(*it))) < tol) {
 			elems.push_back(*it);
 		}
 	}

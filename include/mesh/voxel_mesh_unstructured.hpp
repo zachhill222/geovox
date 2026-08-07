@@ -294,7 +294,7 @@ namespace GV {
 			GV_ASSERT_KEY_MASK_STABLE_STATE
 			GUTIL_TIMER("collecting active elements");
 			BASE::collect_active_keys<Elem_t>();
-			active_elements = BASE::reinterpret_key_span<Elem_t,uint64_t>(std::span<uint64_t>(BASE::active_keys));
+			active_elements = BASE::reinterpret_key_span<Elem_t,uint64_t>(BASE::active_keys);
 			BASE::sort_active_keys(max_depth, &UnstructuredVoxelMesh::element_key_bin);
 			GUTIL_ASSERT(is_current());
 		}
@@ -329,7 +329,7 @@ namespace GV {
 					GUTIL_ASSERT(std::find(verts.begin(), verts.end(), Vert_t{uint64_t(-1)})==verts.end());
 				#endif
 
-				BASE::sort_and_unique(verts);
+				gutil::sort_and_unique(verts);
 				verts.shrink_to_fit();
 			};
 
@@ -342,6 +342,7 @@ namespace GV {
 								std::make_move_iterator(thread_verts[i].end()));
 			}
 			thread_verts.clear();
+			GUTIL_ASSERT(gutil::sort_and_unique(tracked_vertices)==tracked_vertices.end());
 
 			vertex_sorter = gutil::BinSort<Vert_t>(tracked_vertices, max_depth+1);
 			GUTIL_ASSERT(vertex_sorter.n_bins() == max_depth+1);
@@ -821,7 +822,7 @@ namespace GV {
 				//note that elements marked as 'unrefine' are elements that should be activated and
 				//if they have no active descendant, the request is removed.
 				auto job = [&](uint8_t dd) {
-					BASE::sort_and_unique(request_unrefine_list[dd]);
+					gutil::sort_and_unique(request_unrefine_list[dd]);
 					//this is only a valid unrefinement target if it is not active and its depth field is greater
 					//than its own depth. The latter guarantees the former as the elements are disjoint.
 					//additionally, rather than adding cells to unrefine, we only refine cells that will still
@@ -919,7 +920,7 @@ namespace GV {
 			//note that elements at the max_depth cannot be refined and elements at depth 0
 			//cannot have neighbors that are 'too coarse'
 			for (uint8_t dd=max_depth-1; dd>=1; --dd) {
-				BASE::sort_and_unique(request_refine_list[dd]);
+				gutil::sort_and_unique(request_refine_list[dd]);
 				for (Elem_t el : request_refine_list[dd]) {
 					for (Elem_t nbr : neighbors(el)) {
 						if (nbr.depth_u8() == dd-1) {
@@ -928,7 +929,7 @@ namespace GV {
 					}
 				}
 			}
-			BASE::sort_and_unique(request_refine_list[0]);
+			gutil::sort_and_unique(request_refine_list[0]);
 
 			//we can process in 2 parallel batches due to the 2-1 rule
 			//deactivate specified elements at level dd,
