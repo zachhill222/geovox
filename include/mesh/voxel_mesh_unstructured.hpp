@@ -315,6 +315,7 @@ namespace GV {
 			active_elements = BASE::reinterpret_key_span<Elem_t,uint64_t>(BASE::active_keys);
 			sort_elements_by_depth();
 			GUTIL_ASSERT(is_current());
+			is_vertices_collected_.store(false);
 		}
 
 		void sort_elements_by_depth() noexcept {
@@ -452,7 +453,7 @@ namespace GV {
 			
 			#ifndef NDEBUG
 				if (is_encoded() == val) {
-					for (size_t i=0; i<std::min(size_t{100}, n_elements()); ++i) {
+					for (size_t i=0; i<std::min(size_t{100}, active_elements.size()); ++i) {
 						GUTIL_ASSERT(active_elements[i].is_encoded() == val);
 					}
 				}
@@ -538,7 +539,9 @@ namespace GV {
 										  static_cast<uint64_t>(el_idx[2+dj]),
 										  static_cast<uint64_t>(el_idx[4+dk])};
 						if (!elem.exists()) { continue; }
-						if (is_active(Elem_t{elem})) {return false; }
+						if (is_active(Elem_t{elem})) {
+							return false;
+						}
 					}
 				}
 			}
@@ -602,7 +605,6 @@ namespace GV {
 		[[nodiscard]] GeoPoint_t el_size_inv(Elem_t el) const noexcept {
 			return gutil::ldexp(Scalar_t{1}, (int)(el.depth())) * inv_diag;
 		}
-
 
 		[[nodiscard]] size_t n_elements() const noexcept {
 			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
@@ -706,11 +708,14 @@ namespace GV {
 				for (Elem_t el : e_list) {
 					el = el.encode();
 					Elem_t sib{el.siblings_simd()};
+					bool can_unrefine = true;
 					for (int i=0; i<8; ++i, ++sib) {
-						if (read_depth_field_stable(sib) > dd) {continue;}
-						if (is_active_stable(sib) && !pred(sib)) {continue;}
+						if (read_depth_field_stable(sib) > dd) {can_unrefine=false; break;}
+						if (is_active_stable(sib) && !pred(sib)) {can_unrefine=false; break;}
 					}
-					request_unrefine_list[dd-1].push_back(el.parent());
+					if (can_unrefine) {
+						request_unrefine_list[dd-1].push_back(el.parent());
+					}
 				}
 			};
 
@@ -722,28 +727,46 @@ namespace GV {
 
 		[[nodiscard]] bool is_depth_field_correct() const noexcept;
 		void propagate_depth_field(Elem_t el) noexcept;
-		void process_unrefine() noexcept;
+		
 
-		template<typename Predicate = std::nullptr_t>
+		//if we require the 2-1 rule to be respected periodically, we need to pass the period
+		template<uint8_t Period=0, typename Predicate = std::nullptr_t> requires(Period<8)
 		void process_refine(Predicate&& pred = nullptr) noexcept;
 
+		template<uint8_t Period=0> requires(Period<8)
+		void process_unrefine() noexcept;
 
-		[[nodiscard]] std::vector<Elem_t> neighbors(Elem_t el) const noexcept {
-			GUTIL_ASSERT(el.is_valid())
-			GUTIL_ASSERT(is_active_no_check(el))
+		template<uint8_t Period=0> requires(Period<8)
+		[[nodiscard]] std::vector<Elem_t> neighbors(Elem_t el_) const noexcept {
+			using P_Elem_t = Keys::VoxelElement<Period>;
+			P_Elem_t el = static_cast<P_Elem_t>(el_);
+
+
+			GUTIL_ASSERT(el.is_valid());
+			GUTIL_ASSERT(is_active_no_check(Elem_t{el.key}));	
 
 			const uint64_t dd = el.depth();
-			if (!is_active_no_check(el)) { return {}; }
+			const int s_el_i = static_cast<int>(el.i());	//note i/j/k is at most 2^15 - 1
+			const int s_el_j = static_cast<int>(el.j());
+			const int s_el_k = static_cast<int>(el.k());
+			
+			[[maybe_unused]] int s_max_idx;
+			if constexpr (Period!=0) {
+				s_max_idx = static_cast<int>(1<<dd)-1;
+			}
+			
+
+			// if (!is_active_no_check(el)) { return {}; }
 
 			//a coarse cell at depth dd surrounded by cells at depth dd+1 will have 54 neighbors
 			std::vector<Elem_t> list;
 			list.reserve(54);
 
-			for (Elem_t nbr : el.neighbors()) {
+			for (P_Elem_t nbr : el.neighbors()) {
 				if (!nbr.is_valid()) { continue; }
 
-				if ( is_active_no_check(nbr) ) { list.push_back(nbr); }
-				else if ( dd>0 && is_active_no_check(nbr.parent())) { list.push_back(nbr.parent()); }
+				if ( is_active_no_check(Elem_t{nbr.key}) ) { list.emplace_back(nbr.key); }
+				else if ( dd>0 && is_active_no_check(Elem_t{nbr.parent().key})) { list.emplace_back(nbr.parent().key); }
 				else if ( dd<max_depth ) {
 					
 					//to only get the correct fine neighbors, we need to be careful
@@ -752,18 +775,49 @@ namespace GV {
 					
 					//track if the nbr child needs low/high/any bits for each axis
 					//note that el.i/j/k and nbr.i/j/k are at most one apart
-					const int64_t di = static_cast<int64_t>(nbr.i()) - static_cast<int64_t>(el.i());
-					const int64_t dj = static_cast<int64_t>(nbr.j()) - static_cast<int64_t>(el.j());
-					const int64_t dk = static_cast<int64_t>(nbr.k()) - static_cast<int64_t>(el.k());
+					//if we need to get periodic neighbors, this must be handled here as well.
+					//suppose we are periodic in the x-axis:
+					// 	if el.i()=n_el-1, then we need the neighbor nbr.i()=0 for the high neighbor 
+					//	if el.i()=0, then we need the neighbor nbr.i()=n_el-1 for the low neighbor
+					
+					//compute indicators from comparing the element and neighbor indices in each axis
+					// di>0 means we need the neighbor's high index children (the neighbor is lower than the query element)
+					// di<0 means we need the neighbor's low index children
+					// di=0 means this axis does not restrict the candidate children.
+					const int s_nbr_i = static_cast<int>(nbr.i());
+					const int s_nbr_j = static_cast<int>(nbr.j());
+					const int s_nbr_k = static_cast<int>(nbr.k());
+					int di = s_el_i - s_nbr_i;
+					int dj = s_el_j - s_nbr_j;
+					int dk = s_el_k - s_nbr_k;
 
-					for (Elem_t c : nbr.children()) {
-						if (!is_active_no_check(c)) {continue;}
+					if constexpr (Period&0b001) {
+						if (s_el_i == 0) {di=-1;}	//need the low side of this axis
+						else if (s_el_i==s_max_idx) {di=1;}
+					}
+
+					if constexpr (Period&0b010) {
+						if (s_el_j == 0) {dj=-1;}	//need the low side of this axis
+						else if (s_el_j==s_max_idx) {dj=1;}
+					}
+
+					if constexpr (Period&0b100) {
+						if (s_el_k == 0) {dk=-1;}	//need the low side of this axis
+						else if (s_el_k==s_max_idx) {dk=1;}
+					}
+
+					// int64_t di = static_cast<int64_t>(nbr.i()) - static_cast<int64_t>(el.i());
+					// int64_t dj = static_cast<int64_t>(nbr.j()) - static_cast<int64_t>(el.j());
+					// int64_t dk = static_cast<int64_t>(nbr.k()) - static_cast<int64_t>(el.k());
+
+					for (P_Elem_t c : nbr.children()) {
+						if (!c.exists() || !is_active_no_check(Elem_t{c.key})) {continue;}
 
 						//check if each axis index is ok (any/low/high)
-						if ( (di>0 && static_cast<bool>(c.i()&1)) || (di<0 && !static_cast<bool>(c.i()&1)) ) {continue;}
-						if ( (dj>0 && static_cast<bool>(c.j()&1)) || (dj<0 && !static_cast<bool>(c.j()&1)) ) {continue;}
-						if ( (dk>0 && static_cast<bool>(c.k()&1)) || (dk<0 && !static_cast<bool>(c.k()&1)) ) {continue;}
-						list.push_back(c);
+						if ( (di>0 && !static_cast<bool>(c.i()&1)) || (di<0 && static_cast<bool>(c.i()&1)) ) {continue;}
+						if ( (dj>0 && !static_cast<bool>(c.j()&1)) || (dj<0 && static_cast<bool>(c.j()&1)) ) {continue;}
+						if ( (dk>0 && !static_cast<bool>(c.k()&1)) || (dk<0 && static_cast<bool>(c.k()&1)) ) {continue;}
+						list.emplace_back(c.key);
 					}
 				}
 			}
@@ -900,7 +954,8 @@ namespace GV {
 	//////////////////////////////////////////////////////////////////////////////////////////////////////
 	/// Implementations
 	//////////////////////////////////////////////////////////////////////////////////////////////////////
-	template<typename T>
+	template<typename T> 
+	template<uint8_t Period> requires(Period<8)
 	void UnstructuredVoxelMesh<T>::process_unrefine() noexcept {
 		GUTIL_ASSERT(is_current());
 		if (!has_pending_unrefine_requests()) {
@@ -923,7 +978,8 @@ namespace GV {
 				//note that elements marked as 'unrefine' are elements that should be activated and
 				//if they have no active descendant, the request is removed.
 				auto job = [&](uint8_t dd) {
-					gutil::sort_and_unique(request_unrefine_list[dd]);
+					auto it = gutil::sort_and_unique(request_unrefine_list[dd]);
+					request_unrefine_list[dd].erase(it, request_unrefine_list[dd].end());
 					//this is only a valid unrefinement target if it is not active and its depth field is greater
 					//than its own depth. The latter guarantees the former as the elements are disjoint.
 					//additionally, rather than adding cells to unrefine, we only refine cells that will still
@@ -932,7 +988,7 @@ namespace GV {
 						if (read_depth_field_unstable(el) <= dd) {return true;}
 						for (Elem_t c : el.children()) {
 							if (!is_active_unstable(c)) { continue; }
-							for (Elem_t nbr : neighbors(c)) {
+							for (Elem_t nbr : neighbors<Period>(c)) {
 								if (nbr.depth() > static_cast<uint64_t>(dd+1)) {
 									return true; //activating will break 2-1	
 								}
@@ -1006,7 +1062,7 @@ namespace GV {
 	}
 
 	template<typename T>
-	template<typename Predicate>
+	template<uint8_t Period, typename Predicate> requires(Period<8)
 	void UnstructuredVoxelMesh<T>::process_refine(Predicate&& pred) noexcept {
 		GUTIL_ASSERT(is_current());
 
@@ -1030,16 +1086,18 @@ namespace GV {
 			//note that elements at the max_depth cannot be refined and elements at depth 0
 			//cannot have neighbors that are 'too coarse'
 			for (uint8_t dd=max_depth-1; dd>=1; --dd) {
-				gutil::sort_and_unique(request_refine_list[dd]);
+				auto it = gutil::sort_and_unique(request_refine_list[dd]);
+				request_refine_list[dd].erase(it, request_refine_list[dd].end());
 				for (Elem_t el : request_refine_list[dd]) {
-					for (Elem_t nbr : neighbors(el)) {
+					for (Elem_t nbr : neighbors<Period>(el)) {
 						if (nbr.depth_u8() == dd-1) {
 							request_refine_list[dd-1].push_back(nbr);
 						}
 					}
 				}
 			}
-			gutil::sort_and_unique(request_refine_list[0]);
+			auto it = gutil::sort_and_unique(request_refine_list[0]);
+			request_refine_list[0].erase(it, request_refine_list[0].end());
 
 			//we can process in 2 parallel batches due to the 2-1 rule
 			//deactivate specified elements at level dd,
@@ -1208,11 +1266,21 @@ namespace GV {
 		size_t n_used_vert = mesh.n_vertices() * sizeof(typename UnstructuredVoxelMesh<T>::Vert_t);
 		size_t n_vert_reserved = mesh.tracked_vertices.capacity() * sizeof(typename UnstructuredVoxelMesh<T>::Vert_t);
 
-		os << "UnstructuredVoxelMesh\n";
+		os << "UnstructuredVoxelMesh with maximum depth of " << mesh.max_depth << "\n";
 		os << mesh.summary();
-		os << gutil::format(mesh.n_elements(),16) << " active elements (keys)\n";
 		os << gutil::format(mesh.n_vertices(),16) << " tracked vertices (" + format_byte_count(n_used_vert) + " / "
 		    							+ format_byte_count(n_vert_reserved) + " used/reserved\n";
+		os << gutil::format(mesh.n_elements(),16) << " active elements (keys)\n";
+
+		if (mesh.is_depth_sorted()) {
+			for (uint8_t dd=0; dd<=mesh.max_depth; ++dd) {
+				if (mesh.get_depth(dd).size()>0) {
+					std::cout << "\tdepth " << (int)dd <<" : " << std::to_string(mesh.get_depth(dd).size()) << "\n";
+				}
+			}
+		}
+
+
 		return os;
 	}
 

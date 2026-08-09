@@ -83,7 +83,7 @@ namespace Keys{
 		}
 		GUTIL_DECLARE_SIMD()
 		[[nodiscard]] static constexpr uint64_t decode_simd(uint64_t k) noexcept {
-			return Mesh3D::DecodeElement_SIMD(k);
+			return Mesh3D::IsMorton(k) ? Mesh3D::DecodeElement_SIMD(k) : k;
 		}
 
 		/// Color54 by pairity - no ring 1 colisions in a 2-1 mesh

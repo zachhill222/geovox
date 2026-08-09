@@ -7,7 +7,7 @@
 ///   GV_TEST_DOMAIN_PERIOD  0bzyx periodicity of the MESH (e.g. 6=0b110 -> periodic in y,z)
 /////////////////////////////////////////////////////////////////
 #ifndef GV_TEST_DOF_PERIOD
-	#define GV_TEST_DOF_PERIOD 1
+	#define GV_TEST_DOF_PERIOD 0
 #endif
 
 /////////////////////////////////////////////////////////////////
@@ -60,33 +60,29 @@ TestConfig parse_args(int argc, char* argv[]) {
 /////////////////////////////////////////////////////////////////
 void remove_unsupported_elements(Mesh_t& mesh, Handler_t& handler) {
 	GUTIL_TIMER("remove mesh elements with no dofs");
-	std::cout << mesh << "\n";
+	if (!handler.is_all_dofs_conformal()) {GUTIL_ABORT("dofs are not conformal");}
 
 	mesh.request_unrefine([&handler](MeshElem_t el){
-		return handler.get_active_dofs_quasi_hierarchical(el).empty();
+		return handler.get_active_dofs_conformal(el).empty();
 	});
 
-	mesh.process_unrefine();
+	mesh.process_unrefine<DOF_t::PERIOD>();
 	
-	for (DOF_t dof : handler.active_dofs) {
-		if (!mesh.is_conformal(DofVert_t{dof.key})) {
-			GUTIL_ERROR(dof, " is not conformal");
-		}
+	if (!handler.is_all_dofs_conformal()) {
+		GUTIL_ERROR("unrefining mesh made dofs non-conformal");
 	}
-
-	std::cout << mesh << "\n";
 }
 
 /////////////////////////////////////////////////////////////////
 /// Phase: evaluate the field at every mesh vertex and save results to disk.
 /////////////////////////////////////////////////////////////////
-void evaluate_and_save(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_handler, const TestConfig& cfg) {
+void evaluate_and_save(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_handler, const std::string test_name) {
 	mesh.collect_vertices();
 	GUTIL_ASSERT(mesh.is_current());
 	GUTIL_ASSERT(handler.is_current());
 
-	mesh.set_encoded(false);
-	mesh.sort_elements_by_color();
+	// mesh.set_encoded(false);
+	// mesh.sort_elements_by_color();
 
 	std::vector<Scalar_t> scalar_vals(mesh.n_vertices());
 	{
@@ -98,7 +94,7 @@ void evaluate_and_save(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_han
 	}
 
 	GUTIL_LOG("saving file");
-	const std::string filename = cfg.test_name + "_dof.vtk";
+	const std::string filename = test_name + ".vtk";
 	mesh.save_as_binary(filename);
 
 	auto pt_field_lookup = GV::make_index_lookup<float>(
@@ -107,7 +103,7 @@ void evaluate_and_save(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_han
 	auto pt_coef_lookup = GV::make_feature_lookup<MeshVert_t>(
 			[&](MeshVert_t vtx) {
 				auto d_vtx = handler.get_dof_vertex(vtx);
-				return d_vtx.exists() && handler.is_active_stable(DOF_t{d_vtx}) ? (int32_t)coef_handler.coefs[0][handler.global_number(DOF_t{d_vtx})] : -1;
+				return d_vtx.exists() && handler.is_active_stable(DOF_t{d_vtx}) ? (float)coef_handler.coefs[0][handler.global_number(DOF_t{d_vtx})] : -1;
 			}, "scalar_coef");
 
 	auto pt_dof_active_lookup = GV::make_feature_lookup<MeshVert_t>(
@@ -141,10 +137,7 @@ void evaluate_and_save(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_han
 
 	auto el_dof_count_lookup = GV::make_feature_lookup<MeshElem_t>(
 			[&](MeshElem_t el) {
-				std::vector<DOF_t> dofs;
-				std::vector<size_t> idxs;
-				handler.get_active_dofs_full_hierarchical(el, dofs, idxs);
-				return dofs.size();
+				return handler.get_active_dofs_full_hierarchical(el).size();
 			}, "n_active_dofs");
 
 	auto el_dijkm_lookup = GV::make_feature_lookup<MeshElem_t>(
@@ -164,7 +157,7 @@ void evaluate_and_save(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_han
 			}, "element_number");
 
 	mesh.append_point_data_field_binary(filename, "point",
-			pt_dof_active_lookup, pt_dof_key_lookup, pt_field_lookup, pt_vtx_key_lookup);
+			pt_dof_active_lookup, pt_dof_key_lookup, pt_field_lookup, pt_vtx_key_lookup, pt_coef_lookup);
 	mesh.append_cell_data_field_binary(filename, "element",
 			el_dof_count_lookup, el_idx_lookup, el_color_lookup, el_dijkm_lookup);
 }
@@ -181,28 +174,43 @@ void test_dof_handler(const TestConfig& cfg) {
 
 	CoefHandler_t coef_handler(handler);
 
-	coef_handler.init_coefs(0,[](DOF_t dof){return 1.0;});
+	coef_handler.init_coefs(0,[&](DOF_t dof){ 
+		auto pt = mesh.geo_coord(MeshVert_t{dof.key});
+		return pt[0]*(Scalar_t{1}-pt[0])*(Scalar_t{1}+pt[0]);
+		});
+
+	GUTIL_LOG("Initial mesh and dofs:");
+	
 
 	//refine
 	for (uint8_t i=0; i<cfg.n_refine; ++i) {
+		GUTIL_ASSERT(handler.is_all_dofs_conformal());
 		GUTIL_TIMER("Refine ", i+1, "/", cfg.n_refine);
-		handler.refine_quasi_hierarchical(mesh.element_begin(), mesh.element_end());
-		mesh.process_refine();
-		std::cout << handler << "\n";
-		std::cout << mesh << "\n";
+		std::vector<MeshElem_t> elements;
+		for (auto it=mesh.element_begin(); it!=mesh.element_end(); ++it) {
+			if (it->normalized_center()[i%3] < 0.25) {elements.push_back(*it);}
+		}
+		handler.refine_quasi_hierarchical(elements);
+		mesh.process_refine<DOF_t::PERIOD>();
+		std::cout << "after refine:\n" << mesh << "\n" << handler << "\n";
 	}
+	coef_handler.update_coefs();
+	evaluate_and_save(mesh, handler, coef_handler, cfg.test_name + "_refine");
 
 	//unrefine
 	for (uint8_t i=0; i<cfg.n_unrefine; ++i) {
-		GUTIL_TIMER("Unrefine ", i+1, "/", cfg.n_refine);
-		handler.unrefine_quasi_hierarchical(mesh.element_begin(), mesh.element_end());
+		GUTIL_ASSERT(handler.is_all_dofs_conformal());
+		GUTIL_TIMER("Unrefine ", i+1, "/", cfg.n_unrefine);
+		std::vector<MeshElem_t> elements;
+		for (auto it=mesh.element_begin(); it!=mesh.element_end(); ++it) {
+			if (it->normalized_center()[1] < 0.25) {elements.push_back(*it);}
+		}
+		handler.unrefine_quasi_hierarchical(elements);
 		remove_unsupported_elements(mesh, handler);
-		std::cout << handler << "\n";
-		std::cout << mesh << "\n";
+		std::cout << "after unrefine:\n" << mesh << "\n" << handler << "\n";
 	}
-
 	coef_handler.update_coefs();
-	evaluate_and_save(mesh, handler, coef_handler, cfg);
+	evaluate_and_save(mesh, handler, coef_handler, cfg.test_name + "_unrefine");
 }
 
 int main(int argc, char* argv[]) {

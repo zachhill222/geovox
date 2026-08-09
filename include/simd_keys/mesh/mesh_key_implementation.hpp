@@ -1046,11 +1046,6 @@ namespace GV {
 			const uint64_t jj = IndexJ_SIMD(key); uint64_t jp1 = jj+1;
 			const uint64_t kk = IndexK_SIMD(key); uint64_t kp1 = kk+1;
 
-			[[maybe_unused]] const uint64_t N = (uint64_t{1} << dd) + 1;
-			if constexpr (Period&0b001) {ip1%=N;}
-			if constexpr (Period&0b010) {jp1%=N;}
-			if constexpr (Period&0b100) {kp1%=N;}
-
 			//MakeVertex will set any invalid elements to 0
 			*(ptr+0) = MakeVertex<Period>(dd, ii , jj , kk );	//local index 0b000
 			*(ptr+1) = MakeVertex<Period>(dd, ip1, jj , kk );	//local index 0b100

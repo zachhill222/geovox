@@ -42,6 +42,8 @@ namespace DOFS {
 		static constexpr uint64_t N_CHILDREN     = LagrangeQ1::N_CHILDREN;
 		static constexpr uint64_t N_PARENTS      = LagrangeQ1::N_PARENTS;
 
+		[[nodiscard]] static std::string name() noexcept {return "VoxelQ1<" + std::to_string(Period) + ">";}
+
 		static constexpr VoxelQ1 MakeFromIndex(uint64_t index) noexcept {
 			return VoxelQ1<Period>{Mesh3D::VertexFromGlobalIndex_SIMD<Period>(index)};
 		}
@@ -289,11 +291,20 @@ namespace DOFS {
 
 		GUTIL_DECLARE_SIMD()
 		template<typename T=double>
-		[[nodiscard]] constexpr T parent_coef(uint8_t p) const noexcept {
+		[[nodiscard]] constexpr T parent_coef_restrict(uint8_t p) const noexcept {
 			//pass the parent number for a common interface and to help
 			//catch bugs via the assert.
 			GUTIL_ASSERT(p<N_PARENTS)
 			return LagrangeQ1::GetParentCoef<T,Period>(key);
+		}
+
+		GUTIL_DECLARE_SIMD()
+		template<typename T=double>
+		[[nodiscard]] constexpr T parent_coef_mean(uint8_t p) const noexcept {
+			//pass the parent number for a common interface and to help
+			//catch bugs via the assert.
+			GUTIL_ASSERT(p<N_PARENTS)
+			return LagrangeQ1::GetParentCoef_Mean<T,Period>(key);
 		}
 	};
 

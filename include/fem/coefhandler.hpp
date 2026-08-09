@@ -50,7 +50,6 @@ namespace GV {
 		std::span<const DOF_t> 			dh_curr_dofs;
 		std::vector<DOF_t> 				dofs{};
 		std::array<std::vector<T>,N> 	coefs{};
-		static constexpr uint8_t 		COEF_MARKED_BIT = DofHandler_type::COEF_MARKED_BIT;
 
 		//////////////////////////////////////////////////////////////////
 		/// Constructor and movement
@@ -108,17 +107,6 @@ namespace GV {
 			{
 				auto lock = dofhandler.begin_active_keys_stable();
 				dh_curr_dofs = dofhandler.active_dofs;
-			}
-			
-			{
-				//mark all dof masks with which ones are in the current batch
-				auto lock = dofhandler.begin_key_mask_unstable();
-				dofhandler.unconditional_bitwise_and_all_masks(~COEF_MARKED_BIT);
-				GUTIL_OMP(parallel for schedule(static, 1024))
-				for (uint64_t idx=0; idx<dofs.size(); ++idx) {
-					dofhandler.set_coef_marked(dofs[idx], false);
-				}
-				dofhandler.end_key_mask_unstable();
 			}
 
 			{
@@ -214,15 +202,13 @@ namespace GV {
 			dof.parents_simd(pc_dofs);
 			for (uint8_t p=0; p<DOF_t::N_PARENTS; ++p) {
 				if (!pc_dofs[p].exists()) {continue;}
-				Scalar_t parent_contribution = contribution * dof.template parent_coef<Scalar_t>(p);
+				Scalar_t parent_contribution = contribution * dof.template parent_coef_restrict<Scalar_t>(p);
 				if (parent_contribution == Scalar_t{0}) {continue;}
 
 				size_t n_idx = dofhandler.global_number(pc_dofs[p]);
 				if (n_idx<new_size) {
-					if (!dofhandler.is_coef_marked_stable(pc_dofs[p])) {
-						GUTIL_OMP(atomic)
-						new_coefs[n_idx] += parent_contribution;
-					}
+					GUTIL_OMP(atomic)
+					new_coefs[n_idx] += parent_contribution;
 				}
 				else if (!dofhandler.is_active_stable(pc_dofs[p])) {
 					distribute_unrefined(pc_dofs[p], parent_contribution, new_coefs, new_size);

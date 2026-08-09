@@ -979,7 +979,7 @@ namespace Keys {
 					if ( it==global_list.end() || *it!=query_key) { global_index[n] = size_t(-1); }
 					else {
 						global_index[n] = sorter.bin_start(i) + 
-								static_cast<size_t>(std::distance(global_list.begin(), it));
+							static_cast<size_t>(std::distance(global_list.begin(), it));
 					}
 				}
 			}

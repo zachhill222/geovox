@@ -235,14 +235,14 @@ namespace LagrangeQ1 {
 	//this only happens if all of its indices are 0.
 	GUTIL_DECLARE_SIMD()
 	template<typename T=double, uint8_t Period> requires(Period<8)
-	[[nodiscard]] inline constexpr T GetParentCoef(uint64_t dof) noexcept {
-		GUTIL_ASSERT(Mesh3D::Depth(dof)>0)
-		ASSERT_VALID_VOXELQ1_DOF(dof)
-		GUTIL_ASSERT(Mesh3D::IsValid<Period>(dof))
+	[[nodiscard]] inline constexpr T GetParentCoef(uint64_t child) noexcept {
+		GUTIL_ASSERT(Mesh3D::Depth(child)>0)
+		ASSERT_VALID_VOXELQ1_DOF(child)
+		GUTIL_ASSERT(Mesh3D::IsValid<Period>(child))
 		
-		uint64_t par = Mesh3D::CartesianIndexPairity_SIMD(dof);
+		uint64_t par = Mesh3D::CartesianIndexPairity_SIMD(child);
 		if constexpr (Period!=0) {
-			if (Mesh3D::Depth(dof)==1) {
+			if (Mesh3D::Depth(child)==1) {
 				if constexpr (Period&0b001) {par&=0b110;}
 				if constexpr (Period&0b010) {par&=0b101;}
 				if constexpr (Period&0b100) {par&=0b011;}
@@ -250,6 +250,27 @@ namespace LagrangeQ1 {
 
 		}
 		return static_cast<T>(par==0);
+	}
+
+	GUTIL_DECLARE_SIMD()
+	template<typename T=double, uint8_t Period> requires(Period<8)
+	[[nodiscard]] inline constexpr T GetParentCoef_Mean(uint64_t child) noexcept {
+		GUTIL_ASSERT(Mesh3D::Depth(child)>0)
+		ASSERT_VALID_VOXELQ1_DOF(child)
+		GUTIL_ASSERT(Mesh3D::IsValid<Period>(child))
+		
+		//split this coefficient between all parents that exist.
+		//each odd-parity index doubles the number of parents
+		uint64_t par = Mesh3D::CartesianIndexPairity_SIMD(child);
+		if constexpr (Period!=0) {
+			if (Mesh3D::Depth(child)==1) {
+				if constexpr (Period&0b001) {par&=0b110;}
+				if constexpr (Period&0b010) {par&=0b101;}
+				if constexpr (Period&0b100) {par&=0b011;}
+			}
+
+		}
+		return gutil::ldexp(T{1},-(int)std::popcount(par));
 	}
 
 
