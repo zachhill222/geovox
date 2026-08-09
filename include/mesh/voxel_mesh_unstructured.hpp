@@ -2,13 +2,10 @@
 
 #include "gutil.hpp"
 
-#include "util/concepts.hpp"
-#include "util/macros.hpp"
+#include "util/util.hpp"
+#include "simd_keys/simd_keys.hpp"
 
-#include "simd_keys/containers.hpp"
-#include "simd_keys/mesh/mesh_keys.hpp"
 #include "mesh/vtk_file_io.hpp"
-#include "mesh/voxel_mesh_structured.hpp"
 
 #include <cstdint>
 #include <algorithm>
@@ -90,6 +87,9 @@ namespace GV {
 		mutable std::vector<std::vector<Elem_t>> 	request_refine_list{};		//allow classes with const-ref to request refinement
 		mutable std::vector<std::vector<Elem_t>>	request_unrefine_list{};	//allow classes with const-ref to request unrefinement
 		std::atomic<bool>							is_elements_encoded_{true};	//track if the elements in active_keys are in morton(true) or cartesian(false) form.
+		std::atomic<bool>							is_elements_depth_sorted_{false};	//track if the elements are sorted by color or depth
+		std::atomic<bool>							is_elements_color_sorted_{false};	//track if the elements are sorted by color or depth
+
 
 		public:
 		using BASE::is_key_mask_unstable;										//synchronization tools used in macros
@@ -110,6 +110,8 @@ namespace GV {
 		[[nodiscard]] bool is_vertices_collected() const noexcept {return is_vertices_collected_.load();}
 		[[nodiscard]] bool is_active_elements_linked() const noexcept {return are_spans_same_data(active_elements,BASE::active_keys);}
 		[[nodiscard]] bool is_encoded() const noexcept {return is_elements_encoded_.load();}
+		[[nodiscard]] bool is_depth_sorted() const noexcept {return is_elements_depth_sorted_.load();}
+		[[nodiscard]] bool is_color_sorted() const noexcept {return is_elements_color_sorted_.load();}
 		[[nodiscard]] bool is_current() const noexcept {	//for most processes we only care about the elements
 			return BASE::is_current() && is_active_elements_linked();
 		}
@@ -293,27 +295,51 @@ namespace GV {
 			GUTIL_ASSERT(is_current() && is_depth_field_correct());
 		}
 
+		[[nodiscard]] std::span<const Elem_t> get_depth(uint8_t depth) const noexcept {
+			GUTIL_ASSERT(is_depth_sorted());
+			GUTIL_ASSERT(depth<=max_depth);
+			return BASE::reinterpret_key_span<Elem_t,uint64_t>(sorter.get_bin((int) depth));
+		}
+
+		[[nodiscard]] std::span<Elem_t> get_depth(uint8_t depth) noexcept {
+			GUTIL_ASSERT(is_depth_sorted());
+			GUTIL_ASSERT(depth<=max_depth);
+			return BASE::reinterpret_key_span<Elem_t,uint64_t>(sorter.get_bin((int) depth));
+		}
+
 		void collect_elements() noexcept {
 			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
 			GV_ASSERT_KEY_MASK_STABLE_STATE
-			GUTIL_TIMER("collecting active elements");
+			GUTIL_PROFILE("collecting active elements");
 			BASE::collect_active_keys<Elem_t>();
 			active_elements = BASE::reinterpret_key_span<Elem_t,uint64_t>(BASE::active_keys);
-			BASE::sort_active_keys(max_depth, &UnstructuredVoxelMesh::element_key_depth_bin);
+			sort_elements_by_depth();
 			GUTIL_ASSERT(is_current());
+		}
+
+		void sort_elements_by_depth() noexcept {
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GV_ASSERT_KEY_MASK_STABLE_STATE
+			GUTIL_PROFILE("sorting elements by depth");
+			BASE::sort_active_keys(54, &UnstructuredVoxelMesh::element_key_depth_bin);
+			is_elements_color_sorted_.store(false);
+			is_elements_depth_sorted_.store(true);
 		}
 
 		void sort_elements_by_color() noexcept {
 			GUTIL_ASSERT(is_current());
+			GUTIL_ASSERT(!is_encoded());			//elements must be in cartesian form to easily get their color
 			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
 			GV_ASSERT_KEY_MASK_STABLE_STATE
-			GUTIL_TIMER("sorting elements by color");
+			GUTIL_PROFILE("sorting elements by color");
 			BASE::sort_active_keys(54, &UnstructuredVoxelMesh::element_key_color54_bin);
+			is_elements_color_sorted_.store(true);
+			is_elements_depth_sorted_.store(false);
 		}
 
 		void collect_vertices() noexcept {
 			GV_BEGIN_STABLE  	//The base class+elements must be stable, we are only altering the vertices
-			GUTIL_TIMER("Collecting active vertices");
+			GUTIL_PROFILE("Collecting active vertices");
 			GUTIL_ASSERT(is_current());
 			is_vertices_collected_.store(false);
 
@@ -433,26 +459,31 @@ namespace GV {
 			#endif
 
 			if (is_encoded() == val) {return;}
+			GUTIL_PROFILE("Setting encoding to ", val ? "morton" : "cartesian");
 
 			if (val) { //cartesian->morton
 				dispatch_parallel_active_keys(
-					[](std::span<uint64_t> keys) {
+					[val](std::span<uint64_t> keys) {
 					GUTIL_SIMD()
 					for (size_t i=0; i<keys.size(); ++i) {
 						keys[i] = Elem_t::encode_simd(keys[i]);
+						GUTIL_ASSERT(Elem_t{keys[i]}.is_encoded()==val);
+						GUTIL_ASSERT(Elem_t{keys[i]}.is_valid());
 					}
 				});
 			}
 			else {	//morton->cartesian
 				dispatch_parallel_active_keys(
-					[](std::span<uint64_t> keys) {
+					[val](std::span<uint64_t> keys) {
 					GUTIL_SIMD()
 					for (size_t i=0; i<keys.size(); ++i) {
 						keys[i] = Elem_t::decode_simd(keys[i]);
+						GUTIL_ASSERT(Elem_t{keys[i]}.is_encoded()==val);
+						GUTIL_ASSERT(Elem_t{keys[i]}.is_valid());
 					}
 				});
 			}
-
+			threads.wait_idle();
 			is_elements_encoded_.store(val);
 			GV_END_ACTIVE_UNSTABLE
 		}
@@ -575,14 +606,11 @@ namespace GV {
 
 		[[nodiscard]] size_t n_elements() const noexcept {
 			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
-			GUTIL_ASSERT(is_current());
 			return active_elements.size();
 		}
 
 		[[nodiscard]] size_t n_vertices() const noexcept {
 			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
-			GUTIL_ASSERT(is_current());
-			GUTIL_ASSERT(is_vertices_collected());
 			return tracked_vertices.size();
 		}
 
@@ -607,6 +635,13 @@ namespace GV {
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		[[nodiscard]] bool has_pending_refine_requests() const noexcept {
 			for (auto& list : request_refine_list) {
+				if (list.size()>0) {return true;}
+			}
+			return false;
+		}
+
+		[[nodiscard]] bool has_pending_unrefine_requests() const noexcept {
+			for (auto& list : request_unrefine_list) {
 				if (list.size()>0) {return true;}
 			}
 			return false;
@@ -647,6 +682,7 @@ namespace GV {
 
 		template<typename Predicate>
 		void request_refine(Predicate&& pred) const noexcept {
+			GUTIL_ASSERT(is_depth_sorted());
 			std::lock_guard<std::mutex> lock(request_mutex);
 			auto job = [pred,this](std::span<const uint64_t> list, uint8_t dd) {
 				std::span<const Elem_t> e_list = BASE::reinterpret_key_span<Elem_t,uint64_t>(list);
@@ -663,11 +699,13 @@ namespace GV {
 
 		template<typename Predicate>
 		void request_unrefine(Predicate&& pred) const noexcept {
+			GUTIL_ASSERT(is_depth_sorted());
 			std::lock_guard<std::mutex> lock(request_mutex);
-			auto job = [pred,this](std::span<const Elem_t> list, uint8_t dd) {
-				for (Elem_t el : list) {
+			auto job = [pred,this](std::span<const uint64_t> list, uint8_t dd) {
+				std::span<const Elem_t> e_list = BASE::reinterpret_key_span<Elem_t,uint64_t>(list);
+				for (Elem_t el : e_list) {
 					el = el.encode();
-					Elem_t sib = el.siblings_simd();
+					Elem_t sib{el.siblings_simd()};
 					for (int i=0; i<8; ++i, ++sib) {
 						if (read_depth_field_stable(sib) > dd) {continue;}
 						if (is_active_stable(sib) && !pred(sib)) {continue;}
@@ -865,7 +903,15 @@ namespace GV {
 	template<typename T>
 	void UnstructuredVoxelMesh<T>::process_unrefine() noexcept {
 		GUTIL_ASSERT(is_current());
-		GUTIL_TIMER("process_unrefine : ", n_elements(), " current elements");
+		if (!has_pending_unrefine_requests()) {
+			GUTIL_LOG("there are no unrefine requests");
+			return;
+		}
+
+		is_elements_color_sorted_.store(false);
+		is_elements_depth_sorted_.store(false);
+
+		GUTIL_PROFILE("process_unrefine : ", n_elements(), " current elements");
 		{
 			GV_BEGIN_UNSTABLE
 			is_vertices_collected_.store(false);
@@ -883,9 +929,9 @@ namespace GV {
 					//additionally, rather than adding cells to unrefine, we only refine cells that will still
 					//satisfy the 2-1 rule.
 					std::erase_if(request_unrefine_list[dd], [&,dd](Elem_t el) {
-						if (read_depth_field(el) <= dd) {return true;}
+						if (read_depth_field_unstable(el) <= dd) {return true;}
 						for (Elem_t c : el.children()) {
-							if (!is_active(c)) { continue; }
+							if (!is_active_unstable(c)) { continue; }
 							for (Elem_t nbr : neighbors(c)) {
 								if (nbr.depth() > static_cast<uint64_t>(dd+1)) {
 									return true; //activating will break 2-1	
@@ -963,7 +1009,16 @@ namespace GV {
 	template<typename Predicate>
 	void UnstructuredVoxelMesh<T>::process_refine(Predicate&& pred) noexcept {
 		GUTIL_ASSERT(is_current());
-		GUTIL_TIMER("process_refine : ", n_elements(), " current elements");
+
+		if (!has_pending_refine_requests()) {
+			GUTIL_LOG("there are no refine requests");
+			return;
+		}
+
+		is_elements_color_sorted_.store(false);
+		is_elements_depth_sorted_.store(false);
+
+		GUTIL_PROFILE("process_refine : ", n_elements(), " current elements");
 		{
 			GV_BEGIN_UNSTABLE
 			is_vertices_collected_.store(false);
@@ -1048,6 +1103,7 @@ namespace GV {
 
 			GV_END_UNSTABLE
 		}
+
 		collect_elements();
 		GUTIL_ASSERT(is_current() && is_depth_field_correct());
 	}
@@ -1142,9 +1198,27 @@ namespace GV {
 		}
 		is_depth_explicitly_correct_.store(count==0);
 		GV_END_STABLE
-		GUTIL_LOG(count, "/", max_possible_elements, " elements have inconsistent depth field");
 		return count==0;
 	}
+
+
+
+	template<typename T>
+	std::ostream& operator<<(std::ostream& os, const UnstructuredVoxelMesh<T>& mesh) {
+		size_t n_used_vert = mesh.n_vertices() * sizeof(typename UnstructuredVoxelMesh<T>::Vert_t);
+		size_t n_vert_reserved = mesh.tracked_vertices.capacity() * sizeof(typename UnstructuredVoxelMesh<T>::Vert_t);
+
+		os << "UnstructuredVoxelMesh\n";
+		os << mesh.summary();
+		os << gutil::format(mesh.n_elements(),16) << " active elements (keys)\n";
+		os << gutil::format(mesh.n_vertices(),16) << " tracked vertices (" + format_byte_count(n_used_vert) + " / "
+		    							+ format_byte_count(n_vert_reserved) + " used/reserved\n";
+		return os;
+	}
+
+
+
+
 }//GV
 	
 

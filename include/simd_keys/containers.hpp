@@ -839,7 +839,7 @@ namespace Keys {
 		void collect_active_keys() noexcept {
 			GV_BEGIN_UNSTABLE
 
-			GUTIL_TIMER("Collecting active keys (", key_mask.size(), " to check)");
+			// GUTIL_PROFILE("Collecting active keys (", key_mask.size(), " to check)");
 
 			//note that the gutil::ThreadPool with n_threads==0 will have the submitting thread run
 			//the job.
@@ -884,7 +884,7 @@ namespace Keys {
 			GV_BEGIN_ACTIVE_UNSTABLE
 
 			GUTIL_ASSERT(is_collected_ && "The keys were not collected. Call collect_active_keys<KeyType>() to collect them.");
-			GUTIL_TIMER("sorting ", active_keys.size(), " keys into ", N, " bins");
+			// GUTIL_PROFILE("sorting ", active_keys.size(), " keys into ", N, " bins");
 			sorter = sort_keys(std::span<uint64_t>{active_keys}, N, std::forward<BinFun>(fun), &threads, std::forward<Less_t>(less));
 			is_sorted_.store(true);
 
@@ -989,6 +989,29 @@ namespace Keys {
 				GUTIL_ASSERT(keys[n] == active_keys[global_index[n]]);
 			}
 			#endif
+		}
+
+
+		///////////////////////////////////////////////////////////////////////////////////
+		/// Debug and print info
+		///////////////////////////////////////////////////////////////////////////////////
+		std::string summary(const std::string& line_prefix = "") const noexcept {
+			GV_BEGIN_STABLE
+			const size_t n_masks       = key_mask.size();
+		    const size_t masks_used    = n_masks * sizeof(uint8_t);
+		    const size_t mask_reserved = key_mask.capacity() * sizeof(uint8_t);
+
+		    const size_t n_active        = active_keys.size();
+		    const size_t active_used     = n_active * sizeof(uint64_t);
+		    const size_t active_reserved = active_keys.capacity() * sizeof(uint64_t);
+
+		    std::string result = line_prefix + gutil::format(n_masks,16) + " masks tracked (" + format_byte_count(masks_used) + " / "
+		    							+ format_byte_count(mask_reserved) + " used/reserved\n";
+		    result += 			 line_prefix + gutil::format(n_active,16) + " active keys (" + format_byte_count(active_used) + " / "
+		    							+ format_byte_count(active_reserved) + " used/reserved\n";
+			GV_END_STABLE
+
+			return result;
 		}
 	};
 }}

@@ -31,6 +31,19 @@ namespace GV {
 
 		return str;
 	}
+
+	/////////////////////////////////////////////
+	/// Format bytes into B, KB, etc.
+	/////////////////////////////////////////////
+	[[nodiscard]] inline std::string format_byte_count(size_t bytes) noexcept {
+		constexpr double KB = 1024.0, MB = KB*1024.0, GB = MB*1024.0;
+		char buf[64];
+		if 		(bytes >= (size_t)(GB)) { std::snprintf(buf, sizeof(buf), "%.2f GB", bytes/GB);}
+		else if (bytes >= (size_t)(MB)) { std::snprintf(buf, sizeof(buf), "%.2f MB", bytes/MB);}
+		else if (bytes >= (size_t)(KB)) { std::snprintf(buf, sizeof(buf), "%.2f KB", bytes/KB);}
+		else  					   	    { std::snprintf(buf, sizeof(buf), "%zu B", bytes);}
+		return buf;
+	}
 }
 
 

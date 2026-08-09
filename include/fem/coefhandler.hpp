@@ -104,7 +104,7 @@ namespace GV {
 		///////////////////////////////////////////////////////////////////
 		void update_coefs() noexcept {
 			GUTIL_ASSERT(dofhandler.is_current());
-			GUTIL_TIMER("updating coefficients (", dofs.size(), " -> ", dh_curr_dofs.size(), ")");
+			GUTIL_PROFILE("updating coefficients (", dofs.size(), " -> ", dh_curr_dofs.size(), ")");
 			{
 				auto lock = dofhandler.begin_active_keys_stable();
 				dh_curr_dofs = dofhandler.active_dofs;

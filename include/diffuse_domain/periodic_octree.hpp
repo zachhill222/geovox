@@ -9,10 +9,10 @@ namespace GV {
 
 	//////////////////////////////////////////////////////
 	/// Extend the VolumeOctree class to be periodic in the
-	/// specified directions. Each bit in the PeriodicAxes
+	/// specified directions. Each bit in the Period
 	/// specifies an axis that will be treated as periodic.
 	//////////////////////////////////////////////////////
-	template<typename VolumeType, int PeriodicAxes=0>
+	template<typename VolumeType, uint8_t Period=0> requires(Period<8)
 	struct PeriodicVolumeOctree : public gutil::VolumeOctree<VolumeType> {
 		
 
@@ -24,9 +24,10 @@ namespace GV {
 		using point_type  = typename BASE::point_type;
 		using box_type    = typename BASE::box_type;
 		using scalar_type = typename BASE::scalar_type;
-		static constexpr int DIMENSION = BASE::OPTS::DIMENSION;
-		static constexpr int P_AXIS = PeriodicAxes;
-		static_assert( 0<=P_AXIS && P_AXIS < (1<<DIMENSION), "PeriodicVolumeOctree - invlaid axis flag");
+		
+		static constexpr int DIMENSION 	= BASE::OPTS::DIMENSION;
+		static constexpr int PERIOD 	= Period;
+		static_assert( 0<=PERIOD && PERIOD < (1<<DIMENSION), "PeriodicVolumeOctree - invlaid axis flag");
 
 		using BASE::data_;
 		using BASE::root_;
@@ -38,9 +39,9 @@ namespace GV {
 		//////////////////////////////////////////////////
 		/// Compute normalized extensions to check
 		//////////////////////////////////////////////////
-		static constexpr int N_PERIODIC_AXES = std::popcount(static_cast<unsigned>(PeriodicAxes));
+		static constexpr int N_PERIODIC_AXES = std::popcount(static_cast<unsigned>(Period));
 		static constexpr size_t N_EXTENSIONS = []() {size_t n=1; for (int i=0; i<N_PERIODIC_AXES; ++i) {n*=3;} return n;}(); //3^N_PERIODIC_AXES
-		static constexpr bool IS_PERIODIC(int ax) { return PeriodicAxes & (1<<ax); }
+		static constexpr bool IS_PERIODIC(int ax) { return Period & (1<<ax); }
 
 
 		/////////////////////////////////////////////////
@@ -48,7 +49,7 @@ namespace GV {
 		/////////////////////////////////////////////////
 		PeriodicVolumeOctree(const box_type& bbox) : BASE{bbox}, period_{bbox.high-bbox.low} {
 			for (int ax=0; ax<DIMENSION; ++ax) {
-				if (!(PeriodicAxes&(1<<ax))) {period_[ax] = scalar_type{0};}
+				if (!(Period&(1<<ax))) {period_[ax] = scalar_type{0};}
 			}
 
 			//we track objects in a larger bounding box than requested to accurately capture the period
@@ -94,11 +95,11 @@ namespace GV {
 		/// the periodic bounding box.
 		/////////////////////////////////////////////////
 		void push_back(value_type value) noexcept {
-			push_back_range(std::span<value_type>{&value, 1});
+			push_back_range_add_periodic(std::span<value_type>{&value, 1});
 		}
 
-		void push_back_range(std::vector<value_type>&& values) noexcept {
-			push_back_range(std::span<value_type>(values.begin(), values.end()));
+		void push_back_range_add_periodic(std::vector<value_type>&& values) noexcept {
+			push_back_range_add_periodic(std::span<value_type>(values.begin(), values.end()));
 		}
 
 		template<typename T>
@@ -111,7 +112,7 @@ namespace GV {
 			return false;
 		}
 
-		void push_back_range(std::span<value_type> values) noexcept {
+		void push_back_range_add_periodic(std::span<value_type> values) noexcept {
 			//insert data and track the inserted values
 			const size_t idx_start = data_.size();
 			BASE::push_back_range(values);
