@@ -21,8 +21,8 @@ namespace DOFS {
 	///
 	/// All quadrature (mesh) elements are assumed to have period 0.
 	////////////////////////////////////////////////////////////
-	template<typename T=double, uint8_t Period=0> requires(Period<8)
-	[[maybe_unused]] constexpr VoxelElement<Period> ProjectQuadratureElementToSupportElement(uint64_t spt_depth, VoxelElement<0> quad, T* X, T* Y, T* Z, uint32_t N) noexcept {
+	template<typename T=double>
+	[[maybe_unused]] constexpr VoxelElement<0> ProjectQuadratureElementToSupportElement(uint64_t spt_depth, VoxelElement<0> quad, T* X, T* Y, T* Z, uint32_t N) noexcept {
 		GUTIL_ASSERT(X && Y && Z && "X,Y,Z must be valid pointers at the start of N contiguous memory locations");
 		GUTIL_ASSERT(quad.depth() >= spt_depth && "the quadrature element must be at least as fine as the support element");
 		GUTIL_ASSERT(!quad.is_encoded() && "the quadrature element must be in cartesian form. use quad.decode()");
@@ -63,7 +63,7 @@ namespace DOFS {
 		}
 
 		//return the support element
-		return static_cast<VoxelElement<Period>>(quad);
+		return quad;
 	}
 
 }}}

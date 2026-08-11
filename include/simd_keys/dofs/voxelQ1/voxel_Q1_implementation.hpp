@@ -254,13 +254,16 @@ namespace LagrangeQ1 {
 
 	GUTIL_DECLARE_SIMD()
 	template<typename T=double, uint8_t Period> requires(Period<8)
-	[[nodiscard]] inline constexpr T GetParentCoef_Mean(uint64_t child) noexcept {
+	[[nodiscard]] inline constexpr T GetParentCoef_Weight(uint64_t child) noexcept {
+		// for use when a dof is deactivated and its coefficient needs to be used
+		// to update/initialize an ancestor dof. This chooses a weight to equally distribute
+		// to all parents near the child. If the child is in the element center (at the depth above),
+		// its parent weights are all 1/8, if it is in a face they are 1/4 and so on.
 		GUTIL_ASSERT(Mesh3D::Depth(child)>0)
 		ASSERT_VALID_VOXELQ1_DOF(child)
 		GUTIL_ASSERT(Mesh3D::IsValid<Period>(child))
 		
 		//split this coefficient between all parents that exist.
-		//each odd-parity index doubles the number of parents
 		uint64_t par = Mesh3D::CartesianIndexPairity_SIMD(child);
 		if constexpr (Period!=0) {
 			if (Mesh3D::Depth(child)==1) {
@@ -268,7 +271,6 @@ namespace LagrangeQ1 {
 				if constexpr (Period&0b010) {par&=0b101;}
 				if constexpr (Period&0b100) {par&=0b011;}
 			}
-
 		}
 		return gutil::ldexp(T{1},-(int)std::popcount(par));
 	}

@@ -86,11 +86,11 @@ namespace DOFS {
 		GUTIL_DECLARE_SIMD()
 		[[nodiscard]] constexpr uint64_t linear_index_simd() const noexcept { return Mesh3D::GlobalVertexIndex_SIMD(key); }
 		[[nodiscard]] constexpr uint64_t linear_index() const noexcept {
-			GUTIL_ASSERT(Mesh3D::IsValid<0>(key)); //linear index does not take into account periodicity
+			GUTIL_ASSERT(Mesh3D::IsValid<0>(key)); //linear index does not take into account periodicity;
 			return Mesh3D::GlobalVertexIndex(key);
 		}
 		[[nodiscard]] constexpr uint64_t depth_linear_index() const noexcept {
-			GUTIL_ASSERT(is_valid())
+			GUTIL_ASSERT(is_valid());
 			return Mesh3D::GlobalVertexIndex_SIMD(key) - Mesh3D::VerticesBelowDepth(Mesh3D::Depth(key));
 		}
 
@@ -159,7 +159,7 @@ namespace DOFS {
 		GUTIL_DECLARE_SIMD()
 		[[maybe_unused]] static VoxelQ1* dofs_on_elem_simd(uint64_t s, VoxelQ1* dof) noexcept {
 			GUTIL_ASSERT(dof);
-			GUTIL_ASSERT(DofElem_t{s}.is_valid())
+			GUTIL_ASSERT(DofElem_t{s}.is_valid());
 			
 			#ifndef NDEBUG
 				std::fill(dof, dof+N_DOF_PER_ELEM, VoxelQ1{uint64_t(-1)});
@@ -294,17 +294,17 @@ namespace DOFS {
 		[[nodiscard]] constexpr T parent_coef_restrict(uint8_t p) const noexcept {
 			//pass the parent number for a common interface and to help
 			//catch bugs via the assert.
-			GUTIL_ASSERT(p<N_PARENTS)
+			GUTIL_ASSERT(p<N_PARENTS);
 			return LagrangeQ1::GetParentCoef<T,Period>(key);
 		}
 
 		GUTIL_DECLARE_SIMD()
 		template<typename T=double>
-		[[nodiscard]] constexpr T parent_coef_mean(uint8_t p) const noexcept {
+		[[nodiscard]] constexpr T parent_coef_weight(uint8_t p) const noexcept {
 			//pass the parent number for a common interface and to help
 			//catch bugs via the assert.
-			GUTIL_ASSERT(p<N_PARENTS)
-			return LagrangeQ1::GetParentCoef_Mean<T,Period>(key);
+			GUTIL_ASSERT(p<N_PARENTS);
+			return LagrangeQ1::GetParentCoef_Weight<T,Period>(key);
 		}
 	};
 

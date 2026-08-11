@@ -230,6 +230,8 @@ namespace GV {
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Bin functions for sorting elements and vertices
 		/////////////////////////////////////////////////////////////////////////////////////////////////
+		static constexpr int n_colors() noexcept {return 54;}
+
 		GUTIL_DECLARE_SIMD()
 		static constexpr int element_key_color54_bin(uint64_t key) noexcept {
 			return static_cast<int>(Elem_t::color_simd(key));
@@ -305,6 +307,18 @@ namespace GV {
 			GUTIL_ASSERT(is_depth_sorted());
 			GUTIL_ASSERT(depth<=max_depth);
 			return BASE::reinterpret_key_span<Elem_t,uint64_t>(sorter.get_bin((int) depth));
+		}
+
+		[[nodiscard]] std::span<const Elem_t> get_color(int color) const noexcept {
+			GUTIL_ASSERT(is_color_sorted());
+			GUTIL_ASSERT(color<=54);
+			return BASE::reinterpret_key_span<Elem_t,uint64_t>(sorter.get_bin(color));
+		}
+
+		[[nodiscard]] std::span<Elem_t> get_color(int color) noexcept {
+			GUTIL_ASSERT(is_color_sorted());
+			GUTIL_ASSERT(color<=54);
+			return BASE::reinterpret_key_span<Elem_t,uint64_t>(sorter.get_bin(color));
 		}
 
 		void collect_elements() noexcept {
@@ -1266,7 +1280,7 @@ namespace GV {
 		size_t n_used_vert = mesh.n_vertices() * sizeof(typename UnstructuredVoxelMesh<T>::Vert_t);
 		size_t n_vert_reserved = mesh.tracked_vertices.capacity() * sizeof(typename UnstructuredVoxelMesh<T>::Vert_t);
 
-		os << "UnstructuredVoxelMesh with maximum depth of " << mesh.max_depth << "\n";
+		os << "UnstructuredVoxelMesh with maximum depth of " << (int) mesh.max_depth << "\n";
 		os << mesh.summary();
 		os << gutil::format(mesh.n_vertices(),16) << " tracked vertices (" + format_byte_count(n_used_vert) + " / "
 		    							+ format_byte_count(n_vert_reserved) + " used/reserved\n";

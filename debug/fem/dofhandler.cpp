@@ -175,6 +175,7 @@ void test_dof_handler(const TestConfig& cfg) {
 	CoefHandler_t coef_handler(handler);
 
 	coef_handler.init_coefs(0,[&](DOF_t dof){ 
+		// return Scalar_t{1};
 		auto pt = mesh.geo_coord(MeshVert_t{dof.key});
 		return pt[0]*(Scalar_t{1}-pt[0])*(Scalar_t{1}+pt[0]);
 		});
@@ -194,7 +195,7 @@ void test_dof_handler(const TestConfig& cfg) {
 		mesh.process_refine<DOF_t::PERIOD>();
 		std::cout << "after refine:\n" << mesh << "\n" << handler << "\n";
 	}
-	coef_handler.update_coefs();
+	coef_handler.prolong_coefs();
 	evaluate_and_save(mesh, handler, coef_handler, cfg.test_name + "_refine");
 
 	//unrefine
@@ -209,7 +210,8 @@ void test_dof_handler(const TestConfig& cfg) {
 		remove_unsupported_elements(mesh, handler);
 		std::cout << "after unrefine:\n" << mesh << "\n" << handler << "\n";
 	}
-	coef_handler.update_coefs();
+	coef_handler.restrict_is_average = true; //decide if the restriction should smooth or not
+	coef_handler.restrict_coefs();
 	evaluate_and_save(mesh, handler, coef_handler, cfg.test_name + "_unrefine");
 }
 

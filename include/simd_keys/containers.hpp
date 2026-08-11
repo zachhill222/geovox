@@ -234,6 +234,7 @@ namespace Keys {
 		[[nodiscard]] constexpr size_t n_possible_keys() const noexcept { return key_mask.size();}
 		[[nodiscard]] bool is_sorted() const noexcept 					{ return is_sorted_.load();}
 		[[nodiscard]] bool is_collected() const noexcept				{ return is_collected_.load();}
+		[[nodiscard]] gutil::BinSort<uint64_t> get_sorter() const noexcept {return sorter;}
 
 		[[nodiscard]] bool is_current() const noexcept {
 			const bool col = is_collected();

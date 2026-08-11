@@ -102,7 +102,9 @@ namespace GV {
 		using BASE::ACTIVE_BIT; 						//0b00000001;	
 		static constexpr uint8_t REFINED_BIT 			= 0b00000010;
 		static constexpr uint8_t INITIAL_DOF_BIT        = 0b00000100;	//these dofs don't check their parents and cannot be unrefined
-		static constexpr uint8_t FREE_BITS 	            = 0b11111000;
+		static constexpr uint8_t COEF_PROP_BIT			= 0b00001000;	//track if a coefficient needs to be propagated through a dof
+		static constexpr uint8_t HAS_COEF_BIT 			= 0b00010000;	//track if a dof has a coefficient (managed by a coef_handler class)
+		static constexpr uint8_t FREE_BITS 	            = 0b11100000;
 
 
 		/////////////////////////////////////////////////////////////////////////
@@ -118,7 +120,7 @@ namespace GV {
 		/////////////////////////////////////////////////////////////////////////
 		protected:
 		using BASE::key_mask;
-		using BASE::threads;										//max hardware concurency by default
+		using BASE::threads;							//max hardware concurency by default
 		
 		public:
 		using BASE::is_key_mask_unstable;
@@ -135,14 +137,11 @@ namespace GV {
 		using BASE::begin_active_keys_unstable;
 		using BASE::end_active_keys_unstable;
 
-		std::span<DOF_t>					active_dofs;
-		const Mesh_t& 						mesh;					//link to the mesh, we can request refinement through const methods
+		std::span<DOF_t>		active_dofs;
+		const Mesh_t& 			mesh;					//link to the mesh, we can request refinement through const methods
 		
-		[[nodiscard]] bool is_active_dofs_linked() const noexcept {	//check that we are linked to the active_keys correctly
-			return are_spans_same_data(active_dofs, BASE::active_keys);
-		}
 		[[nodiscard]] bool is_current() const noexcept {
-			return BASE::is_current() && is_active_dofs_linked();
+			return BASE::is_current() && are_spans_same_data(active_dofs, BASE::active_keys);
 		}
 
 		/////////////////////////////////////////////////////////////////////////
@@ -319,6 +318,24 @@ namespace GV {
 		}
 		void set_refined(DOF_t dof, bool val) noexcept {
 			GUTIL_ASSERT(dof.is_valid()); BASE::set_bit<REFINED_BIT>(dof.linear_index(), val);
+		}
+
+		[[nodiscard]] bool is_coef_prop_stable(DOF_t dof) const noexcept {
+			GUTIL_ASSERT(dof.is_valid()); return BASE::check_bit_stable<COEF_PROP_BIT>(dof.linear_index());
+		}
+		[[nodiscard]] bool has_coef_stable(DOF_t dof) const noexcept {
+			GUTIL_ASSERT(dof.is_valid()); return BASE::check_bit_stable<HAS_COEF_BIT>(dof.linear_index());
+		}
+		void clear_coef_marks() const noexcept {
+			BASE::unconditional_bitwise_and_all_masks(~(COEF_PROP_BIT|HAS_COEF_BIT));
+		}
+		void set_has_coef(std::span<const DOF_t> dofs) const noexcept {
+			GUTIL_OMP(parallel for)
+			for (size_t i=0; i<dofs.size(); ++i) {
+				uint8_t& byte = get_mask_ref_pseudo_const(dofs[i]);
+				GUTIL_ASSERT(byte&ACTIVE_BIT);
+				byte|=HAS_COEF_BIT;
+			}
 		}
 
 
@@ -809,8 +826,8 @@ namespace GV {
 			DofVert_t dv = static_cast<DofVert_t>(vtx);
 			while (dv.depth() < max_depth) { dv = dv.child(); }
 
-			std::array<DofElem_t,8> elems;
-			dv.elements_simd(&elems[0]);
+			DofElem_t elems[8];
+			dv.elements_simd(elems);
 
 			
 			//traverse back up and search all (up to 8) elements that the vertex
@@ -1002,10 +1019,14 @@ namespace GV {
 			}
 		}
 
-		void deactivate(DOF_t dof) noexcept {						//when un-refining, it is not essential to have the mesh un-refine as well.
-			GV_ASSERT_KEY_MASK_UNSTABLE_STATE						//mesh unrefinement should be done in some cleanup pass so that
-			set_active(dof,false); 									//multiple dofhandlers can be organized
-		}
+		// void deactivate(DOF_t dof) noexcept {						//when un-refining, it is not essential to have the mesh un-refine as well.
+		// 	GV_ASSERT_KEY_MASK_UNSTABLE_STATE						//mesh unrefinement should be done in some cleanup pass so that
+		// 	uint8_t& byte = get_mask_ref(dof);
+		// 	if (byte&ACTIVE_BIT) {
+		// 		byte&=~ACTIVE_BIT;
+		// 		byte|=UNREF_BIT;									//track that this coefficient needs to contribute to an ancestor
+		// 	}
+		// }
 
 		////////////////////////////////////////////////////////////////////
 		/// Refinement operations that must be called from within an unstable mask region.
@@ -1199,12 +1220,16 @@ namespace GV {
 						for (size_t i=0; i<par_list.size(); ++i) {
 							//activate children (that the mesh can support)
 							for (DOF_t c : par_list[i].children()) {
-								if (c.exists()) {activate(c);}
+								if (c.exists()) {
+									activate(c);
+									get_mask_ref(c)|=COEF_PROP_BIT;
+								}
 							}
 
 							//mark this element inactive and refined
 							uint8_t& byte = get_mask_ref(par_list[i]);
-							byte&=!ACTIVE_BIT;
+							byte&=~ACTIVE_BIT;
+							byte|=COEF_PROP_BIT;	//mark that the coef needs to be propogated down to descendants
 							byte|=REFINED_BIT;
 						}
 					}
@@ -1248,7 +1273,7 @@ namespace GV {
 				std::vector<DOF_t> dofs = get_dofs_impl(d_elems, max_depth, std::move(pred));
 				GUTIL_PROFILE("Processing ", dofs.size(), " dofs for unrefinement");
 				
-				// gutil::BinSort<DOF_t> dof_depth_sorter(dofs, max_depth+1);
+				// gutil::BinSort<DOF_t> dof_depth_B(dofs, max_depth+1);
 				// dof_depth_sorter.dispatch_sort([](DOF_t dof){return (int)dof.depth();}, &threads);
 				// threads.wait_idle();
 
@@ -1259,7 +1284,7 @@ namespace GV {
 					GUTIL_ASSERT((byte&ACTIVE_BIT)==0);
 					GUTIL_ASSERT(byte&REFINED_BIT);
 
-					byte|=ACTIVE_BIT;
+					byte|=(ACTIVE_BIT|COEF_PROP_BIT);
 					byte&=~REFINED_BIT;
 				}
 
@@ -1268,7 +1293,11 @@ namespace GV {
 				for (size_t i=0; i<dofs.size(); ++i) {
 					for (DOF_t c : dofs[i].children()) {
 						if (!c.exists()) {continue;}
-						if (!has_any_refined_parent(c)) {deactivate(c);}
+						if (!has_any_refined_parent(c)) {
+							uint8_t& byte = get_mask_ref(c);
+							byte&=~ACTIVE_BIT;
+							byte|=COEF_PROP_BIT;
+						}
 					}
 				}
 				
