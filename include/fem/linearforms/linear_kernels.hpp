@@ -14,7 +14,7 @@ namespace GV {
 	/// A few evaluation methods for standard linear kernels
 	///////////////////////////////////////////////////////////////////
 	struct ZeroLinearKernel {
-		//kernel for the linear form L(phi) = int_D(phi)
+		//kernel for the linear form L(phi) = 0
 		static constexpr bool NEEDS_GEO_POINTS = false;
 
 		template<typename TestDof_t, typename QuadRule_t>

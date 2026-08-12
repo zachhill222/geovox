@@ -651,6 +651,51 @@ namespace GV {
 			return key;
 		}
 
+
+		GUTIL_DECLARE_SIMD()
+		template<uint8_t Period=0> requires(Period<8)
+		[[nodiscard]] inline constexpr uint64_t VertexSubgridElement(uint64_t vtx_key, uint64_t target_depth) noexcept {
+			GUTIL_ASSERT(Exists(vtx_key));
+			GUTIL_ASSERT(IsVertex(vtx_key));
+			GUTIL_ASSERT(Depth(vtx_key)>=target_depth);
+
+			//return the valid element with minimal coordinates at the target_depth that contains
+			//the specified vertex in its closure.
+			uint64_t delta 	= Depth(vtx_key) - target_depth;
+			uint64_t ii 	= IndexI_SIMD(vtx_key);
+			uint64_t jj 	= IndexJ_SIMD(vtx_key);
+			uint64_t kk 	= IndexK_SIMD(vtx_key);
+
+			if (ii>0) {ii = (ii-1)>>delta;}
+			if (jj>0) {jj = (jj-1)>>delta;}
+			if (kk>0) {kk = (kk-1)>>delta;}
+
+			return MakeElement(target_depth, ii, jj, kk);
+		}
+
+		GUTIL_DECLARE_SIMD()
+		template<uint8_t Period=0> requires(Period<8)
+		[[nodiscard]] inline constexpr uint64_t RelativeVertexInSubgrid(uint64_t vtx_key, uint64_t el_key) noexcept {
+			GUTIL_ASSERT(Exists(vtx_key));
+			GUTIL_ASSERT(IsVertex(vtx_key));
+			GUTIL_ASSERT(Exists(el_key));
+			GUTIL_ASSERT(IsElement(el_key));
+			GUTIL_ASSERT(IsCartesian(el_key));
+			GUTIL_ASSERT(Depth(vtx_key)>=Depth(el_key));
+
+			//when el_key = VertexSubgridElement(vtx_key, dd), return the relative location
+			//of the specified index in that subgrid (treating el_key as the root element);
+			const uint64_t rel_d = Depth(vtx_key) - Depth(el_key);
+			const uint64_t span  = uint64_t{1} << rel_d;
+			const uint64_t rel_i = IndexI_SIMD(vtx_key) - IndexI_SIMD(el_key)*span;
+			const uint64_t rel_j = IndexJ_SIMD(vtx_key) - IndexJ_SIMD(el_key)*span;
+			const uint64_t rel_k = IndexK_SIMD(vtx_key) - IndexK_SIMD(el_key)*span;
+
+			return MakeVertex<Period>(rel_d, rel_i, rel_j, rel_k);
+		}
+
+
+
 		///////////////////////////////////////////////////////////
 		/// Debug methods
 		///////////////////////////////////////////////////////////
@@ -698,6 +743,19 @@ namespace GV {
 					scale * static_cast<T>(IndexJ(key)),
 					scale * static_cast<T>(IndexK(key))};
 		}
+
+		GUTIL_DECLARE_SIMD()
+		template<typename T>
+		inline constexpr void NormalizedCoordinate_SIMD(uint64_t key, T* coords) noexcept {
+			GUTIL_ASSERT(Exists(key));
+			GUTIL_ASSERT(IsVertex(key));
+			GUTIL_ASSERT(coords);	//must point to 3 valid memory locations
+			const T scale = gutil::ldexp(T{1}, -(int) Depth(key));
+			coords[0] = scale * static_cast<T>(IndexI_SIMD(key));
+			coords[1] = scale * static_cast<T>(IndexJ_SIMD(key));
+			coords[2] = scale * static_cast<T>(IndexK_SIMD(key));
+		}
+
 
 		template<typename T>
 		[[nodiscard]] inline constexpr gutil::Point<3,T> NormalizedCenter(uint64_t key) noexcept {

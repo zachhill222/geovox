@@ -138,15 +138,17 @@ namespace LagrangeQ1 {
 	template<uint8_t Period, typename PointContainer> requires(Period<8)
 	[[nodiscard]] inline constexpr typename PointContainer::value_type GetDofValue(uint64_t spt, uint64_t dof, const PointContainer& pt) noexcept {
 		typename PointContainer::value_type val;
-		GetDofValueByLocalNumber(dof, LocalDofNumber_SIMD<Period>(spt,dof), &val, &pt[0], &pt[1], &pt[2], 1);
+		auto x=pt[0], y=pt[1], z=pt[2];
+		GetDofValueByLocalNumber(dof, LocalDofNumber_SIMD<Period>(spt,dof), &val, &x, &y, &z, 1);
 		return val;
 	}
 
 	template<uint8_t Period, typename PointContainer> requires(Period<8)
 	[[nodiscard]] inline constexpr PointContainer GetDofGradient(uint64_t spt, uint64_t dof, const PointContainer& pt) noexcept {
-		PointContainer grad{0,0,0};
-		GetDofGradientByLocalNumber(dof, LocalDofNumber_SIMD<Period>(spt,dof), &grad[0], &grad[1], &grad[2], &pt[0], &pt[1], &pt[2], 1);
-		return grad;
+		auto x=pt[0], y=pt[1], z=pt[2];
+		typename PointContainer::value_type gx,gy,gz;
+		GetDofGradientByLocalNumber(dof, LocalDofNumber_SIMD<Period>(spt,dof), &gx, &gy, &gz, &x, &y, &z, 1);
+		return PointContainer{gx,gy,gz};
 	}
 
 
@@ -350,8 +352,6 @@ namespace LagrangeQ1 {
 		parents[6] = ((6&mask)==0) ? Mesh3D::MakeVertex<Period>(dd, ip0, jp1, kp1) : 0;
 		parents[7] = ((7&mask)==0) ? Mesh3D::MakeVertex<Period>(dd, ip1, jp1, kp1) : 0;
 	}
-
-
 
 
 

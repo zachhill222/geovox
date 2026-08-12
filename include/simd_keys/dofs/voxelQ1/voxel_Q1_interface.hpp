@@ -145,7 +145,7 @@ namespace DOFS {
 
 		GUTIL_DECLARE_SIMD()
 		[[nodiscard]] constexpr uint64_t pairity_simd() const noexcept {
-			//for general dofs, pairity must partition the dofs into [0,n_dofs_per_elem)
+			//for general dofs, parity must partition the dofs into [0,n_dofs_per_elem)
 			return Mesh3D::CartesianIndexPairity_SIMD(key);
 		}
 
@@ -187,7 +187,9 @@ namespace DOFS {
 			return ProjectQuadratureElementToSupportElement<T,Period>(depth(), quad, X, Y, Z, N);
 		}
 
-		[[nodiscard]] constexpr uint8_t local_dof_number(DofElem_t spt) noexcept {
+		//note all Element keys are the same, regardless of period
+		template<uint8_t P> requires (P<8)
+		[[nodiscard]] constexpr uint8_t local_dof_number(VoxelElement<P> spt) noexcept {
 			return LagrangeQ1::LocalDofNumber_SIMD<Period>(spt.key, key);
 		}
 
@@ -195,25 +197,25 @@ namespace DOFS {
 		/// Evaluate
 		/////////////////////////////////////////////////////////////
 		template<typename T=double>
-		constexpr void evaluate_simd(uint8_t local, T* val, const T* X, const T* Y, const T* Z, uint32_t N) noexcept {
+		constexpr void evaluate_simd(uint8_t local, T* val, const T* X, const T* Y, const T* Z, uint32_t N) const noexcept {
 			LagrangeQ1::GetDofValueByLocalNumber(key, local, val, X, Y, Z, N);
 		}
 
-		template<typename T=double>
-		constexpr void gradient_simd(uint8_t local, T* val_x, T* val_y, T* val_z, const T* X, const T* Y, const T* Z, uint32_t N) noexcept {
-			LagrangeQ1::GetDofGradientByLocalNumber(key, local, val_x, val_y, val_z, X, Y, Z, N);
-		}
-
 		template<typename PointContainer>
-		[[nodiscard]] constexpr typename PointContainer::value_type evaluate(DofElem_t spt, const PointContainer& pt) noexcept {
+		[[nodiscard]] constexpr typename PointContainer::value_type evaluate(DofElem_t spt, const PointContainer& pt) const noexcept {
 			return LagrangeQ1::GetDofValue<Period>(spt.key, key, pt);
 		}
 
 		template<typename PointContainer>
-		[[nodiscard]] constexpr typename PointContainer::value_type evaluate(uint8_t local, const PointContainer& pt) noexcept {
+		[[nodiscard]] constexpr typename PointContainer::value_type evaluate(uint8_t local, const PointContainer& pt) const noexcept {
 			typename PointContainer::value_type val;
 			evaluate_simd(local, &val, &pt[0], &pt[1], &pt[2], 1);
 			return val;
+		}
+
+		template<typename PointContainer>
+		constexpr void gradient_simd(uint8_t local, T* gx, T* gy, T* gz, const T* X, const T* Y, const T* Z, uint32_t N) noexcept {
+			LagrangeQ1::GetDofGradientByLocalNumber(key, local, gx, gy, gz, X, Y, Z, N);
 		}
 
 		template<typename PointContainer>
@@ -228,6 +230,13 @@ namespace DOFS {
 			return val;
 		}
 
+		template<typename T=double>
+		[[nodiscard]] static constexpr T evaluate_field_at_depth(DofVert_t loc, std::span<const T> coef,
+								std::span<const VoxelQ1> dofs, uint64_t depth) noexcept;
+
+		template<bool Increment=true, typename T>
+		static constexpr void batched_evaluate_field_at_depth(std::span<T> vals, std::span<const DofVert_t> loc, 
+				std::span<const T> coef, std::span<const VoxelQ1> dofs, uint64_t depth) noexcept;
 
 		/////////////////////////////////////////////////////////////
 		/// Hierarchy
@@ -319,6 +328,136 @@ namespace DOFS {
 	std::ostream& operator<<(std::ostream& os, VoxelQ1<Period> dof) {
 		return os << to_string(dof);
 	}
+
+
+	template<uint8_t Period>
+	template<typename T>
+	[[nodiscard]] constexpr T VoxelQ1<Period>::evaluate_field_at_depth(DofVert_t loc, std::span<const T> coef,
+								std::span<const VoxelQ1> dofs, uint64_t depth) noexcept {
+		GUTIL_ASSERT(coef.size()==dofs.size());
+
+		if (loc.depth() <= depth) {
+			// the location corresponds to a dof or is not in the support of any dof
+			while (loc.depth() < depth) {loc = loc.child();}
+
+			VoxelQ1 target_dof{loc.key};
+			auto it = std::lower_bound(dofs.begin(), dofs.end(), target_dof);
+			GUTIL_ASSERT(it == std::find(dofs.begin(), dofs.end(), target_dof) && "the dofs must be sorted in increasing order at each depth");
+
+			if (it==dofs.end() || *it!=target_dof) {return T{0};}
+			else {return coef[std::distance(dofs.begin(),it)];}
+		}
+		else {
+			// the the location is in the interior of some support element for up to 8 dofs
+			// the support element can be recovered by the index arithmetic.
+			// note that if the vertex is on an edge or face, any of the adjacent support elements
+			// will work.
+			DofElem_t spt{Mesh3D::VertexSubgridElement<Period>(loc.key, depth)};
+			DofVert_t rel_loc{Mesh3D::RelativeVertexInSubgrid<Period>(loc.key, spt.key)};
+			gutil::Point<3,T> coord = T{2} * rel_loc.template normalized_coordinate<T>() - gutil::Point<3,T>::Filled(1);
+			
+			VoxelQ1 target_dof[VoxelQ1::N_DOF_PER_ELEM];
+			VoxelQ1::dofs_on_elem_simd(spt.key, target_dof);
+			T result{0};
+			for (uint64_t i=0; i<VoxelQ1::N_DOF_PER_ELEM; ++i) {
+				auto it = std::lower_bound(dofs.begin(), dofs.end(), target_dof[i]);
+				GUTIL_ASSERT(it == std::find(dofs.begin(), dofs.end(), target_dof) && "the dofs must be sorted in increasing order at each depth");
+
+				if (it!=dofs.end() && *it==target_dof[i]) {
+					size_t idx = std::distance(dofs.begin(), it);
+					result += coef[idx] * it->evaluate(spt, coord);
+				}
+			}
+			return result;
+		}
+	}
+
+
+
+	template<uint8_t Period>
+	template<bool Increment, typename T>
+	constexpr void VoxelQ1<Period>::batched_evaluate_field_at_depth(std::span<T> vals, std::span<const DofVert_t> loc, 
+				std::span<const T> coef, std::span<const VoxelQ1> dofs, uint64_t depth) noexcept {
+		GUTIL_ASSERT(coef.size()==dofs.size());
+		GUTIL_ASSERT(vals.size()==loc.size());
+		GUTIL_ASSERT(loc.size()>0);
+		//note that the vals are only incremented (not assigned).
+		//for hierarchical methods, it can also be useful to decrement (set Increment=false)
+
+
+		//to efficiently batch the evaluations, all of the locations must be at the same depth.
+		//additionally, the locations must be sorted in increasing order so that the dof
+		//lookups become progressively more efficient.
+		const uint64_t loc_depth = loc[0].depth();
+		#ifndef NDEBUG
+		for (size_t i=0; i<loc.size()-1; ++i) {
+			GUTIL_ASSERT(loc[i].depth()==loc_depth && "all locations must be at the same depth in a batch");
+			GUTIL_ASSERT(loc[i]!=loc[i+1] && "all locations should be unique");
+			GUTIL_ASSERT(loc[i]<loc[i+1] && "the locations must be sorted by increasing key value");
+		}
+		#endif
+
+
+		if (loc_depth <= depth) {
+			//all locations either correspond to a dof or evaluate to 0
+			auto lower = dofs.begin();
+			for (size_t i=0; i<loc.size(); ++i) {
+				DofVert_t vtx = loc[i];
+				while (vtx.depth() < depth) {vtx = vtx.child();}
+
+				VoxelQ1 target_dof{vtx.key};
+				auto it = std::lower_bound(lower, dofs.end(), target_dof);
+				if (it!=dofs.end()) {
+					lower = it;
+					if (*it == target_dof) {
+						if constexpr (Increment) {vals[i] += coef[std::distance(dofs.begin(),it)]; }
+						else {vals[i] -= coef[std::distance(dofs.begin(),it)]; }
+					}
+				}
+			}
+		}
+		else {
+			// each location is in the interior of some support element for up to 8 dofs
+			// the support element can be recovered by the index arithmetic.
+			// note that if the vertex is on an edge or face, any of the adjacent support elements
+			// will work.
+
+			//compute the support elements and the normalized coordinates
+			std::vector<uint64_t> spt_key(loc.size());
+			std::vector<T>		  coords(3*loc.size());
+
+			GUTIL_SIMD()
+			for (size_t i=0; i<loc.size(); ++i) {
+				spt_key[i] = Mesh3D::VertexSubgridElement<Period>(loc[i].key, depth);
+				uint64_t rel_loc_key = Mesh3D::RelativeVertexInSubgrid<Period>(loc[i].key, spt_key[i]);
+				Mesh3D::NormalizedCoordinate_SIMD(rel_loc_key, &coords[3*i]); //[0,1] normalized
+				coords[3*i]   = T{2}*coords[3*i]   - T{1};
+				coords[3*i+1] = T{2}*coords[3*i+1] - T{1};
+				coords[3*i+2] = T{2}*coords[3*i+2] - T{1};
+			}
+
+			//evaluate (could be in parallel, but threads are better spent by making smaller batches)
+			for (size_t i=0; i<loc.size(); ++i) {
+				VoxelQ1 target_dof[VoxelQ1::N_DOF_PER_ELEM];
+				VoxelQ1::dofs_on_elem_simd(spt_key[i], target_dof);
+
+				for (uint64_t j=0; j<VoxelQ1::N_DOF_PER_ELEM; ++j) {
+					if (!target_dof[j].exists()) {continue;}
+					
+					auto it = std::lower_bound(dofs.begin(), dofs.end(), target_dof[j]);
+					if (it!=dofs.end() && *it==target_dof[j]) {
+						size_t idx = std::distance(dofs.begin(), it);
+
+						T eval; T* coord_start = &coords[3*i];
+						it->evaluate_simd(j, &eval, coord_start, coord_start+1, coord_start+2, 1);
+						if constexpr (Increment) {vals[i] += coef[idx]*eval;}
+						else {vals[i] -= coef[idx]*eval;}
+					}
+				}
+			}
+		}
+	}
+
 
 
 }}}

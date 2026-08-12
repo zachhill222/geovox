@@ -48,6 +48,7 @@ namespace GV {
 		mutable gutil::ThreadPool 		threads{N};
 		const Mesh_t& 					mesh;
 		const DofHandler_t& 			dofhandler;
+		const uint8_t  					max_depth;
 		std::span<const DOF_t> 			dh_curr_dofs;
 		std::vector<DOF_t> 				dofs{};
 		gutil::BinSort<uint64_t>		sorter{};	//capture the sorter for the dofs snapshot
@@ -61,6 +62,7 @@ namespace GV {
 		CoefHandler(const DofHandler_t& dofhandler) noexcept : 
 			mesh{dofhandler.mesh},
 			dofhandler{dofhandler},
+			max_depth{dofhandler.mesh.max_depth},
 			dh_curr_dofs{dofhandler.active_dofs} {}
 		CoefHandler(CoefHandler&& other) noexcept = default;
 		CoefHandler(const CoefHandler&) = default;
@@ -138,7 +140,7 @@ namespace GV {
 			sorter = dofhandler.get_sorter();
 			//the sorter uses the raw key values
 			sorter.rebind_to_copy(dofhandler.template reinterpret_key_span<uint64_t,DOF_t>(dofs));
-			GUTIL_ASSERT(sorter.n_bins()== (int) dofhandler.mesh.max_depth+1);
+			GUTIL_ASSERT(sorter.n_bins()== (int) max_depth+1);
 		}
 
 
@@ -193,11 +195,7 @@ namespace GV {
 				std::array<std::vector<Scalar_t>,N> new_coefs;
 				
 				for (uint8_t i=0; i<N; ++i) {
-					threads.submit([&,i](){
-						// if (restrict_is_average) {restrict_coefs_average(i,new_coefs[i]);}
-						// else {restrict_coefs(i,new_coefs[i]);}
-						restrict_coefs(i,new_coefs[i]);
-					});
+					threads.submit([&,i](){restrict_coefs(i,new_coefs[i]);});
 				}
 				threads.wait_idle();
 
@@ -257,36 +255,61 @@ namespace GV {
 			GUTIL_ASSERT(dofhandler.is_key_mask_stable());
 			GUTIL_ASSERT(i<N);
 
-			const size_t old_size = dofs.size();
+			// const size_t old_size = dofs.size();
 			const size_t new_size = dh_curr_dofs.size();
 			new_coefs.assign(new_size, Scalar_t{0});
 			auto cur_sorter = dofhandler.get_sorter();
 
+			GUTIL_OMP(parallel)
+			{
+				const size_t n_threads = GUTIL_OMP_TERNARY(omp_get_num_threads(), 1);
+				const size_t tid       = GUTIL_OMP_TERNARY(omp_get_thread_num(),  0);
 
-			for (int dd=0; dd<cur_sorter.n_bins(); ++dd) {
-				std::span<const DOF_t> list = 
-					dofhandler.template reinterpret_key_span<DOF_t,uint64_t>(cur_sorter.get_bin(dd));
+				for (int dd=0; dd<cur_sorter.n_bins(); ++dd) {
+					std::span<const DOF_t> list = gutil::reinterpret_as_span<DOF_t>(cur_sorter.get_bin(dd));
+						// dofhandler.template reinterpret_key_span<DOF_t,uint64_t>(cur_sorter.get_bin(dd));
 				
-				//transfer same depth dofs
-				GUTIL_OMP(parallel for)
-				for (size_t j=0; j<list.size(); ++j) {
-					size_t new_idx = cur_sorter.bin_start(dd) + j;
-					size_t old_idx = global_number(list[j]);
-					if (old_idx < old_size) {
-						new_coefs[new_idx] += coefs[i][old_idx];
-					}
-					else {
-						//determine the required value at the dof
-						//then subtract off the current value from the low depth dofs
-						Scalar_t f_val = evaluate_at(list[j], std::span<const DOF_t>(dofs), std::span<const Scalar_t>(coefs[i]));
+					//transfer same depth dofs
+					//split the dofs at this depth into batches to be evaluated
+					const size_t n_dofs 	= list.size();
+					const size_t batch_size = n_dofs/n_threads;
+					const size_t start      = tid*batch_size;
+					const size_t end        = (tid==n_threads-1) ? n_dofs : start+batch_size;
 
-						//the dofs must be depth sorted
-						std::span<const DOF_t> coarse_dofs(dh_curr_dofs.begin(), cur_sorter.bin_start(dd));
-						std::span<const Scalar_t> coarse_coefs(new_coefs.begin(), cur_sorter.bin_start(dd));
-						
-						f_val -= evaluate_at(list[j], coarse_dofs, coarse_coefs);
-						new_coefs[new_idx] += f_val;
+					//collect the dof locations (at this depth) that this thread is responsible for
+					std::span<const DofVert_t> thread_dof_locs = gutil::reinterpret_as_span<DofVert_t>(list.begin()+start, list.begin()+end);
+
+					//collect the new coefficients (at this depth) that this thread is responsible for incrementing
+					const size_t new_idx_start = cur_sorter.bin_start(dd) + start;
+					const size_t new_idx_end   = cur_sorter.bin_start(dd) + end;
+					std::span<Scalar_t> thread_new_coefs(new_coefs.begin()+new_idx_start, new_coefs.begin()+new_idx_end);
+
+					//increment the dofs using the old coefs
+					batched_evaluate_at(thread_new_coefs, thread_dof_locs, coefs[i], sorter, max_depth);
+
+					//decrement the dofs using the new coefs at lower depths
+					if (dd>0) {
+						batched_evaluate_at<false>(thread_new_coefs, thread_dof_locs, new_coefs, cur_sorter, dd-1);
 					}
+
+
+					// for (size_t j=start; j<end; ++j) {
+						
+
+
+					// 	size_t new_idx = cur_sorter.bin_start(dd) + j;
+						
+					// 	//determine the required function value at the dof
+					// 	DofVert_t loc{list[j].key};
+					// 	Scalar_t f_val = evaluate_at(loc, coefs[i], sorter, max_depth);
+					// 	//subtract the coarse depths in the new field
+					// 	if (dd>0) {
+					// 		Scalar_t offset = evaluate_at(loc, new_coefs, cur_sorter, dd-1);
+					// 		f_val -= offset;
+					// 	}
+					// 	new_coefs[new_idx] += f_val;
+					// }
+					GUTIL_OMP(barrier)
 				}
 			}
 		}
@@ -331,7 +354,7 @@ namespace GV {
 				if (!p_dofs[p].exists()) {continue;}
 				Scalar_t parent_contribution = contribution * dof.template parent_coef_restrict<Scalar_t>(p_dofs[p]);
 				if (parent_contribution == Scalar_t{0}) {continue;}
-				
+
 				size_t n_idx = dofhandler.global_number(p_dofs[p]);
 				if (n_idx<new_size) {
 					GUTIL_OMP(atomic) new_coefs[n_idx] += parent_contribution;
@@ -365,10 +388,8 @@ namespace GV {
 			
 			//initialize storage
 			std::vector<Scalar_t> vals(n_verts, Scalar_t{0});
-
 			GUTIL_OMP(parallel)
 			{
-				
 				const uint64_t n_threads 	= GUTIL_OMP_TERNARY(omp_get_num_threads(), 1);
 				const uint64_t tid       	= GUTIL_OMP_TERNARY(omp_get_thread_num(),  0);
 				const uint64_t n_per_thread = n_verts/n_threads;
@@ -397,57 +418,65 @@ namespace GV {
 			return vals;
 		}
 
-
-
-		///////////////////////////////////////////////////////////////////////
-		/// Evaluate the function represented by (dofs, coefs) at the geometric
-		/// position of `target`. `dofs` must be sorted by key (ascending), matching
-		/// whatever convention the rest of the class already uses for lower_bound lookups.
-		/// Walks every one of target's geometric ancestors (up to N_PARENTS per level,
-		/// recursively to depth 0), summing weighted contributions from whichever
-		/// ancestors are genuinely present in `dofs`. Does NOT stop early on an exact
-		/// match -- other, non-coinciding ancestors can still legitimately contribute.
-		///////////////////////////////////////////////////////////////////////
-		template<typename DOF_t, typename Scalar_t>
-		[[nodiscard]] static Scalar_t evaluate_at(DOF_t target, std::span<const DOF_t> dofs, std::span<const Scalar_t> coefs) noexcept {
-			GUTIL_ASSERT(dofs.size() == coefs.size());
+		protected:
+		[[nodiscard]] static Scalar_t evaluate_at(DofVert_t loc, std::span<const Scalar_t> coefs, const gutil::BinSort<uint64_t>& dof_depth_sorter, uint8_t target_depth) noexcept {
+			//evaluate the scalar field using dofs up to the target depth
+			GUTIL_ASSERT(dof_depth_sorter.n_bins() >= target_depth);
+			GUTIL_ASSERT(dof_depth_sorter.size() == coefs.size());
+			
 			Scalar_t result{0};
-			evaluate_at_impl(target, Scalar_t{1}, dofs, coefs, result);
+			for (int dd=0; dd<= (int) target_depth; ++dd) {
+				size_t depth_start = dof_depth_sorter.bin_start(dd);
+				size_t depth_size  = dof_depth_sorter.bin_size(dd);
+				
+				std::span<const DOF_t> dofs_at_depth = gutil::reinterpret_as_span<DOF_t>(
+					dof_depth_sorter.get_bin(dd));
+
+				result += DOF_t::evaluate_field_at_depth(
+						loc,coefs.subspan(depth_start, depth_size), 
+							gutil::reinterpret_as_span<DOF_t>(dof_depth_sorter.get_bin(dd)), (uint64_t) dd);
+			}
 			return result;
 		}
 
-		private:
-		template<typename DOF_t, typename Scalar_t>
-		static void evaluate_at_impl(DOF_t node, Scalar_t weight, std::span<const DOF_t> dofs,
-									  std::span<const Scalar_t> coefs, Scalar_t& result) noexcept {
-			auto it = std::lower_bound(dofs.begin(), dofs.end(), node);
-			if (it != dofs.end() && *it == node) {
-				result += weight * coefs[std::distance(dofs.begin(), it)];
-				// no early return -- other, non-coinciding parents may still contribute
-			}
-			if (node.depth() == 0) {return;}
+		template<bool Increment=true>
+		static void batched_evaluate_at(std::span<Scalar_t> vals, std::span<const DofVert_t> loc, 
+				std::span<const Scalar_t> coefs, const gutil::BinSort<uint64_t>& dof_depth_sorter, uint8_t target_depth) noexcept {
+			//note vals are incremented or decremented, not assigned.
+			//evaluate the scalar field using dofs up to the target depth
+			//the provided locations must all be at the same depth and be sorted in increasing order
+			GUTIL_ASSERT(dof_depth_sorter.n_bins() >= target_depth);
+			GUTIL_ASSERT(dof_depth_sorter.size() == coefs.size());
+			GUTIL_ASSERT(vals.size()==loc.size());
+			if (loc.size()==0) {return;}
 
-			DOF_t p_dofs[DOF_t::N_PARENTS];
-			node.parents_simd(p_dofs);
-			for (uint8_t p=0; p<DOF_t::N_PARENTS; ++p) {
-				if (!p_dofs[p].exists()) {continue;}
-				Scalar_t p_weight = weight * node.template parent_coef_weight<Scalar_t>(p);
-				if (p_weight == Scalar_t{0}) {continue;}
-				evaluate_at_impl(p_dofs[p], p_weight, dofs, coefs, result);
+			for (int dd=0; dd<= (int) target_depth; ++dd) {
+				size_t depth_start = dof_depth_sorter.bin_start(dd);
+				size_t depth_size  = dof_depth_sorter.bin_size(dd);
+				
+				std::span<const DOF_t> dofs_at_depth = gutil::reinterpret_as_span<DOF_t>(
+					dof_depth_sorter.get_bin(dd));
+
+				DOF_t::template batched_evaluate_field_at_depth<Increment>(
+					vals, loc, coefs.subspan(depth_start, depth_size), 
+					dofs_at_depth, (uint64_t) dd);
 			}
 		}
-
 
 
 		//////////////////////////////////////////////////////////////////////
 		/// Debugging
 		//////////////////////////////////////////////////////////////////////
+		public:
 		void print_coefs(int i=0) {
 			std::cout << "\nCoefs for field " << i << ":\n";
 			for (size_t idx=0; idx<dofs.size(); ++idx) {
 				std::cout << idx << " : " << dofs[idx] << " -> " << coefs[i][idx] << "\n";
 			}
 		}
+
+
+
 
 	};
 

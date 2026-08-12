@@ -15,7 +15,7 @@
 
 
 namespace GV {
-	
+
 
 	/////////////////////////////////////////////////////////////////////////////
 	/// Concepts to check compatibility of the mesh and DOF types
@@ -389,10 +389,15 @@ namespace GV {
 		}
 
 		//get a single dof global number
-		[[nodiscard]] uint64_t global_number(DOF_t dof) const noexcept {
+		[[nodiscard]] size_t global_number(DOF_t dof) const noexcept {
 			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
 			GUTIL_ASSERT(is_current());
 			return BASE::lookup_key(dof.key, &dof_key_bin);
+		}
+
+		[[nodiscard]] DOF_t operator[](size_t idx) const noexcept {
+			GUTIL_ASSERT(idx<active_dofs.size());
+			return active_dofs[idx];
 		}
 
 		//sort the dofs by increasing global index and get their global index

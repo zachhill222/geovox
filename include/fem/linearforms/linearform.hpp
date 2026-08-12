@@ -82,6 +82,7 @@ namespace GV {
 					for (size_t j=start; j<end; ++j) {
 						const MeshElem_t el = quad_elems[j];
 						quad_rule.set_element(el,mesh.max_depth);
+						if constexpr (Kernel_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 						test_dofs_on_elem = test_handler.get_active_dofs_full_hierarchical(el);
 
 						for (TestDof_t dof : test_dofs_on_elem) {
@@ -110,6 +111,7 @@ namespace GV {
 				for (size_t i=0; i<quad_elems.size(); ++i) {
 					const MeshElem_t el = quad_elems[i];
 					quad_rule.set_element(el,mesh.max_depth);
+					if constexpr (Kernel_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 					test_dofs_on_elem = test_handler.get_active_dofs_full_hierarchical(el);
 
 					for (TestDof_t dof : test_dofs_on_elem) {
@@ -125,48 +127,6 @@ namespace GV {
 		/// Implementation of evaluation methods to evaluate the linear form
 		/// on a function defined via the dof handler
 		//////////////////////////////////////////////////////////////////
-		// T evaluate_colored(std::span<const T> coefs) noexcept {
-		// 	// compute result = L( sum_i coefs[i]*dof[i] )
-		// 	GUTIL_ASSERT(test_handler.is_current());
-		// 	GUTIL_ASSERT(result.size() == test_handler.n_dofs());
-		// 	GUTIL_ASSERT(mesh.is_color_sorted());
-
-		// 	Scalar_t result{0};
-		// 	for (int i=0; i<mesh.n_colors(); ++i) {
-		// 		std::span<const Elem_t> quad_elems = mesh.get_color(i);
-
-		// 		GUTIL_OMP(parallel)
-		// 		{
-		// 			std::array<T,QuadRule_t::TOTAL_QUAD_POINTS> dof_vals;
-		// 			QuadRule_t 						quad_rule(mesh);
-		// 			std::vector<TestDof_t> 			test_dofs_on_elem;
-
-		// 			Scalar_t thread_result{0};
-
-		// 			const size_t n_threads 		  = GUTIL_OMP_TERNARY(omp_get_num_threads(), 1);
-		// 			const size_t n_els_per_thread = quad_elems.size()/n_threads;
-		// 			const size_t tid 			  = GUTIL_OMP_TERNARY(omp_get_thread_num(), 0);
-		// 			const size_t start 			  = tid*n_els_per_thread;
-		// 			const size_t end 			  = (tid==n_threads-1) ? quad_elems.size() : start + n_els_per_thread;
-					
-		// 			for (size_t j=start; j<end; ++j) {
-		// 				const MeshElem_t el = quad_elems[j];
-		// 				quad_rule.set_element(el,mesh.max_depth);
-		// 				test_dofs_on_elem = test_handler.get_active_dofs_full_hierarchical(el);
-
-		// 				for (TestDof_t dof : test_dofs_on_elem) {
-		// 					size_t global_n = test_handler.global_number(dof);
-		// 					GUTIL_ASSERT(global_n<result.size());
-		// 					thread_result += coefs[global_n]*kernel(dof,quad_rule);
-		// 				}
-		// 			}
-
-		// 			GUTIL_OMP(atomic) result += thread_result;
-		// 		}
-		// 	}
-		// 	return result;
-		// }
-
 		T evaluate_form(std::span<const T> coefs) noexcept {
 			// compute result = L( sum_i coefs[i]*dof[i] )
 			GUTIL_ASSERT(test_handler.is_current());
@@ -185,6 +145,7 @@ namespace GV {
 				for (size_t i=0; i<quad_elems.size(); ++i) {
 					const MeshElem_t el = quad_elems[i];
 					quad_rule.set_element(el,mesh.max_depth);
+					if constexpr (Kernel_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 					test_dofs_on_elem = test_handler.get_active_dofs_full_hierarchical(el);
 
 					for (TestDof_t dof : test_dofs_on_elem) {
@@ -198,6 +159,5 @@ namespace GV {
 			}
 			return result;
 		}
-
 	};
 }

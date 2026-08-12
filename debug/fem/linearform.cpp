@@ -25,12 +25,22 @@ using DofElem_t     = typename DofHandler_t::DofElem_t;
 
 using CoefHandler_t = GV::CoefHandler<DofHandler_t,Scalar_t,1>;
 
-using Kernel_t      = GV::IdentityLinearKernel;
+// using Kernel_t      = GV::IdentityLinearKernel;
+struct Kernel_t : public GV::WeightedLinearKernel<Kernel_t> {
+	template<typename T, size_t N>
+	static void eval_weight(std::span<T,N> vals, std::span<const T,N> x, std::span<const T,N> y, std::span<const T,N> z) noexcept {
+		GUTIL_SIMD()
+		for (size_t i=0; i<N; ++i) {
+			vals[i] = x[i]*y[i]*z[i];
+		}
+	}
+};
 using LinearForm    = GV::LinearForm<Kernel_t, DofHandler_t, 4, Scalar_t>;
 
 inline constexpr Box_t domain{ {-1,-1,-1},
 							   { 1, 1, 1} };
 
+inline constexpr Scalar_t exact{0};
 
 /////////////////////////////////////////////////////////////////
 /// Runtime test configuration (from argv)
@@ -38,10 +48,9 @@ inline constexpr Box_t domain{ {-1,-1,-1},
 struct TestConfig {
 	std::string test_name     	= "linearform";
 	std::string file_name		= "spheres.txt";
-	size_t      initial_depth 	= 3;			// initial mesh depth
-	Scalar_t    tol 		   	= 0.25;  	 	// signed-distance tolerance for boundary refinement
-	uint8_t     n_refine      	= 3;     	 	// number of refinements
-	uint8_t     n_unrefine      = 3;     	 	// number of unrefinements
+	size_t      initial_depth 	= 2;			// initial mesh depth
+	uint8_t     n_refine      	= 1;     	 	// number of refinements
+	uint8_t     n_unrefine      = 1;     	 	// number of unrefinements
 };
 
 TestConfig parse_args(int argc, char* argv[]) {
@@ -51,7 +60,6 @@ TestConfig parse_args(int argc, char* argv[]) {
 		if 		(args[i] == "-name") { cfg.test_name     = args[++i]; 				}
 		else if (args[i] == "-file") { cfg.file_name     = args[++i]; 				}
 		else if (args[i] == "-ID")   { cfg.initial_depth = atoi(args[++i].c_str()); }
-		else if (args[i] == "-TOL")  { cfg.tol 			 = atof(args[++i].c_str()); }
 		else if (args[i] == "-NR")   { cfg.n_refine      = atoi(args[++i].c_str()); }
 		else if (args[i] == "-NU")   { cfg.n_unrefine    = atoi(args[++i].c_str()); }
 	}
@@ -61,7 +69,6 @@ TestConfig parse_args(int argc, char* argv[]) {
 
 void test_box_domain(Mesh_t& mesh, DofHandler_t& d_handler, CoefHandler_t& c_handler) {
 	LinearForm l_form(d_handler);
-	const Scalar_t exact = mesh.diag[0]*mesh.diag[1]*mesh.diag[2];
 	{
 		GUTIL_TIMER("Test linear form scalar evaluation");
 		Scalar_t approx = l_form.evaluate_form(c_handler.get_coefs(0));
@@ -69,8 +76,9 @@ void test_box_domain(Mesh_t& mesh, DofHandler_t& d_handler, CoefHandler_t& c_han
 	}
 
 	{
-		GUTIL_TIMER("Test linear form vector evaluation");
 		std::vector vec(d_handler.n_dofs(), Scalar_t{0});
+		
+		GUTIL_TIMER("Test linear form vector evaluation");
 		l_form.evaluate_vector(std::span<Scalar_t>(vec));
 
 		Scalar_t approx{0}; auto coef = c_handler.get_coefs(0);
@@ -81,12 +89,12 @@ void test_box_domain(Mesh_t& mesh, DofHandler_t& d_handler, CoefHandler_t& c_han
 		GUTIL_LOG("approx=", approx, " exact=", exact, " (error=", std::abs(exact-approx), ")");
 	}
 
+	mesh.set_encoded(false);
+	mesh.sort_elements_by_color();
 	{
-		GUTIL_TIMER("Test linear form vector evaluation (colored)");
-		mesh.set_encoded(false);
-		mesh.sort_elements_by_color();
-
 		std::vector vec(d_handler.n_dofs(), Scalar_t{0});
+		
+		GUTIL_TIMER("Test linear form vector evaluation (colored)");
 		l_form.evaluate_vector_colored(std::span<Scalar_t>(vec));
 
 		Scalar_t approx{0}; auto coef = c_handler.get_coefs(0);
@@ -95,10 +103,9 @@ void test_box_domain(Mesh_t& mesh, DofHandler_t& d_handler, CoefHandler_t& c_han
 			approx += coef[i]*vec[i];
 		}
 		GUTIL_LOG("approx=", approx, " exact=", exact, " (error=", std::abs(exact-approx), ")");
-
-		mesh.sort_elements_by_depth();
-		mesh.set_encoded(false);
 	}
+	mesh.sort_elements_by_depth();
+	mesh.set_encoded(true);
 }
 
 
@@ -142,6 +149,7 @@ void unrefine(TestConfig cfg, Mesh_t& mesh, DofHandler_t& d_handler, CoefHandler
 }
 
 void save_mesh(const std::string& filename, Mesh_t& mesh, DofHandler_t& d_handler, CoefHandler_t& c_handler) {
+	GUTIL_TIMER("saving mesh as ", filename);
 	mesh.collect_vertices();
 	GUTIL_ASSERT(mesh.is_current());
 	GUTIL_ASSERT(d_handler.is_current());
@@ -194,7 +202,7 @@ int main(int argc, char* argv[]) {
 	std::cout << "\n\n";
 	std::cout << mesh << d_handler;
 	{
-		GUTIL_LOG("Uniform mesh");
+		GUTIL_TIMER("Uniform mesh");
 		test_box_domain(mesh, d_handler, c_handler);
 	}
 	
@@ -203,7 +211,7 @@ int main(int argc, char* argv[]) {
 	std::cout << mesh << d_handler;
 	save_mesh(cfg.test_name + "_refined.vtk", mesh, d_handler, c_handler);
 	{
-		GUTIL_LOG("Refined mesh");
+		GUTIL_TIMER("Refined mesh");
 		test_box_domain(mesh, d_handler, c_handler);
 	}
 
@@ -212,7 +220,7 @@ int main(int argc, char* argv[]) {
 	std::cout << mesh << d_handler;
 	save_mesh(cfg.test_name + "_unrefined.vtk", mesh, d_handler, c_handler);
 	{
-		GUTIL_LOG("Unrefined mesh");
+		GUTIL_TIMER("Unrefined mesh");
 		test_box_domain(mesh, d_handler, c_handler);
 	}
 
