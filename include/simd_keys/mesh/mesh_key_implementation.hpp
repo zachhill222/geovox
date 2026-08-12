@@ -1078,6 +1078,12 @@ namespace GV {
 
 			#ifndef NDEBUG
 				uint64_t check = GetVerticesOfElement<uint64_t,Period>(el)[V^E];
+				if (check!=vtx) {
+					std::cout << "el:    " << print_bytes(el) << "\n";
+					std::cout << "vtx:   " << print_bytes(vtx) << "\n";
+					std::cout << "local: " << (int) (V^E) << "\n";
+					std::cout << "check: " << print_bytes(check) << "\n";
+				}
 				GUTIL_ASSERT(check==vtx);
 			#endif
 			return V^E;

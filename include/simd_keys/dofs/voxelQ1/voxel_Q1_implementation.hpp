@@ -177,7 +177,7 @@ namespace LagrangeQ1 {
 	template<typename T=double>
 	[[nodiscard]] inline constexpr T GetChildCoef(uint8_t idx) noexcept {
 		GUTIL_ASSERT(idx<27);
-		return T{ChildrenCoefficients[idx]};
+		return static_cast<T>(ChildrenCoefficients[idx]);
 	}
 
 	GUTIL_DECLARE_SIMD()
@@ -235,21 +235,33 @@ namespace LagrangeQ1 {
 	//this only happens if all of its indices are 0.
 	GUTIL_DECLARE_SIMD()
 	template<typename T=double, uint8_t Period> requires(Period<8)
-	[[nodiscard]] inline constexpr T GetParentCoef(uint64_t child) noexcept {
-		GUTIL_ASSERT(Mesh3D::Depth(child)>0)
-		ASSERT_VALID_VOXELQ1_DOF(child)
+	[[nodiscard]] inline constexpr T GetParentCoef(uint64_t child, uint64_t parent) noexcept {
+		GUTIL_ASSERT(Mesh3D::Depth(parent)+1 == Mesh3D::Depth(child));
+		ASSERT_VALID_VOXELQ1_DOF(child);
+		ASSERT_VALID_VOXELQ1_DOF(parent);
 		GUTIL_ASSERT(Mesh3D::IsValid<Period>(child))
+		GUTIL_ASSERT(Mesh3D::IsValid<Period>(parent))
 		
-		uint64_t par = Mesh3D::CartesianIndexPairity_SIMD(child);
-		if constexpr (Period!=0) {
-			if (Mesh3D::Depth(child)==1) {
-				if constexpr (Period&0b001) {par&=0b110;}
-				if constexpr (Period&0b010) {par&=0b101;}
-				if constexpr (Period&0b100) {par&=0b011;}
-			}
+		//a given parent only inherits coefficients from a single child
+		const uint64_t ii = Mesh3D::IndexI_SIMD(parent) << 1;
+		const uint64_t jj = Mesh3D::IndexJ_SIMD(parent) << 1;
+		const uint64_t kk = Mesh3D::IndexK_SIMD(parent) << 1;
+		return static_cast<T>(
+				ii == Mesh3D::IndexI_SIMD(child) &&
+				jj == Mesh3D::IndexJ_SIMD(child) &&
+				kk == Mesh3D::IndexK_SIMD(child)
+			);
 
-		}
-		return static_cast<T>(par==0);
+		// uint64_t par = Mesh3D::CartesianIndexPairity_SIMD(child);
+		// if constexpr (Period!=0) {
+		// 	if (Mesh3D::Depth(child)==1) {
+		// 		if constexpr (Period&0b001) {par&=0b110;}
+		// 		if constexpr (Period&0b010) {par&=0b101;}
+		// 		if constexpr (Period&0b100) {par&=0b011;}
+		// 	}
+
+		// }
+		// return static_cast<T>(par==0);
 	}
 
 	GUTIL_DECLARE_SIMD()

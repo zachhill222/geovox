@@ -289,13 +289,12 @@ namespace DOFS {
 			return result;
 		}
 
-		GUTIL_DECLARE_SIMD()
 		template<typename T=double>
-		[[nodiscard]] constexpr T parent_coef_restrict(uint8_t p) const noexcept {
+		[[nodiscard]] constexpr T parent_coef_restrict(VoxelQ1 parent) const noexcept {
 			//pass the parent number for a common interface and to help
 			//catch bugs via the assert.
-			GUTIL_ASSERT(p<N_PARENTS);
-			return LagrangeQ1::GetParentCoef<T,Period>(key);
+			GUTIL_ASSERT(parent.is_valid());
+			return LagrangeQ1::GetParentCoef<T,Period>(key, parent.key);
 		}
 
 		GUTIL_DECLARE_SIMD()

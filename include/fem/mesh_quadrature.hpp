@@ -33,13 +33,13 @@ namespace GV {
 		MeshQuadratureRule(const Mesh_t& mesh) : 
 			mesh(mesh), 
 			support_element(mesh.max_depth+1), 
-			projected_quad_points(mesh.max_depth+1),
+			proj_quad_pts(mesh.max_depth+1),
 			jacobian_diag(mesh.max_depth+1),
 			jacobian_diag_inv(mesh.max_depth+1),
 			jacobian_det(mesh.max_depth+1),
 			jacobian_det_inv(mesh.max_depth+1) {
 				//pre-compute jacobians for each depth
-				T scale{1};
+				T scale{0.5};	//note the [0,1] -> [-1,1] normalized domains
 				for (uint8_t dd=0; dd<=mesh.max_depth; ++dd) {
 					jacobian_diag[dd][0] = scale*mesh.diag[0];
 					jacobian_diag[dd][1] = scale*mesh.diag[1];
@@ -77,26 +77,36 @@ namespace GV {
 		//////////////////////////////////////////////////////////////////
 		/// Current quadrature data
 		//////////////////////////////////////////////////////////////////
-		MeshElem_t 										q_el{0};
-		std::vector<MeshElem_t> 						support_element{};
-		std::vector<std::array<3*TOTAL_QUAD_POINTS>> 	projected_quad_points{};//all x-values, y-values, z-values per-depth
-		std::vector<std::array<T,3>>					jacobian_diag{};		//jacobian info at each depth, set at contruction time
-		std::vector<std::array<T,3>>					jacobian_diag_inv{};
-		std::vector<T>									jacobian_det{};
-		std::vector<T>									jacobian_det_inv{};
+		MeshElem_t 												q_el{0};
+		std::vector<MeshElem_t> 								support_element{};
+		std::vector<std::array<Scalar_t,3*TOTAL_QUAD_POINTS>> 	proj_quad_pts{};		//all x-values, y-values, z-values per-depth
+		std::vector<std::array<T,3>>							jacobian_diag{};		//jacobian info at each depth, set at contruction time
+		std::vector<std::array<T,3>>							jacobian_diag_inv{};
+		std::vector<T>											jacobian_det{};
+		std::vector<T>											jacobian_det_inv{};
+		std::vector<T>											geometric_coords{};
 
 		std::span<const T,TOTAL_QUAD_POINTS> quad_x(uint8_t depth) const {
-			return {&projected_quad_points[depth][0],TOTAL_QUAD_POINTS};
+			return std::span<const T,TOTAL_QUAD_POINTS>{&proj_quad_pts[depth][0], TOTAL_QUAD_POINTS};
 		}
 		std::span<const T,TOTAL_QUAD_POINTS> quad_y(uint8_t depth) const {
-			return {&projected_quad_points[depth][TOTAL_QUAD_POINTS],TOTAL_QUAD_POINTS};
+			return std::span<const T,TOTAL_QUAD_POINTS>{&proj_quad_pts[depth][TOTAL_QUAD_POINTS], TOTAL_QUAD_POINTS};
 		}
 		std::span<const T,TOTAL_QUAD_POINTS> quad_z(uint8_t depth) const {
-			return {&projected_quad_points[depth][2*TOTAL_QUAD_POINTS],TOTAL_QUAD_POINTS};
+			return std::span<const T,TOTAL_QUAD_POINTS>{&proj_quad_pts[depth][2*TOTAL_QUAD_POINTS], TOTAL_QUAD_POINTS};
+		}
+		std::span<T,TOTAL_QUAD_POINTS> quad_x(uint8_t depth) {
+			return std::span<T,TOTAL_QUAD_POINTS>{&(proj_quad_pts[depth][0]), TOTAL_QUAD_POINTS};
+		}
+		std::span<T,TOTAL_QUAD_POINTS> quad_y(uint8_t depth) {
+			return std::span<T,TOTAL_QUAD_POINTS>{&proj_quad_pts[depth][TOTAL_QUAD_POINTS], TOTAL_QUAD_POINTS};
+		}
+		std::span<T,TOTAL_QUAD_POINTS> quad_z(uint8_t depth) {
+			return std::span<T,TOTAL_QUAD_POINTS>{&proj_quad_pts[depth][2*TOTAL_QUAD_POINTS], TOTAL_QUAD_POINTS};
 		}
 
 		static constexpr std::span<const T, TOTAL_QUAD_POINTS> quad_w() {
-			return {&total_quad_w[0], TOTAL_QUAD_POINTS};
+			return std::span<const T, TOTAL_QUAD_POINTS>{&total_quad_w[0], TOTAL_QUAD_POINTS};
 		}
 		
 		//////////////////////////////////////////////////////////////////
@@ -136,6 +146,51 @@ namespace GV {
 			//for some depth in [min(0,q_el.depth()-depth_range), q_el.depth()]
 			//quad_x(depth) gives all TOTAL_QUAD_POINT quadrature points
 			//and support_element[depth] is the support element for the basis functions
+		}
+
+
+		//////////////////////////////////////////////////////////////////
+		/// Get the geometric locations of the quadrature points
+		//////////////////////////////////////////////////////////////////
+		std::span<const T, TOTAL_QUAD_POINTS> geo_x() const {
+			GUTIL_ASSERT(geometric_coords.size()==3*TOTAL_QUAD_POINTS);
+			return std::span<const T, TOTAL_QUAD_POINTS>{&geometric_coords[0], TOTAL_QUAD_POINTS};
+		}
+		std::span<const T, TOTAL_QUAD_POINTS> geo_y() const {
+			GUTIL_ASSERT(geometric_coords.size()==3*TOTAL_QUAD_POINTS);
+			return std::span<const T, TOTAL_QUAD_POINTS>{&geometric_coords[TOTAL_QUAD_POINTS], TOTAL_QUAD_POINTS};
+		}
+		std::span<const T, TOTAL_QUAD_POINTS> geo_z() const {
+			GUTIL_ASSERT(geometric_coords.size()==3*TOTAL_QUAD_POINTS);
+			return std::span<const T, TOTAL_QUAD_POINTS>{&geometric_coords[2*TOTAL_QUAD_POINTS], TOTAL_QUAD_POINTS};
+		}
+		std::span<T, TOTAL_QUAD_POINTS> geo_x() {
+			GUTIL_ASSERT(geometric_coords.size()==3*TOTAL_QUAD_POINTS);
+			return std::span<T, TOTAL_QUAD_POINTS>{&geometric_coords[0], TOTAL_QUAD_POINTS};
+		}
+		std::span<T, TOTAL_QUAD_POINTS> geo_y() {
+			GUTIL_ASSERT(geometric_coords.size()==3*TOTAL_QUAD_POINTS);
+			return std::span<T, TOTAL_QUAD_POINTS>{&geometric_coords[TOTAL_QUAD_POINTS], TOTAL_QUAD_POINTS};
+		}
+		std::span<T, TOTAL_QUAD_POINTS> geo_z() {
+			GUTIL_ASSERT(geometric_coords.size()==3*TOTAL_QUAD_POINTS);
+			return std::span<T, TOTAL_QUAD_POINTS>{&geometric_coords[2*TOTAL_QUAD_POINTS], TOTAL_QUAD_POINTS};
+		}
+
+		void build_geometric_coords() {
+			geometric_coords.assign(3*TOTAL_QUAD_POINTS, T{0});
+			auto center    = mesh.geo_center(q_el);
+			auto off_scale = gutil::ldexp(T{1}, -(int) q_el.depth()) * mesh.diag;
+			const uint8_t dd = q_el.depth_u8();
+
+			GUTIL_SIMD(collapse(2))
+			for (int i=0; i<3; ++i) {
+				for (int j=0; j<TOTAL_QUAD_POINTS; ++j) {
+					const int idx = i*TOTAL_QUAD_POINTS + j;
+					geometric_coords[idx] = 
+						center[i] + off_scale[i]*proj_quad_pts[dd][idx];
+				}
+			}
 		}
 	};
 }

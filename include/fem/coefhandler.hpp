@@ -39,6 +39,7 @@ namespace GV {
 		using MeshFeature_t = typename DofHandler_t::MeshFeature_t;
 
 		using Scalar_t      = T;
+		using Point_t       = gutil::Point<3,T>;
 
 		//////////////////////////////////////////////////////////////////
 		// Hold a snapshot of the last dofs (current coefficients)
@@ -107,6 +108,20 @@ namespace GV {
 
 
 		///////////////////////////////////////////////////////////////////
+		/// Get coefficients
+		///////////////////////////////////////////////////////////////////
+		std::span<Scalar_t> get_coefs(uint8_t i) {
+			GUTIL_ASSERT(i<N);
+			return {coefs[i]};
+		}
+
+		std::span<const Scalar_t> get_coefs(uint8_t i) const {
+			GUTIL_ASSERT(i<N);
+			return {coefs[i]};
+		}
+
+
+		///////////////////////////////////////////////////////////////////
 		/// Look up previous global dof numbers and get snapshot of the handler's current dofs
 		///////////////////////////////////////////////////////////////////
 		[[nodiscard]] size_t global_number(DOF_t dof) const noexcept {
@@ -115,9 +130,6 @@ namespace GV {
 			auto it = std::lower_bound(list.begin(), list.end(), dof.key);
 			if (it==list.end() || *it!=dof.key) {return size_t(-1);}
 			return sorter.bin_start(bin_number) + std::distance(list.begin(), it);
-
-			// auto it = std::find(dofs.begin(), dofs.end(), dof);
-			// return (it==dofs.end()) ? size_t(-1) : std::distance(dofs.begin(), it);
 		}
 
 		void snapshot_dofs() noexcept {
@@ -126,6 +138,7 @@ namespace GV {
 			sorter = dofhandler.get_sorter();
 			//the sorter uses the raw key values
 			sorter.rebind_to_copy(dofhandler.template reinterpret_key_span<uint64_t,DOF_t>(dofs));
+			GUTIL_ASSERT(sorter.n_bins()== (int) dofhandler.mesh.max_depth+1);
 		}
 
 
@@ -217,7 +230,7 @@ namespace GV {
 
 			const size_t old_size = dofs.size();
 			const size_t new_size = dh_curr_dofs.size();
-			new_coefs.resize(new_size, Scalar_t{0});
+			new_coefs.assign(new_size, Scalar_t{0});
 
 			GUTIL_OMP(parallel)
 			{
@@ -234,10 +247,10 @@ namespace GV {
 					GUTIL_ASSERT(!dofhandler.is_active_stable(dof));
 					GUTIL_ASSERT(dofhandler.is_refined_stable(dof));
 					distribute_refined(dof, coefs[i][idx], std::span<Scalar_t>(new_coefs), new_size);
-
 				}//for dofs
 			}//omp parallel
 		}//update coefs
+
 
 		void restrict_coefs(uint8_t i, std::vector<Scalar_t>& new_coefs) noexcept {
 			GUTIL_ASSERT(dofhandler.is_active_keys_stable());
@@ -247,86 +260,36 @@ namespace GV {
 			const size_t old_size = dofs.size();
 			const size_t new_size = dh_curr_dofs.size();
 			new_coefs.assign(new_size, Scalar_t{0});
-
-			GUTIL_OMP(parallel)
-			{
-				GUTIL_OMP(for)
-				for (size_t idx=0; idx<old_size; ++idx) {
-					DOF_t dof = dofs[idx];
-
-					size_t n_idx = dofhandler.global_number(dof);
-					if (n_idx < new_size) {
-						GUTIL_OMP(atomic)
-						new_coefs[n_idx] += coefs[i][idx];
-						continue;
-					}
-					GUTIL_ASSERT(!dofhandler.is_active_stable(dof));
-					GUTIL_ASSERT(!dofhandler.is_refined_stable(dof));
-					distribute_unrefined_restrict(dof, coefs[i][idx], std::span<Scalar_t>(new_coefs), new_size);
-				}//for dofs
-			}//omp parallel
-		}//update coefs
-
-		// void restrict_coefs_average(uint8_t i, std::vector<Scalar_t>& new_coefs) noexcept {
-		// 	GUTIL_ASSERT(dofhandler.is_active_keys_stable());
-		// 	GUTIL_ASSERT(dofhandler.is_key_mask_stable());
-		// 	GUTIL_ASSERT(i<N);
-
-		// 	const size_t new_size = dh_curr_dofs.size();
-		// 	new_coefs.assign(new_size, Scalar_t{0});
-			
-		// 	std::vector<Scalar_t> w_increment(new_size, Scalar_t{0});
-		// 	std::vector<Scalar_t> w_sum(new_size, Scalar_t{0});
-
-		// 	std::span<Scalar_t> new_coefs_span(new_coefs);
-		// 	std::span<Scalar_t> w_increment_span(w_increment);
-		// 	std::span<Scalar_t> w_sum_span(w_sum);
-
-		// 	GUTIL_OMP(parallel for)
-		// 	for (size_t idx=0; idx<dofs.size(); ++idx) {
-		// 		DOF_t dof = dofs[idx];
-		// 		size_t n_idx = dofhandler.global_number(dof);
-		// 		if (n_idx < new_size) {
-		// 			GUTIL_OMP(atomic) new_coefs[n_idx]	+= coefs[i][idx];
-		// 			GUTIL_OMP(atomic) w_sum[n_idx]		+= Scalar_t{1};
-		// 		}
-		// 		distribute_unrefined_average(dof, coefs[i][idx], new_coefs_span, w_sum_span, new_size);
-		// 	}
-
-		// 	//normalize
-		// 	GUTIL_SIMD()
-		// 	for (size_t idx=0; idx<new_size; ++idx) {
-		// 		new_coefs[idx] += w_increment[idx]/w_sum[idx];
-		// 		if (w_increment[idx]>0) {
-		// 		}
-		// 	}
+			auto cur_sorter = dofhandler.get_sorter();
 
 
-		// 	// GUTIL_OMP(parallel for)
-		// 	// for (size_t idx=0; idx<new_size; ++idx) {
-		// 	// 	DOF_t dof = dh_curr_dofs[idx];
-		// 	// 	GUTIL_ASSERT(dofhandler.has_coef_stable(dof) || dofhandler.is_coef_prop_stable(dof));
-
-		// 	// 	// was this dof ALREADY active with a known value before this batch? just keep it.
-		// 	// 	if (dofhandler.has_coef_stable(dof)) {
-		// 	// 		size_t old_idx = global_number(dof);
-		// 	// 		GUTIL_ASSERT(old_idx<dofs.size());
-		// 	// 		new_coefs[idx] = coefs[i][old_idx];
-		// 	// 		// continue;
-		// 	// 	}
-
+			for (int dd=0; dd<cur_sorter.n_bins(); ++dd) {
+				std::span<const DOF_t> list = 
+					dofhandler.template reinterpret_key_span<DOF_t,uint64_t>(cur_sorter.get_bin(dd));
 				
-		// 	// 	if (dofhandler.is_coef_prop_stable(dof)) {
-		// 	// 		// newly-reactivated -- gather a weighted average from its former children
-		// 	// 		Scalar_t w_coef = Scalar_t{0};
-		// 	// 		Scalar_t w_sum  = Scalar_t{0};   // was incorrectly initialized to 1
-		// 	// 		gather_unrefined_average(dof, coefs[i], Scalar_t{1}, w_coef, w_sum);
-		// 	// 		GUTIL_ASSERT(w_sum > Scalar_t{0});
-		// 	// 		new_coefs[idx] += w_coef / w_sum;   // was missing entirely -- result was never written
-		// 	// 	}
-		// 	// }
-		// }
+				//transfer same depth dofs
+				GUTIL_OMP(parallel for)
+				for (size_t j=0; j<list.size(); ++j) {
+					size_t new_idx = cur_sorter.bin_start(dd) + j;
+					size_t old_idx = global_number(list[j]);
+					if (old_idx < old_size) {
+						new_coefs[new_idx] += coefs[i][old_idx];
+					}
+					else {
+						//determine the required value at the dof
+						//then subtract off the current value from the low depth dofs
+						Scalar_t f_val = evaluate_at(list[j], std::span<const DOF_t>(dofs), std::span<const Scalar_t>(coefs[i]));
 
+						//the dofs must be depth sorted
+						std::span<const DOF_t> coarse_dofs(dh_curr_dofs.begin(), cur_sorter.bin_start(dd));
+						std::span<const Scalar_t> coarse_coefs(new_coefs.begin(), cur_sorter.bin_start(dd));
+						
+						f_val -= evaluate_at(list[j], coarse_dofs, coarse_coefs);
+						new_coefs[new_idx] += f_val;
+					}
+				}
+			}
+		}
 
 
 
@@ -366,67 +329,18 @@ namespace GV {
 			dof.parents_simd(p_dofs);
 			for (uint8_t p=0; p<DOF_t::N_PARENTS; ++p) {
 				if (!p_dofs[p].exists()) {continue;}
-				Scalar_t parent_contribution = contribution * dof.template parent_coef_restrict<Scalar_t>(p);
+				Scalar_t parent_contribution = contribution * dof.template parent_coef_restrict<Scalar_t>(p_dofs[p]);
 				if (parent_contribution == Scalar_t{0}) {continue;}
-
+				
 				size_t n_idx = dofhandler.global_number(p_dofs[p]);
 				if (n_idx<new_size) {
-					GUTIL_OMP(atomic)
-					new_coefs[n_idx] += parent_contribution;
+					GUTIL_OMP(atomic) new_coefs[n_idx] += parent_contribution;
 				}
 				else if (!dofhandler.is_active_stable(p_dofs[p])) {
 					distribute_unrefined_restrict(p_dofs[p], parent_contribution, new_coefs, new_size);
 				}
 			}
 		}
-
-
-		void distribute_unrefined_average(DOF_t dof, Scalar_t contribution, std::span<Scalar_t> new_coefs,
-							std::span<Scalar_t> w_sum, size_t new_size) const noexcept {
-			DOF_t p_dofs[DOF_t::N_PARENTS];
-			dof.parents_simd(p_dofs);
-			for (uint8_t p=0; p<DOF_t::N_PARENTS; ++p) {
-				if (!p_dofs[p].exists()) {continue;}
-				Scalar_t weight   = dof.template parent_coef_weight<Scalar_t>(p);
-				Scalar_t weighted = contribution * weight;
-				size_t n_idx = dofhandler.global_number(p_dofs[p]);
-				// size_t o_idx = global_number(p_dofs[p]);
-				if (n_idx<new_size){// && o_idx==size_t(-1)) {
-					GUTIL_OMP(atomic) new_coefs[n_idx]	+= weighted;
-					GUTIL_OMP(atomic) w_sum[n_idx]	 	+= weight;
-				} else if (!dofhandler.is_active_stable(p_dofs[p])) {
-					distribute_unrefined_average(p_dofs[p], weighted, new_coefs, w_sum, new_size);
-				}
-			}
-		}
-
-
-
-		//start at a newly activated dof from unrefinement. Its coefficient needs to be initialized.
-		//we do this in a manner that averages the contribution from all descendants that used to be active.
-		//we start at the parent and recurse into the children, accumulating a weighted average of their coefficients.
-		//
-		// - dof: 		the dof being examined (start at active parent and recurse into children)
-		// - w:   		the current weight that the dof contributes
-		// - w_coef:	the current sum of weights*coefficients
-		// - w_sum:		the current sum of weights
-		// void gather_unrefined_average(DOF_t dof, std::span<const Scalar_t> old_coefs, Scalar_t w, Scalar_t& w_coef, Scalar_t& w_sum) const noexcept {
-		// 	DOF_t c_dofs[DOF_t::N_CHILDREN];
-		// 	dof.children_simd(c_dofs);
-		// 	for (uint8_t c=0; c<DOF_t::N_CHILDREN; ++c) {
-		// 		if (!c_dofs[c].exists()) {continue;}
-		// 		Scalar_t w_new = w * dof.template child_coef<Scalar_t>(c);
-		// 		if (dofhandler.has_coef_stable(c_dofs[c])) {
-		// 			size_t old_idx = global_number(c_dofs[c]);
-		// 			GUTIL_ASSERT(old_idx < old_coefs.size());
-		// 			w_sum  += w_new;
-		// 			w_coef += w_new*old_coefs[old_idx];
-		// 		} else if (dofhandler.is_coef_prop_stable(c_dofs[c])) {
-		// 			gather_unrefined_average(c_dofs[c], old_coefs, w_new, w_coef, w_sum);   // was missing old_coefs
-		// 		}
-		// 	}
-		// }
-
 
 
 	public:
@@ -482,6 +396,47 @@ namespace GV {
 
 			return vals;
 		}
+
+
+
+		///////////////////////////////////////////////////////////////////////
+		/// Evaluate the function represented by (dofs, coefs) at the geometric
+		/// position of `target`. `dofs` must be sorted by key (ascending), matching
+		/// whatever convention the rest of the class already uses for lower_bound lookups.
+		/// Walks every one of target's geometric ancestors (up to N_PARENTS per level,
+		/// recursively to depth 0), summing weighted contributions from whichever
+		/// ancestors are genuinely present in `dofs`. Does NOT stop early on an exact
+		/// match -- other, non-coinciding ancestors can still legitimately contribute.
+		///////////////////////////////////////////////////////////////////////
+		template<typename DOF_t, typename Scalar_t>
+		[[nodiscard]] static Scalar_t evaluate_at(DOF_t target, std::span<const DOF_t> dofs, std::span<const Scalar_t> coefs) noexcept {
+			GUTIL_ASSERT(dofs.size() == coefs.size());
+			Scalar_t result{0};
+			evaluate_at_impl(target, Scalar_t{1}, dofs, coefs, result);
+			return result;
+		}
+
+		private:
+		template<typename DOF_t, typename Scalar_t>
+		static void evaluate_at_impl(DOF_t node, Scalar_t weight, std::span<const DOF_t> dofs,
+									  std::span<const Scalar_t> coefs, Scalar_t& result) noexcept {
+			auto it = std::lower_bound(dofs.begin(), dofs.end(), node);
+			if (it != dofs.end() && *it == node) {
+				result += weight * coefs[std::distance(dofs.begin(), it)];
+				// no early return -- other, non-coinciding parents may still contribute
+			}
+			if (node.depth() == 0) {return;}
+
+			DOF_t p_dofs[DOF_t::N_PARENTS];
+			node.parents_simd(p_dofs);
+			for (uint8_t p=0; p<DOF_t::N_PARENTS; ++p) {
+				if (!p_dofs[p].exists()) {continue;}
+				Scalar_t p_weight = weight * node.template parent_coef_weight<Scalar_t>(p);
+				if (p_weight == Scalar_t{0}) {continue;}
+				evaluate_at_impl(p_dofs[p], p_weight, dofs, coefs, result);
+			}
+		}
+
 
 
 		//////////////////////////////////////////////////////////////////////

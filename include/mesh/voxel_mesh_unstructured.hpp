@@ -290,7 +290,6 @@ namespace GV {
 				uint8_t depth_mask = (depth<<1)&DEPTH_BITS;
 				std::fill(key_mask.begin()+start, key_mask.begin()+end, ACTIVE_BIT|depth_mask);
 				std::fill(key_mask.begin(), key_mask.begin()+start, depth_mask);
-				is_vertices_collected_.store(false);
 				GV_END_UNSTABLE
 			}
 			collect_elements();
@@ -330,22 +329,25 @@ namespace GV {
 			sort_elements_by_depth();
 			GUTIL_ASSERT(is_current());
 			is_vertices_collected_.store(false);
+			is_elements_encoded_.store(true);
 		}
 
 		void sort_elements_by_depth() noexcept {
 			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
 			GV_ASSERT_KEY_MASK_STABLE_STATE
+
 			GUTIL_PROFILE("sorting elements by depth");
-			BASE::sort_active_keys(54, &UnstructuredVoxelMesh::element_key_depth_bin);
+			BASE::sort_active_keys((int) max_depth+1, &UnstructuredVoxelMesh::element_key_depth_bin);
 			is_elements_color_sorted_.store(false);
 			is_elements_depth_sorted_.store(true);
 		}
 
 		void sort_elements_by_color() noexcept {
-			GUTIL_ASSERT(is_current());
-			GUTIL_ASSERT(!is_encoded());			//elements must be in cartesian form to easily get their color
 			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
 			GV_ASSERT_KEY_MASK_STABLE_STATE
+
+			GUTIL_ASSERT(!is_encoded());
+
 			GUTIL_PROFILE("sorting elements by color");
 			BASE::sort_active_keys(54, &UnstructuredVoxelMesh::element_key_color54_bin);
 			is_elements_color_sorted_.store(true);
@@ -463,17 +465,20 @@ namespace GV {
 
 		//change the encoding of the active elements
 		void set_encoded(bool val) noexcept {
-			GV_BEGIN_ACTIVE_UNSTABLE
 			
 			#ifndef NDEBUG
 				if (is_encoded() == val) {
 					for (size_t i=0; i<std::min(size_t{100}, active_elements.size()); ++i) {
+						
+						if (active_elements[i].is_encoded()!=val) {
+							std::cout << print_bytes(active_elements[i]) << std::endl;
+						}
 						GUTIL_ASSERT(active_elements[i].is_encoded() == val);
 					}
 				}
 			#endif
-
-			if (is_encoded() == val) {return;}
+			
+			GV_BEGIN_ACTIVE_UNSTABLE
 			GUTIL_PROFILE("Setting encoding to ", val ? "morton" : "cartesian");
 
 			if (val) { //cartesian->morton
@@ -611,8 +616,8 @@ namespace GV {
 		/////////////////////////////////////////////////////////////////////////////////////////////////
 		/// Methods primarily for writing to vtk files
 		/////////////////////////////////////////////////////////////////////////////////////////////////
-		[[nodiscard]] GeoPoint_t geo_coord(Vert_t vtx) const noexcept {return box.low + (box.high-box.low)*vtx.normalized_coordinate();}
-		[[nodiscard]] GeoPoint_t geo_center(Elem_t el) const noexcept {return box.low + (box.high-box.low)*el.normalized_center();}
+		[[nodiscard]] GeoPoint_t geo_coord(Vert_t vtx) const noexcept {return box.low + (box.high-box.low)*vtx.template normalized_coordinate<Scalar_t>();}
+		[[nodiscard]] GeoPoint_t geo_center(Elem_t el) const noexcept {return box.low + (box.high-box.low)*el.template normalized_center<Scalar_t>();}
 		[[nodiscard]] GeoPoint_t el_size(Elem_t el) const noexcept {
 			return gutil::ldexp(Scalar_t{1}, -(int)(el.depth())) * diag;
 		}
@@ -972,6 +977,8 @@ namespace GV {
 	template<uint8_t Period> requires(Period<8)
 	void UnstructuredVoxelMesh<T>::process_unrefine() noexcept {
 		GUTIL_ASSERT(is_current());
+		GUTIL_ASSERT(is_depth_sorted());
+
 		if (!has_pending_unrefine_requests()) {
 			GUTIL_LOG("there are no unrefine requests");
 			return;
@@ -1079,6 +1086,7 @@ namespace GV {
 	template<uint8_t Period, typename Predicate> requires(Period<8)
 	void UnstructuredVoxelMesh<T>::process_refine(Predicate&& pred) noexcept {
 		GUTIL_ASSERT(is_current());
+		GUTIL_ASSERT(is_depth_sorted());
 
 		if (!has_pending_refine_requests()) {
 			GUTIL_LOG("there are no refine requests");
