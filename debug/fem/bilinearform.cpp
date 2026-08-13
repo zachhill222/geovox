@@ -25,17 +25,17 @@ using DofElem_t     = typename DofHandler_t::DofElem_t;
 
 using CoefHandler_t = GV::CoefHandler<DofHandler_t,Scalar_t,1>;
 
-// using Kernel_t      = GV::H1BilinearKernel<true>;
-// using Kernel_t      = GV::L2BilinearKernel<true>;
-struct Kernel_t : public GV::H1BilinearKernel<true,Kernel_t> {
-	template<typename T, size_t N>
-	static void eval_weight(std::span<T,N> vals, std::span<const T,N> x, std::span<const T,N> y, std::span<const T,N> z) noexcept {
-		GUTIL_SIMD()
-		for (size_t i=0; i<N; ++i) {
-			vals[i] = x[i]*y[i]*z[i];
-		}
-	}
-};
+using Kernel_t      = GV::H1BilinearKernel<true>;
+// using Kernel_t      = GV::L2BilinearKernel<>;
+// struct Kernel_t : public GV::H1BilinearKernel<true,Kernel_t> {
+// 	template<typename T, size_t N>
+// 	static void eval_weight(std::span<T,N> vals, std::span<const T,N> x, std::span<const T,N> y, std::span<const T,N> z) noexcept {
+// 		GUTIL_SIMD()
+// 		for (size_t i=0; i<N; ++i) {
+// 			vals[i] = x[i]*y[i]*z[i];
+// 		}
+// 	}
+// };
 using BilinearForm_t    = GV::BilinearForm<DofHandler_t, DofHandler_t, Kernel_t, 4, Scalar_t>;
 
 inline constexpr Box_t domain{ {-1,-1,-1},
@@ -99,9 +99,9 @@ void refine(TestConfig cfg, Mesh_t& mesh, DofHandler_t& d_handler, CoefHandler_t
 		d_handler.refine_quasi_hierarchical(elements);
 		// d_handler.refine_quasi_hierarchical(mesh.element_begin(), mesh.element_end());
 		mesh.process_refine();
-		// c_handler.prolong_coefs();
+		c_handler.prolong_coefs();
 	}
-	c_handler.restrict_coefs();
+	// c_handler.restrict_coefs();
 
 }
 
@@ -113,7 +113,7 @@ void unrefine(TestConfig cfg, Mesh_t& mesh, DofHandler_t& d_handler, CoefHandler
 				elements.push_back(*it);
 			}
 		}
-
+		
 		d_handler.unrefine_quasi_hierarchical(elements);
 
 		for (auto it = mesh.element_begin(); it!=mesh.element_end(); ++it) {
@@ -121,11 +121,10 @@ void unrefine(TestConfig cfg, Mesh_t& mesh, DofHandler_t& d_handler, CoefHandler
 				mesh.request_unrefine(*it);
 			}
 		}
-
+		
 		mesh.process_unrefine();
 		c_handler.restrict_coefs();
 	}
-
 }
 
 void save_mesh(const std::string& filename, Mesh_t& mesh, DofHandler_t& d_handler, CoefHandler_t& c_handler) {
@@ -177,6 +176,7 @@ int main(int argc, char* argv[]) {
 
 	CoefHandler_t c_handler(d_handler);
 	c_handler.init_coefs(0, [&](DOF_t dof) {return mesh.geo_coord(Vert_t{dof.key})[0];});
+	// c_handler.init_coefs(0, [&](DOF_t dof) {return 1;});
 
 	save_mesh(cfg.test_name + "_initial.vtk", mesh, d_handler, c_handler);
 	std::cout << "\n\n";

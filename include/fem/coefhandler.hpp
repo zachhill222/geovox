@@ -108,6 +108,27 @@ namespace GV {
 			}
 		}
 
+		///////////////////////////////////////////////////////////////////
+		/// Check if the coefs are likely up to date
+		///////////////////////////////////////////////////////////////////
+		[[nodiscard]] bool is_current() const noexcept {
+			if (!dofhandler.is_current()) {return false;}
+
+			if (dh_curr_dofs.size() != dofhandler.active_dofs.size()) {return false;}
+			if (dh_curr_dofs.data() != dofhandler.active_dofs.data()) {return false;}
+
+			if (dofs.empty()) {return false;}
+			if (dofs.size()  != dh_curr_dofs.size()) {return false;}
+			if (dofs.front() != dh_curr_dofs.front()) {return false;}
+			if (dofs.back()  != dh_curr_dofs.back())  {return false;}
+
+			for (uint8_t i=0; i<N; ++i) {
+				if (coefs[i].size() != dofs.size()) {return false;}
+			}
+
+			return true;
+		}
+
 
 		///////////////////////////////////////////////////////////////////
 		/// Get coefficients

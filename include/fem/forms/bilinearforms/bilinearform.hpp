@@ -48,7 +48,8 @@ namespace GV {
 		static_assert(std::is_invocable_r_v<T,KernelType,TrialDof_t,TestDof_t,const QuadRule_t&>, 
 			"The Kernel must have the signature T(TrialDof_t,TestDof_t,const QuadRule_t&)");
 
-		static_assert(!Kernel_t::IS_SYMMETRIC || std::same_as<TrialHandler_t,TestHandler_t>);
+		static_assert(!Kernel_t::IS_SYMMETRIC || std::same_as<TrialHandler_t,TestHandler_t>,
+			"A symmetric kernel must have the same dofhandlers for the test and trial spaces");
 
 		//////////////////////////////////////////////////////////////////
 		/// Data and constructor
@@ -58,10 +59,10 @@ namespace GV {
 		const Mesh_t&	 		mesh;
 		const Kernel_t 			kernel;
 
-		BilinearForm(const TrialHandler_t& u_handler, const TestHandler_t& v_handler, KernelType&& kernel = KernelType{}) :
+		BilinearForm(const TrialHandler_t& u_handler, const TestHandler_t& v_handler, KernelType kernel = KernelType{}) :
 			trial_handler(u_handler), test_handler(v_handler), mesh(test_handler.mesh), kernel(std::move(kernel)) {}
 
-		BilinearForm(const TrialHandler_t& sym_handler, KernelType&& kernel=KernelType{}) requires(Kernel_t::IS_SYMMETRIC) :
+		BilinearForm(const TrialHandler_t& sym_handler, KernelType kernel=KernelType{}) requires(Kernel_t::IS_SYMMETRIC) :
 			trial_handler(sym_handler), test_handler(sym_handler), mesh(sym_handler.mesh), kernel(std::move(kernel)) {}
 
 
@@ -486,7 +487,7 @@ namespace GV {
 				const size_t end 			  = (tid==n_threads-1) ? mesh.n_elements() : start + n_els_per_thread;
 				
 				std::span<const MeshElem_t> quad_elems(mesh.element_begin()+start, mesh.element_begin()+end);
-				thread_triplets.reserve(quad_elems.size() * TrialDof_t::N_DOFS_PER_ELEM * TestDof_t::N_DOFS_PER_ELEM);
+				thread_triplets.reserve(quad_elems.size() * TrialDof_t::N_DOF_PER_ELEM * TestDof_t::N_DOF_PER_ELEM);
 
 
 				for (size_t q=0; q<quad_elems.size(); ++q) {
@@ -563,7 +564,7 @@ namespace GV {
 				const size_t end 			  = (tid==n_threads-1) ? mesh.n_elements() : start + n_els_per_thread;
 				
 				std::span<const MeshElem_t> quad_elems(mesh.element_begin()+start, mesh.element_begin()+end);
-				thread_triplets.reserve(quad_elems.size() * TrialDof_t::N_DOFS_PER_ELEM * TestDof_t::N_DOFS_PER_ELEM);
+				thread_triplets.reserve(quad_elems.size() * TrialDof_t::N_DOF_PER_ELEM * TestDof_t::N_DOF_PER_ELEM);
 
 
 				for (size_t q=0; q<quad_elems.size(); ++q) {

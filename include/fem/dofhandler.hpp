@@ -962,7 +962,7 @@ namespace GV {
 			return true;
 		}
 
-		[[nodiscard]] bool is_refinable(DOF_t dof) const noexcept {
+		[[nodiscard]] bool can_refine(DOF_t dof) const noexcept {
 			GUTIL_ASSERT(dof.is_valid());
 			if (dof.depth() >= max_depth) {return false;}		//we can't refine past max depth
 			uint8_t byte = BASE::get_mask_no_check(dof.linear_index());
@@ -975,7 +975,7 @@ namespace GV {
 			return has_all_refined_parents(dof);
 		}
 
-		[[nodiscard]] bool is_unrefinable(DOF_t dof) const noexcept {
+		[[nodiscard]] bool can_unrefine(DOF_t dof) const noexcept {
 			GUTIL_ASSERT(dof.is_valid());
 			if (!is_refined_no_check(dof)) {return false;}
 			if (has_any_refined_child(dof)) {return false;}
@@ -1024,7 +1024,7 @@ namespace GV {
 			GV_ASSERT_KEY_MASK_UNSTABLE_STATE
 			GUTIL_ASSERT(dof.is_valid());
 			GUTIL_ASSERT(is_active_unstable(dof));
-			GUTIL_ASSERT(is_refinable(dof));
+			GUTIL_ASSERT(can_refine(dof));
 
 			for (DOF_t c : dof.children()) {
 				if (c.exists()) { activate(c); }
@@ -1038,7 +1038,7 @@ namespace GV {
 		void unrefine_quasi_hierarchical(DOF_t dof) noexcept {
 			GV_ASSERT_KEY_MASK_UNSTABLE_STATE
 			GUTIL_ASSERT(dof.is_valid());
-			GUTIL_ASSERT(is_unrefinable(dof));
+			GUTIL_ASSERT(can_unrefine(dof));
 
 			activate(dof);											//send mesh refinement request
 			for (DOF_t c : dof.children()) {
@@ -1052,7 +1052,7 @@ namespace GV {
 
 		//////////////////////////////////////////////////////////////////////////////////////
 		/// For bulk refine/unrefine operations, the above operations won't quite work.
-		/// If "is_refinable" or "is_unrefinable" is true of a batch of elements, then
+		/// If "can_refine" or "can_unrefine" is true of a batch of elements, then
 		/// use these operations sequentially on the entire batch and/or parents/children.
 		//////////////////////////////////////////////////////////////////////////////////////
 		[[nodiscard]] bool has_any_active_child(DOF_t dof) const noexcept {
@@ -1137,7 +1137,7 @@ namespace GV {
 			GUTIL_PROFILE("Refining (QH) dofs on ", elems.size(), " elements");
 			size_t n_start = active_dofs.size();
 
-			auto pred = [this](DOF_t dof) { return is_refinable(dof); };
+			auto pred = [this](DOF_t dof) { return can_refine(dof); };
 
 
 			BASE::mark_stale();
@@ -1169,7 +1169,7 @@ namespace GV {
 						auto par_list = pairity_sorter.get_bin(cc);
 						GUTIL_OMP(parallel for)
 						for (size_t i=0; i<par_list.size(); ++i) {
-							if (is_refinable(par_list[i])) {
+							if (can_refine(par_list[i])) {
 								refine_quasi_hierarchical(par_list[i]);
 							}
 						}
@@ -1184,7 +1184,6 @@ namespace GV {
 			GUTIL_ASSERT(n_end>=n_start);
 			return n_end - n_start;
 		}
-
 
 		template<typename Container_t>
 		[[maybe_unused]] size_t unrefine_quasi_hierarchical(const Container_t& elems) noexcept {
@@ -1204,7 +1203,7 @@ namespace GV {
 			size_t n_start = active_dofs.size();
 
 			auto pred = [this](DOF_t dof) {
-				return is_unrefinable(dof);
+				return can_unrefine(dof);
 			};
 
 			BASE::mark_stale();
@@ -1215,7 +1214,7 @@ namespace GV {
 				GUTIL_PROFILE("Processing ", dofs.size(), " dofs for unrefinement");
 				
 				for (DOF_t dof : dofs) {
-					if (is_unrefinable(dof)) {
+					if (can_unrefine(dof)) {
 						unrefine_quasi_hierarchical(dof);
 					}
 				}

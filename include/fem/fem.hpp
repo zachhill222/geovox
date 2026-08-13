@@ -5,8 +5,4 @@
 
 #include "fem/mesh_quadrature.hpp"
 
-#include "fem/linearforms/linearform.hpp"
-#include "fem/linearforms/linear_kernels.hpp"
-
-#include "fem/bilinearforms/bilinearform.hpp"
-#include "fem/bilinearforms/bilinear_kernels.hpp"
+#include "fem/forms/forms.hpp"
