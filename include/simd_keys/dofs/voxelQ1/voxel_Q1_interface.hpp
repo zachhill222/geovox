@@ -213,7 +213,7 @@ namespace DOFS {
 			return val;
 		}
 
-		template<typename PointContainer>
+		template<typename T>
 		constexpr void gradient_simd(uint8_t local, T* gx, T* gy, T* gz, const T* X, const T* Y, const T* Z, uint32_t N) noexcept {
 			LagrangeQ1::GetDofGradientByLocalNumber(key, local, gx, gy, gz, X, Y, Z, N);
 		}
@@ -317,20 +317,20 @@ namespace DOFS {
 	};
 
 
-	template<uint8_t Period>
+	template<uint8_t Period> requires(Period<8)
 	inline std::string to_string(VoxelQ1<Period> dof) {
 		return "VoxelQ1<" + std::to_string(Period) + ">{" 
 				+ std::to_string(dof.depth()) + ", " + std::to_string(dof.i())
 				+ ", " + std::to_string(dof.j()) + ", " + std::to_string(dof.k()) + "}";
 	}
 
-	template<uint8_t Period>
+	template<uint8_t Period> requires(Period<8)
 	std::ostream& operator<<(std::ostream& os, VoxelQ1<Period> dof) {
 		return os << to_string(dof);
 	}
 
 
-	template<uint8_t Period>
+	template<uint8_t Period> requires(Period<8)
 	template<typename T>
 	[[nodiscard]] constexpr T VoxelQ1<Period>::evaluate_field_at_depth(DofVert_t loc, std::span<const T> coef,
 								std::span<const VoxelQ1> dofs, uint64_t depth) noexcept {
@@ -374,7 +374,7 @@ namespace DOFS {
 
 
 
-	template<uint8_t Period>
+	template<uint8_t Period> requires(Period<8)
 	template<bool Increment, typename T>
 	constexpr void VoxelQ1<Period>::batched_evaluate_field_at_depth(std::span<T> vals, std::span<const DofVert_t> loc, 
 				std::span<const T> coef, std::span<const VoxelQ1> dofs, uint64_t depth) noexcept {

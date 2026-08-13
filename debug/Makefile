@@ -9,7 +9,7 @@ TARGETS = $(SRC:.cpp=)
 INCLUDE = -I../include -I/usr/include/eigen3 -I../external/gutil/include
 
 #default build
-CXX     = g++ -std=c++23 -Wall -march=native -mtune=native
+CXX     = g++ -std=c++23 -Wall -march=native -mtune=native -ffast-math
 CXX    += -pg -g
 # CXX    += -fsanitize=address
 # CXX    += -fsanitize=thread

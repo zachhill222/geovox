@@ -5,9 +5,10 @@
 #include "util/util.hpp"
 #include "mesh/mesh.hpp"
 
+#include "fem/dofhandler.hpp"
+
 #include "fem/mesh_quadrature.hpp"
 #include "fem/linearforms/linear_kernels.hpp"
-#include "fem/dofhandler.hpp"
 
 namespace GV {
 
@@ -26,7 +27,7 @@ namespace GV {
 	/// quadrature points and weights on the current element as well as projections
 	/// of to relevant lower depths.
 	/////////////////////////////////////////////////////////////////////
-	template<typename KernelType, typename TestHandlerType, int N, typename T>
+	template<typename TestHandlerType, typename KernelType, int N, typename T>
 	struct LinearForm {
 
 
@@ -81,9 +82,9 @@ namespace GV {
 					
 					for (size_t j=start; j<end; ++j) {
 						const MeshElem_t el = quad_elems[j];
-						quad_rule.set_element(el,mesh.max_depth);
+						quad_rule.set_element(el,2);
 						if constexpr (Kernel_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
-						test_dofs_on_elem = test_handler.get_active_dofs_full_hierarchical(el);
+						test_dofs_on_elem = test_handler.get_active_dofs_quasi_hierarchical(el);
 
 						for (TestDof_t dof : test_dofs_on_elem) {
 							size_t global_n = test_handler.global_number(dof);
@@ -110,9 +111,9 @@ namespace GV {
 				GUTIL_OMP(for)
 				for (size_t i=0; i<quad_elems.size(); ++i) {
 					const MeshElem_t el = quad_elems[i];
-					quad_rule.set_element(el,mesh.max_depth);
+					quad_rule.set_element(el,2);
 					if constexpr (Kernel_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
-					test_dofs_on_elem = test_handler.get_active_dofs_full_hierarchical(el);
+					test_dofs_on_elem = test_handler.get_active_dofs_quasi_hierarchical(el);
 
 					for (TestDof_t dof : test_dofs_on_elem) {
 						size_t global_n = test_handler.global_number(dof);
@@ -144,9 +145,9 @@ namespace GV {
 				GUTIL_OMP(for)
 				for (size_t i=0; i<quad_elems.size(); ++i) {
 					const MeshElem_t el = quad_elems[i];
-					quad_rule.set_element(el,mesh.max_depth);
+					quad_rule.set_element(el,2);
 					if constexpr (Kernel_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
-					test_dofs_on_elem = test_handler.get_active_dofs_full_hierarchical(el);
+					test_dofs_on_elem = test_handler.get_active_dofs_quasi_hierarchical(el);
 
 					for (TestDof_t dof : test_dofs_on_elem) {
 						size_t global_n = test_handler.global_number(dof);

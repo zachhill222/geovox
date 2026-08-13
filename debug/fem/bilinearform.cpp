@@ -9,7 +9,7 @@
 /////////////////////////////////////////////////////////////////
 /// Aliases
 /////////////////////////////////////////////////////////////////
-using Scalar_t      = float;
+using Scalar_t      = double;
 using Point_t       = gutil::Point<3,Scalar_t>;
 using Box_t         = gutil::Box<3,Scalar_t>;
 using Sphere_t      = gutil::Sphere<3,Scalar_t>;
@@ -25,8 +25,9 @@ using DofElem_t     = typename DofHandler_t::DofElem_t;
 
 using CoefHandler_t = GV::CoefHandler<DofHandler_t,Scalar_t,1>;
 
-// using Kernel_t      = GV::IdentityLinearKernel;
-struct Kernel_t : public GV::WeightedLinearKernel<Kernel_t> {
+// using Kernel_t      = GV::H1BilinearKernel<true>;
+// using Kernel_t      = GV::L2BilinearKernel<true>;
+struct Kernel_t : public GV::H1BilinearKernel<true,Kernel_t> {
 	template<typename T, size_t N>
 	static void eval_weight(std::span<T,N> vals, std::span<const T,N> x, std::span<const T,N> y, std::span<const T,N> z) noexcept {
 		GUTIL_SIMD()
@@ -35,18 +36,18 @@ struct Kernel_t : public GV::WeightedLinearKernel<Kernel_t> {
 		}
 	}
 };
-using LinearForm    = GV::LinearForm<DofHandler_t, Kernel_t, 4, Scalar_t>;
+using BilinearForm_t    = GV::BilinearForm<DofHandler_t, DofHandler_t, Kernel_t, 4, Scalar_t>;
 
 inline constexpr Box_t domain{ {-1,-1,-1},
 							   { 1, 1, 1} };
 
-inline constexpr Scalar_t exact{0};
+inline constexpr Scalar_t exact{8};
 
 /////////////////////////////////////////////////////////////////
 /// Runtime test configuration (from argv)
 /////////////////////////////////////////////////////////////////
 struct TestConfig {
-	std::string test_name     	= "linearform";
+	std::string test_name     	= "bilinearform";
 	size_t      initial_depth 	= 2;			// initial mesh depth
 	uint8_t     n_refine      	= 1;     	 	// number of refinements
 	uint8_t     n_unrefine      = 1;     	 	// number of unrefinements
@@ -66,40 +67,19 @@ TestConfig parse_args(int argc, char* argv[]) {
 
 
 void test_box_domain(Mesh_t& mesh, DofHandler_t& d_handler, CoefHandler_t& c_handler) {
-	LinearForm l_form(d_handler);
-	{
-		GUTIL_TIMER("Test linear form scalar evaluation");
-		Scalar_t approx = l_form.evaluate_form(c_handler.get_coefs(0));
-		GUTIL_LOG("approx=", approx, " exact=", exact, " (error=", std::abs(exact-approx), ")");
-	}
-
-	{
-		std::vector vec(d_handler.n_dofs(), Scalar_t{0});
-		
-		GUTIL_TIMER("Test linear form vector evaluation");
-		l_form.evaluate_vector(std::span<Scalar_t>(vec));
-
-		Scalar_t approx{0}; auto coef = c_handler.get_coefs(0);
-		GUTIL_SIMD(reduction(+:approx))
-		for (size_t i=0; i<vec.size(); ++i) {
-			approx += coef[i]*vec[i];
-		}
-		GUTIL_LOG("approx=", approx, " exact=", exact, " (error=", std::abs(exact-approx), ")");
-	}
-
+	BilinearForm_t b_form(d_handler,d_handler);
+	
 	mesh.set_encoded(false);
 	mesh.sort_elements_by_color();
 	{
-		std::vector vec(d_handler.n_dofs(), Scalar_t{0});
-		
-		GUTIL_TIMER("Test linear form vector evaluation (colored)");
-		l_form.evaluate_vector_colored(std::span<Scalar_t>(vec));
+		std::vector<Scalar_t> y(d_handler.n_dofs(), 0);
+		// std::vector<Scalar_t> ones(d_handler.n_dofs(), 1);
+		auto coefs = c_handler.get_coefs(0);
 
-		Scalar_t approx{0}; auto coef = c_handler.get_coefs(0);
-		GUTIL_SIMD(reduction(+:approx))
-		for (size_t i=0; i<vec.size(); ++i) {
-			approx += coef[i]*vec[i];
-		}
+		GUTIL_TIMER("Test bilinear form vector evaluation (colored)");
+		b_form.mat_vec_multiply_accumulate_colored(GV::as_span(y), coefs);
+
+		Scalar_t approx = gutil::dot_product_reduce<Scalar_t>(y,coefs);
 		GUTIL_LOG("approx=", approx, " exact=", exact, " (error=", std::abs(exact-approx), ")");
 	}
 	mesh.sort_elements_by_depth();
@@ -117,9 +97,11 @@ void refine(TestConfig cfg, Mesh_t& mesh, DofHandler_t& d_handler, CoefHandler_t
 		}
 
 		d_handler.refine_quasi_hierarchical(elements);
+		// d_handler.refine_quasi_hierarchical(mesh.element_begin(), mesh.element_end());
 		mesh.process_refine();
+		// c_handler.prolong_coefs();
 	}
-	c_handler.prolong_coefs();
+	c_handler.restrict_coefs();
 
 }
 
@@ -194,7 +176,7 @@ int main(int argc, char* argv[]) {
 	d_handler.init_dofs();
 
 	CoefHandler_t c_handler(d_handler);
-	c_handler.init_coefs(0, [](DOF_t dof) {return 1;});
+	c_handler.init_coefs(0, [&](DOF_t dof) {return mesh.geo_coord(Vert_t{dof.key})[0];});
 
 	save_mesh(cfg.test_name + "_initial.vtk", mesh, d_handler, c_handler);
 	std::cout << "\n\n";

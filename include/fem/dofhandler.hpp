@@ -1172,19 +1172,6 @@ namespace GV {
 							if (is_refinable(par_list[i])) {
 								refine_quasi_hierarchical(par_list[i]);
 							}
-							// //activate children (that the mesh can support)
-							// for (DOF_t c : par_list[i].children()) {
-							// 	if (c.exists()) {
-							// 		activate(c);
-							// 		get_mask_ref(c)|=COEF_PROP_BIT;
-							// 	}
-							// }
-
-							// //mark this element inactive and refined
-							// uint8_t& byte = get_mask_ref(par_list[i]);
-							// byte&=~ACTIVE_BIT;
-							// byte|=COEF_PROP_BIT;	//mark that the coef needs to be propogated down to descendants
-							// byte|=REFINED_BIT;
 						}
 					}
 				}
@@ -1232,54 +1219,6 @@ namespace GV {
 						unrefine_quasi_hierarchical(dof);
 					}
 				}
-
-
-				// gutil::BinSort<DOF_t> dof_depth_sorter(dofs, max_depth+1);
-				// dof_depth_sorter.dispatch_sort([](DOF_t dof){return (int)dof.depth();}, &threads);
-				// threads.wait_idle();
-
-				// for (int dd=dof_depth_sorter.n_bins()-1; dd>=0; --dd) {
-				// 	auto list = dof_depth_sorter.get_bin(dd);
-				// 	if (list.empty()) {continue;}
-
-				// 	//mark each dof active and not refined
-				// 	// GUTIL_OMP(parallel for)
-				// 	for (size_t i=0; i<list.size(); ++i) {
-				// 		DOF_t dof = list[i];
-				// 		if (!is_unrefinable(dof)) {continue;}
-						
-				// 		uint8_t& byte = get_mask_ref(list[i]);
-				// 		GUTIL_ASSERT((byte&ACTIVE_BIT)==0);
-				// 		GUTIL_ASSERT(byte&REFINED_BIT);
-
-				// 		byte|=(ACTIVE_BIT|COEF_PROP_BIT);
-				// 		byte&=~REFINED_BIT;
-
-				// 		for (DOF_t c : list[i].children()) {
-				// 			if (!c.exists()) {continue;}
-				// 			GUTIL_ASSERT(!is_refined_unstable(c));
-				// 			if (!has_any_refined_parent(c)) {
-				// 				uint8_t& byte = get_mask_ref(c);
-				// 				byte&=~ACTIVE_BIT;
-				// 				byte|=COEF_PROP_BIT;
-				// 			}
-				// 		}
-				// 	}
-
-					//mark each child dof inactive if all of its parents are active
-					// GUTIL_OMP(parallel for)
-					// for (size_t i=0; i<list.size(); ++i) {
-					// 	for (DOF_t c : list[i].children()) {
-					// 		if (!c.exists()) {continue;}
-					// 		GUTIL_ASSERT(!is_refined_unstable(c));
-					// 		if (!has_any_refined_parent(c)) {
-					// 			uint8_t& byte = get_mask_ref(c);
-					// 			byte&=~ACTIVE_BIT;
-					// 			byte|=COEF_PROP_BIT;
-					// 		}
-					// 	}
-					// }
-				// }
 				
 				GV_END_MASK_UNSTABLE
 			}

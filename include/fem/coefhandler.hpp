@@ -143,18 +143,21 @@ namespace GV {
 			GUTIL_ASSERT(sorter.n_bins()== (int) max_depth+1);
 		}
 
+		void update_dh_dof_link() noexcept {
+			auto lock = dofhandler.begin_active_keys_stable();
+			dh_curr_dofs = dofhandler.active_dofs;
+			dofhandler.end_active_keys_stable();
+		}
+
 
 		///////////////////////////////////////////////////////////////////
 		/// Transform dofs due to refinement/unrefinement
 		///////////////////////////////////////////////////////////////////
 		void prolong_coefs() noexcept {
 			GUTIL_ASSERT(dofhandler.is_current());
+			update_dh_dof_link();
+			
 			GUTIL_PROFILE("updating coefficients (", dofs.size(), " -> ", dh_curr_dofs.size(), ")");
-			{
-				auto lock = dofhandler.begin_active_keys_stable();
-				dh_curr_dofs = dofhandler.active_dofs;
-				dofhandler.end_active_keys_stable();
-			}
 			{
 				//compute new coefficients
 				auto lock1 = dofhandler.begin_key_mask_stable();
@@ -182,12 +185,9 @@ namespace GV {
 
 		void restrict_coefs() noexcept {
 			GUTIL_ASSERT(dofhandler.is_current());
+			update_dh_dof_link();
+
 			GUTIL_PROFILE("updating coefficients (", dofs.size(), " -> ", dh_curr_dofs.size(), ")");
-			{
-				auto lock = dofhandler.begin_active_keys_stable();
-				dh_curr_dofs = dofhandler.active_dofs;
-				dofhandler.end_active_keys_stable();
-			}
 			{
 				//compute new coefficients
 				auto lock1 = dofhandler.begin_key_mask_stable();
@@ -291,24 +291,6 @@ namespace GV {
 					if (dd>0) {
 						batched_evaluate_at<false>(thread_new_coefs, thread_dof_locs, new_coefs, cur_sorter, dd-1);
 					}
-
-
-					// for (size_t j=start; j<end; ++j) {
-						
-
-
-					// 	size_t new_idx = cur_sorter.bin_start(dd) + j;
-						
-					// 	//determine the required function value at the dof
-					// 	DofVert_t loc{list[j].key};
-					// 	Scalar_t f_val = evaluate_at(loc, coefs[i], sorter, max_depth);
-					// 	//subtract the coarse depths in the new field
-					// 	if (dd>0) {
-					// 		Scalar_t offset = evaluate_at(loc, new_coefs, cur_sorter, dd-1);
-					// 		f_val -= offset;
-					// 	}
-					// 	new_coefs[new_idx] += f_val;
-					// }
 					GUTIL_OMP(barrier)
 				}
 			}
