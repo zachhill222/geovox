@@ -8,8 +8,8 @@
 #include "fem/dofhandler.hpp"
 
 #include "fem/mesh_quadrature.hpp"
-#include "fem/bilinearforms/bilinear_kernels.hpp"
-#include "fem/bilinearforms/dense_linalg.hpp"
+#include "fem/forms/bilinearforms/bilinear_kernels.hpp"
+#include "fem/forms/bilinearforms/dense_linalg.hpp"
 
 namespace GV {
 
@@ -28,7 +28,7 @@ namespace GV {
 	/// quadrature points and weights on the current element as well as projections
 	/// of to relevant lower depths.
 	/////////////////////////////////////////////////////////////////////
-	template<typename TrialHandlerType, typename TestHandlerType, typename KernelType, int N, typename T>
+	template<int N, typename T, typename TrialHandlerType, typename TestHandlerType, typename KernelType, typename KernelWeightType=NoKernelWeight>
 	struct BilinearForm {
 
 
@@ -36,6 +36,7 @@ namespace GV {
 		/// Aliases and sanity checks
 		//////////////////////////////////////////////////////////////////
 		using Kernel_t      	= KernelType;
+		using Weight_t  		= KernelWeightType;
 		using TrialHandler_t	= TrialHandlerType;
 		using TestHandler_t		= TestHandlerType;
 		using QuadRule_t 		= MeshQuadratureRule<N,T>;
@@ -45,11 +46,42 @@ namespace GV {
 		using TrialDof_t  		= typename TrialHandlerType::DOF_t;
 		using TestDof_t  		= typename TestHandlerType::DOF_t;
 
-		static_assert(std::is_invocable_r_v<T,KernelType,TrialDof_t,TestDof_t,const QuadRule_t&>, 
-			"The Kernel must have the signature T(TrialDof_t,TestDof_t,const QuadRule_t&)");
+		using ElementTrialCache_t = ElementDofCache<Kernel_t,TrialHandler_t,QuadRule_t>;
+		using ElementTestCache_t = ElementDofCache<Kernel_t,TestHandler_t,QuadRule_t>;
+		using WeightCache_t      = ScalarValueCache<QuadRule_t>;
 
 		static_assert(!Kernel_t::IS_SYMMETRIC || std::same_as<TrialHandler_t,TestHandler_t>,
 			"A symmetric kernel must have the same dofhandlers for the test and trial spaces");
+
+
+		struct KernelEval {
+			const Kernel_t& 			kernel;
+			const ElementTrialCache_t& 	trial_cache;
+			const ElementTestCache_t& 	test_cache;
+			const QuadRule_t& 			qr;
+
+			KernelEval(const Kernel_t& k, const ElementTrialCache_t& trial, const ElementTestCache_t& test, const QuadRule_t& q) : 
+					kernel(k), trial_cache(trial), test_cache(test), qr(q) {}
+
+			[[nodiscard]] Scalar_t operator()(size_t i, size_t j, const WeightCache_t* wt = nullptr) const noexcept {
+				const DofValueCache<QuadRule_t>* trial_vals{nullptr};
+				const DofGradCache<QuadRule_t>*  trial_grad{nullptr};
+				const DofValueCache<QuadRule_t>* test_vals{nullptr};
+				const DofGradCache<QuadRule_t>*  test_grad{nullptr};
+				
+				if constexpr (Kernel_t::NEEDS_DOF_VALS) {
+					trial_vals = &trial_cache.vals[i];
+					test_vals  = &test_cache.vals[j];
+				}
+				if constexpr (Kernel_t::NEEDS_DOF_GRAD) {
+					trial_grad = &trial_cache.grad[i];
+					test_grad  = &test_cache.grad[j];
+				}
+				return kernel.cached_eval(trial_vals, trial_grad, test_vals, test_grad, wt, qr);
+			}
+		};
+
+
 
 		//////////////////////////////////////////////////////////////////
 		/// Data and constructor
@@ -89,11 +121,11 @@ namespace GV {
 				GUTIL_OMP(parallel)
 				{
 					QuadRule_t 						quad_rule(mesh);
-					std::vector<TestDof_t> 			v_dofs;
-					std::vector<TrialDof_t>			u_dofs;
-					std::vector<size_t>				v_global;
-					std::vector<size_t>				u_global;
-					
+					ElementTrialCache_t				trial_cache(trial_handler,quad_rule);
+					ElementTestCache_t				test_cache(test_handler,quad_rule);
+					KernelEval						k_eval(kernel, trial_cache, test_cache, quad_rule);
+					WeightCache_t					wt;
+
 					std::vector<Scalar_t>			local_matrix;
 					std::vector<Scalar_t>			local_y;
 					std::vector<Scalar_t>			local_x;
@@ -106,39 +138,27 @@ namespace GV {
 					
 					for (size_t q=start; q<end; ++q) {
 						const MeshElem_t el = quad_elems[q];
+						
 						quad_rule.set_element(el,2);
-						if constexpr (Kernel_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
-						v_dofs = test_handler.get_active_dofs_quasi_hierarchical(el);
-						u_dofs = trial_handler.get_active_dofs_quasi_hierarchical(el);
+						if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
+						
+						trial_cache.gather_qh();	const size_t u_size = trial_cache.size();
+						test_cache.gather_qh();		const size_t v_size = test_cache.size();
+						if constexpr (!std::same_as<Weight_t,NoKernelWeight>) {
+							wt = Weight_t::template build_weights<QuadRule_t>(nullptr, quad_rule);
+						}
 
-						const size_t v_size = v_dofs.size();
-						const size_t u_size = u_dofs.size();
-
-						//get global indices for the test and trial dofs
-						//cache the x values needed locally
 						local_y.assign(v_size, 0);
 						local_x.assign(u_size, 0);
 						local_matrix.assign(u_size*v_size, 0);
 
-						v_global.assign(v_size, 0);
-						u_global.assign(u_size, 0);
-						for (size_t i=0; i<v_size; ++i) {
-							v_global[i] = test_handler.global_number(v_dofs[i]);
-							GUTIL_ASSERT(v_global[i] < test_handler.n_dofs());
-							GUTIL_ASSERT(v_dofs[i].depth()<=el.depth()+1);
-						}
-						for (size_t j=0; j<u_size; ++j) {
-							u_global[j] = trial_handler.global_number(u_dofs[j]);
-							local_x[j]  = X[u_global[j]];
-							GUTIL_ASSERT(u_global[j] < trial_handler.n_dofs());
-							GUTIL_ASSERT(u_dofs[j].depth()<=el.depth()+1);
-						}
+						for (size_t j=0; j<u_size; ++j) {local_x[j]  = X[trial_cache.global_idx[j]];}
 
 						//construct local matrix (col major)
 						size_t idx_start = 0;
 						for (size_t j=0; j<u_size; ++j, idx_start+=v_size) {
 							for (size_t i=0; i<v_size; ++i) {
-								local_matrix[idx_start + i] = kernel(u_dofs[j],v_dofs[i],quad_rule);
+								local_matrix[idx_start + i] = k_eval(j,i,&wt);
 							}
 						}
 
@@ -147,7 +167,7 @@ namespace GV {
 
 						//scatter local result
 						for (size_t i=0; i<v_size; ++i) {
-							Y[v_global[i]] += alpha*local_y[i];
+							Y[trial_cache.global_idx[i]] += alpha*local_y[i];
 						}
 					}
 				}
@@ -169,8 +189,9 @@ namespace GV {
 				GUTIL_OMP(parallel)
 				{
 					QuadRule_t 						quad_rule(mesh);
-					std::vector<TestDof_t> 			v_dofs;
-					std::vector<size_t>				v_global;
+					ElementTestCache_t				sym_cache(test_handler,quad_rule);
+					KernelEval						k_eval(kernel, sym_cache, sym_cache, quad_rule);
+					WeightCache_t					wt;
 					
 					std::vector<Scalar_t>			local_matrix;
 					std::vector<Scalar_t>			local_y;
@@ -184,31 +205,26 @@ namespace GV {
 					
 					for (size_t q=start; q<end; ++q) {
 						const MeshElem_t el = quad_elems[q];
-						quad_rule.set_element(el,2);
-						if constexpr (Kernel_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
-						v_dofs = test_handler.get_active_dofs_quasi_hierarchical(el);
 						
-						const size_t v_size = v_dofs.size();
+						quad_rule.set_element(el,2);
+						if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
+						
+						sym_cache.gather_qh();		const size_t v_size = sym_cache.size();
+						if constexpr (!std::same_as<Weight_t,NoKernelWeight>) {
+							wt = Weight_t::template build_weights<QuadRule_t>(nullptr, quad_rule);
+						}
 
-						//get global indices for the test and trial dofs
-						//cache the x values needed locally
 						local_y.assign(v_size, 0);
 						local_x.assign(v_size, 0);
 						local_matrix.assign(v_size*v_size, 0);
 
-						v_global.assign(v_size, 0);
-						for (size_t i=0; i<v_size; ++i) {
-							v_global[i] = test_handler.global_number(v_dofs[i]);
-							local_x[i]  = X[v_global[i]];
-							GUTIL_ASSERT(v_global[i] < test_handler.n_dofs());
-							GUTIL_ASSERT(v_dofs[i].depth()<=el.depth()+1);
-						}
+						for (size_t i=0; i<v_size; ++i) {local_x[i]  = X[sym_cache.global_idx[i]]; }
 
 						//construct local matrix (col major)
 						for (size_t j=0; j<v_size; ++j) {
-							local_matrix[j + v_size*j] = kernel(v_dofs[j], v_dofs[j],quad_rule);
+							local_matrix[j + v_size*j] = k_eval(j,j,&wt);
 							for (size_t i=j+1; i<v_size; ++i) {
-								Scalar_t val = kernel(v_dofs[j],v_dofs[i],quad_rule);
+								Scalar_t val = k_eval(j,i,&wt);
 								local_matrix[i + v_size*j] = val;
 								local_matrix[j + v_size*i] = val;
 							}
@@ -219,7 +235,7 @@ namespace GV {
 
 						//scatter local result
 						for (size_t i=0; i<v_size; ++i) {
-							Y[v_global[i]] += alpha*local_y[i];
+							Y[sym_cache.global_idx[i]] += alpha*local_y[i];
 						}
 					}
 				}
@@ -235,10 +251,10 @@ namespace GV {
 			GUTIL_OMP(parallel)
 			{
 				QuadRule_t 						quad_rule(mesh);
-				std::vector<TestDof_t> 			v_dofs;
-				std::vector<TrialDof_t>			u_dofs;
-				std::vector<size_t>				v_global;
-				std::vector<size_t>				u_global;
+				ElementTrialCache_t				trial_cache(trial_handler,quad_rule);
+				ElementTestCache_t				test_cache(test_handler,quad_rule);
+				KernelEval						k_eval(kernel, trial_cache, test_cache, quad_rule);
+				WeightCache_t					wt;
 				
 				std::vector<Scalar_t>			local_matrix;
 				std::vector<Scalar_t>			local_y;
@@ -254,39 +270,27 @@ namespace GV {
 
 				for (size_t q=0; q<quad_elems.size(); ++q) {
 					const MeshElem_t el = quad_elems[q];
+						
 					quad_rule.set_element(el,2);
-					if constexpr (Kernel_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
-					v_dofs = test_handler.get_active_dofs_quasi_hierarchical(el);
-					u_dofs = trial_handler.get_active_dofs_quasi_hierarchical(el);
+					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
+					
+					trial_cache.gather_qh();	const size_t u_size = trial_cache.size();
+					test_cache.gather_qh();		const size_t v_size = test_cache.size();
+					if constexpr (!std::same_as<Weight_t,NoKernelWeight>) {
+						wt = Weight_t::template build_weights<QuadRule_t>(nullptr, quad_rule);
+					}
 
-					const size_t v_size = v_dofs.size();
-					const size_t u_size = u_dofs.size();
-
-					//get global indices for the test and trial dofs
-					//cache the x values needed locally
 					local_y.assign(v_size, 0);
 					local_x.assign(u_size, 0);
 					local_matrix.assign(u_size*v_size, 0);
 
-					v_global.assign(v_size, 0);
-					u_global.assign(u_size, 0);
-					for (size_t i=0; i<v_size; ++i) {
-						v_global[i] = test_handler.global_number(v_dofs[i]);
-						GUTIL_ASSERT(v_global[i] < test_handler.n_dofs());
-						GUTIL_ASSERT(v_dofs[i].depth()<=el.depth()+1);
-					}
-					for (size_t j=0; j<u_size; ++j) {
-						u_global[j] = trial_handler.global_number(u_dofs[j]);
-						local_x[j]  = X[u_global[j]];
-						GUTIL_ASSERT(u_global[j] < trial_handler.n_dofs());
-						GUTIL_ASSERT(u_dofs[j].depth()<=el.depth()+1);
-					}
+					for (size_t j=0; j<u_size; ++j) {local_x[j]  = X[trial_cache.global_idx[j]];}
 
 					//construct local matrix (col major)
 					size_t idx_start = 0;
 					for (size_t j=0; j<u_size; ++j, idx_start+=v_size) {
 						for (size_t i=0; i<v_size; ++i) {
-							local_matrix[idx_start + i] = kernel(u_dofs[j],v_dofs[i],quad_rule);
+							local_matrix[idx_start + i] = k_eval(j,i,&wt);
 						}
 					}
 
@@ -295,7 +299,7 @@ namespace GV {
 
 					//scatter local result
 					for (size_t i=0; i<v_size; ++i) {
-						GUTIL_OMP(atomic) Y[v_global[i]] += alpha*local_y[i];
+						GUTIL_OMP(atomic) Y[trial_cache.global_idx[i]] += alpha*local_y[i];
 					}
 				}
 			}
@@ -311,8 +315,9 @@ namespace GV {
 			GUTIL_OMP(parallel)
 			{
 				QuadRule_t 						quad_rule(mesh);
-				std::vector<TestDof_t> 			v_dofs;
-				std::vector<size_t>				v_global;
+				ElementTestCache_t				sym_cache(test_handler,quad_rule);
+				KernelEval						k_eval(kernel, sym_cache, sym_cache, quad_rule);
+				WeightCache_t					wt;
 				
 				std::vector<Scalar_t>			local_matrix;
 				std::vector<Scalar_t>			local_y;
@@ -328,30 +333,26 @@ namespace GV {
 
 				for (size_t q=0; q<quad_elems.size(); ++q) {
 					const MeshElem_t el = quad_elems[q];
+						
 					quad_rule.set_element(el,2);
-					if constexpr (Kernel_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
-					v_dofs = test_handler.get_active_dofs_quasi_hierarchical(el);
+					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 					
-					const size_t v_size = v_dofs.size();
+					sym_cache.gather_qh();		const size_t v_size = sym_cache.size();
+					if constexpr (!std::same_as<Weight_t,NoKernelWeight>) {
+						wt = Weight_t::template build_weights<QuadRule_t>(nullptr, quad_rule);
+					}
 
-					//cache the x values needed locally
 					local_y.assign(v_size, 0);
 					local_x.assign(v_size, 0);
 					local_matrix.assign(v_size*v_size, 0);
 
-					v_global.assign(v_size, 0);
-					for (size_t i=0; i<v_size; ++i) {
-						v_global[i] = test_handler.global_number(v_dofs[i]);
-						local_x[i]  = X[v_global[i]];
-						GUTIL_ASSERT(v_global[i] < test_handler.n_dofs());
-						GUTIL_ASSERT(v_dofs[i].depth()<=el.depth()+1);
-					}
+					for (size_t i=0; i<v_size; ++i) {local_x[i]  = X[sym_cache.global_idx[i]]; }
 
 					//construct local matrix (col major)
 					for (size_t j=0; j<v_size; ++j) {
-						local_matrix[j + v_size*j] = kernel(v_dofs[j], v_dofs[j],quad_rule);
+						local_matrix[j + v_size*j] = k_eval(j,j,&wt);
 						for (size_t i=j+1; i<v_size; ++i) {
-							Scalar_t val = kernel(v_dofs[j],v_dofs[i],quad_rule);
+							Scalar_t val = k_eval(j,i,&wt);
 							local_matrix[i + v_size*j] = val;
 							local_matrix[j + v_size*i] = val;
 						}
@@ -362,7 +363,7 @@ namespace GV {
 
 					//scatter local result
 					for (size_t i=0; i<v_size; ++i) {
-						GUTIL_OMP(atomic) Y[v_global[i]] += alpha*local_y[i];
+						GUTIL_OMP(atomic) Y[sym_cache.global_idx[i]] += alpha*local_y[i];
 					}
 				}
 			}
@@ -384,8 +385,9 @@ namespace GV {
 				GUTIL_OMP(parallel)
 				{
 					QuadRule_t 						quad_rule(mesh);
-					std::vector<TestDof_t> 			v_dofs;
-					std::vector<size_t>				v_global;
+					ElementTestCache_t				sym_cache(test_handler,quad_rule);
+					KernelEval						k_eval(kernel, sym_cache, sym_cache, quad_rule);
+					WeightCache_t					wt;
 					
 					const size_t n_threads 		  = GUTIL_OMP_TERNARY(omp_get_num_threads(), 1);
 					const size_t n_els_per_thread = quad_elems.size()/n_threads;
@@ -395,22 +397,18 @@ namespace GV {
 					
 					for (size_t q=start; q<end; ++q) {
 						const MeshElem_t el = quad_elems[q];
-						quad_rule.set_element(el,2);
-						if constexpr (Kernel_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
-						v_dofs = test_handler.get_active_dofs_quasi_hierarchical(el);
 						
-						const size_t v_size = v_dofs.size();
-
-						v_global.assign(v_size, 0);
-						for (size_t i=0; i<v_size; ++i) {
-							v_global[i] = test_handler.global_number(v_dofs[i]);
-							GUTIL_ASSERT(v_global[i] < test_handler.n_dofs());
-							GUTIL_ASSERT(v_dofs[i].depth()<=el.depth()+1);
+						quad_rule.set_element(el,2);
+						if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
+						
+						sym_cache.gather_qh();		const size_t v_size = sym_cache.size();
+						if constexpr (!std::same_as<Weight_t,NoKernelWeight>) {
+							wt = Weight_t::template build_weights<QuadRule_t>(nullptr, quad_rule);
 						}
 
 						//scatter local result
 						for (size_t i=0; i<v_size; ++i) {
-							D[v_global[i]] += kernel(v_dofs[i],v_dofs[i],quad_rule);
+							D[sym_cache.global_idx[i]] += k_eval(i,i,&wt);
 						}
 					}
 				}
@@ -425,8 +423,9 @@ namespace GV {
 			GUTIL_OMP(parallel)
 			{
 				QuadRule_t 						quad_rule(mesh);
-				std::vector<TestDof_t> 			v_dofs;
-				std::vector<size_t>				v_global;
+				ElementTestCache_t				sym_cache(test_handler,quad_rule);
+				KernelEval						k_eval(kernel, sym_cache, sym_cache, quad_rule);
+				WeightCache_t					wt;
 				
 				const size_t n_threads 		  = GUTIL_OMP_TERNARY(omp_get_num_threads(), 1);
 				const size_t n_els_per_thread = mesh.n_elements()/n_threads;
@@ -438,22 +437,18 @@ namespace GV {
 
 				for (size_t q=0; q<quad_elems.size(); ++q) {
 					const MeshElem_t el = quad_elems[q];
+						
 					quad_rule.set_element(el,2);
-					if constexpr (Kernel_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
-					v_dofs = test_handler.get_active_dofs_quasi_hierarchical(el);
+					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 					
-					const size_t v_size = v_dofs.size();
-
-					v_global.assign(v_size, 0);
-					for (size_t i=0; i<v_size; ++i) {
-						v_global[i] = test_handler.global_number(v_dofs[i]);
-						GUTIL_ASSERT(v_global[i] < test_handler.n_dofs());
-						GUTIL_ASSERT(v_dofs[i].depth()<=el.depth()+1);
+					sym_cache.gather_qh();		const size_t v_size = sym_cache.size();
+					if constexpr (!std::same_as<Weight_t,NoKernelWeight>) {
+						wt = Weight_t::template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}
 
 					//scatter local result
 					for (size_t i=0; i<v_size; ++i) {
-						GUTIL_OMP(atomic) D[v_global[i]] += kernel(v_dofs[i],v_dofs[i],quad_rule);
+						GUTIL_OMP(atomic) D[sym_cache.global_idx[i]] += k_eval(i,i,&wt);
 					}
 				}
 			}
@@ -473,10 +468,10 @@ namespace GV {
 			GUTIL_OMP(parallel)
 			{
 				QuadRule_t 						quad_rule(mesh);
-				std::vector<TestDof_t> 			v_dofs;
-				std::vector<TrialDof_t>			u_dofs;
-				std::vector<size_t>				v_global;
-				std::vector<size_t>				u_global;
+				ElementTrialCache_t				trial_cache(trial_handler,quad_rule);
+				ElementTestCache_t				test_cache(test_handler,quad_rule);
+				KernelEval						k_eval(kernel, trial_cache, test_cache, quad_rule);
+				WeightCache_t					wt;
 				
 				std::vector<Triplet_t>			thread_triplets;
 
@@ -492,34 +487,23 @@ namespace GV {
 
 				for (size_t q=0; q<quad_elems.size(); ++q) {
 					const MeshElem_t el = quad_elems[q];
+						
 					quad_rule.set_element(el,2);
-					if constexpr (Kernel_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
-					v_dofs = test_handler.get_active_dofs_quasi_hierarchical(el);
-					u_dofs = trial_handler.get_active_dofs_quasi_hierarchical(el);
-
-					const size_t v_size = v_dofs.size();
-					const size_t u_size = u_dofs.size();
-
-					v_global.assign(v_size, 0);
-					u_global.assign(u_size, 0);
-					for (size_t i=0; i<v_size; ++i) {
-						v_global[i] = test_handler.global_number(v_dofs[i]);
-						GUTIL_ASSERT(v_global[i] < test_handler.n_dofs());
-						GUTIL_ASSERT(v_dofs[i].depth()<=el.depth()+1);
-					}
-					for (size_t j=0; j<u_size; ++j) {
-						u_global[j] = trial_handler.global_number(u_dofs[j]);
-						GUTIL_ASSERT(u_global[j] < trial_handler.n_dofs());
-						GUTIL_ASSERT(u_dofs[j].depth()<=el.depth()+1);
+					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
+					
+					trial_cache.gather_qh();	const size_t u_size = trial_cache.size();
+					test_cache.gather_qh();		const size_t v_size = test_cache.size();
+					if constexpr (!std::same_as<Weight_t,NoKernelWeight>) {
+						wt = Weight_t::template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}
 
 					//add triplets
 					for (size_t j=0; j<u_size; ++j) {
 						for (size_t i=0; i<v_size; ++i) {
 							thread_triplets.emplace_back(
-								row_offset + v_global[i],
-								col_offset + u_global[j],
-								kernel(u_dofs[j],v_dofs[i],quad_rule));
+								row_offset + test_cache.global_idx[i],
+								col_offset + trial_cache.global_idx[j],
+								k_eval(j,i,&wt));
 						}
 					}
 				}
@@ -552,8 +536,9 @@ namespace GV {
 			GUTIL_OMP(parallel)
 			{
 				QuadRule_t 						quad_rule(mesh);
-				std::vector<TestDof_t> 			v_dofs;
-				std::vector<size_t>				v_global;
+				ElementTestCache_t				sym_cache(test_handler,quad_rule);
+				KernelEval						k_eval(kernel, sym_cache, sym_cache, quad_rule);
+				WeightCache_t					wt;
 				
 				std::vector<Triplet_t>			thread_triplets;
 
@@ -569,35 +554,31 @@ namespace GV {
 
 				for (size_t q=0; q<quad_elems.size(); ++q) {
 					const MeshElem_t el = quad_elems[q];
+						
 					quad_rule.set_element(el,2);
-					if constexpr (Kernel_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
-					v_dofs = test_handler.get_active_dofs_quasi_hierarchical(el);
-
-					const size_t v_size = v_dofs.size();
-
-					v_global.assign(v_size, 0);
-					for (size_t i=0; i<v_size; ++i) {
-						v_global[i] = test_handler.global_number(v_dofs[i]);
-						GUTIL_ASSERT(v_global[i] < test_handler.n_dofs());
-						GUTIL_ASSERT(v_dofs[i].depth()<=el.depth()+1);
+					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
+					
+					sym_cache.gather_qh();		const size_t v_size = sym_cache.size();
+					if constexpr (!std::same_as<Weight_t,NoKernelWeight>) {
+						wt = Weight_t::template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}
 
 					//add triplets
 					for (size_t j=0; j<v_size; ++j) {
 						thread_triplets.emplace_back(
-							row_offset + v_global[j],
-							col_offset + v_global[j],
-							kernel(v_dofs[j],v_dofs[j],quad_rule));
+							row_offset + sym_cache.global_idx[j],
+							col_offset + sym_cache.global_idx[j],
+							k_eval(j,j,&wt));
 						
 						for (size_t i=j+1; i<v_size; ++i) {
-							const Scalar_t val = kernel(v_dofs[j],v_dofs[i],quad_rule);
+							const Scalar_t val = k_eval(j,i,&wt);
 							thread_triplets.emplace_back(
-								row_offset + v_global[i],
-								col_offset + v_global[j],
+								row_offset + sym_cache.global_idx[i],
+								col_offset + sym_cache.global_idx[j],
 								val);
 							thread_triplets.emplace_back(
-								row_offset + v_global[j],
-								col_offset + v_global[i],
+								row_offset + sym_cache.global_idx[j],
+								col_offset + sym_cache.global_idx[i],
 								val);
 						}
 					}

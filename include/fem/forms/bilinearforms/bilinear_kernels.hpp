@@ -15,7 +15,7 @@ namespace GV {
 	///////////////////////////////////////////////////////////////////
 	template<typename K>
 	concept IsBilinearKernel = requires (const K k) {
-		{ K::NEEDS_GEO_POINTS } 	-> std::convertible_to<bool>;
+		{ K::NEEDS_WEIGHT     }		-> std::convertible_to<bool>;
 		{ K::IS_SYMMETRIC     } 	-> std::convertible_to<bool>;
 		{ K::NEEDS_DOF_VALS   }		-> std::convertible_to<bool>;
 		{ K::NEEDS_DOF_GRAD   }		-> std::convertible_to<bool>;
@@ -35,7 +35,7 @@ namespace GV {
 	///////////////////////////////////////////////////////////////////
 	struct ZeroBilinearKernel {
 		//kernel for the bilinear form B(phi,psi) = 0
-		static constexpr bool NEEDS_GEO_POINTS = false;
+		static constexpr bool NEEDS_WEIGHT	   = false;
 		static constexpr bool IS_SYMMETRIC     = false;
 		static constexpr bool NEEDS_DOF_VALS   = false;
 		static constexpr bool NEEDS_DOF_GRAD   = false;
@@ -46,6 +46,7 @@ namespace GV {
 			const DofGradCache<QuadRule_t>*, 
 			const DofValueCache<QuadRule_t>*,
 			const DofGradCache<QuadRule_t>*, 
+			const ScalarValueCache<QuadRule_t>*,
 			const QuadRule_t&) const noexcept {
 			return typename QuadRule_t::Scalar_t{0};
 		}
@@ -59,7 +60,7 @@ namespace GV {
 	struct IdentityBilinearKernel {
 		//kernel for the identity matrix
 		//TODO: the bilinear form needs a specialization to use this kernel correctly.
-		static constexpr bool NEEDS_GEO_POINTS = false;
+		static constexpr bool NEEDS_WEIGHT     = false;
 		static constexpr bool IS_SYMMETRIC     = true;
 		static constexpr bool NEEDS_DOF_VALS   = false;
 		static constexpr bool NEEDS_DOF_GRAD   = false;
@@ -70,6 +71,7 @@ namespace GV {
 			const DofGradCache<QuadRule_t>*, 
 			const DofValueCache<QuadRule_t>* v_vals,
 			const DofGradCache<QuadRule_t>*, 
+			const ScalarValueCache<QuadRule_t>*,
 			const QuadRule_t&) noexcept {
 			GUTIL_ABORT("The IdentityBilinearKernel does not have a meaningful cached_eval method");
 			return typename QuadRule_t::Scalar_t{0};
@@ -81,128 +83,76 @@ namespace GV {
 		}
 	};
 
-	template<bool IsSymmetric=false, typename Derived=void>
+	template<bool IsSymmetric=false, bool NeedsWeight=false>
 	struct L2BilinearKernel {
 		//kernel for the linear form B(u,v) = int_D(u*v)
 		//optionally B(u,v) = int_D(u*v*f) where f is supplied by CRTP in the Derived class
 		//and is a function of x,y,z.
-		static constexpr bool NEEDS_GEO_POINTS = !std::same_as<Derived,void>;
+		static constexpr bool NEEDS_WEIGHT     = NeedsWeight;
 		static constexpr bool IS_SYMMETRIC     = IsSymmetric;
 		static constexpr bool NEEDS_DOF_VALS   = true;
 		static constexpr bool NEEDS_DOF_GRAD   = false;
 
 		template<typename QuadRule_t>
 		[[nodiscard]] constexpr typename QuadRule_t::Scalar_t cached_eval(
-			const DofValueCache<QuadRule_t>* u_vals, 
+			const DofValueCache<QuadRule_t>* 	u_vals, 
 			const DofGradCache<QuadRule_t>*, 
-			const DofValueCache<QuadRule_t>* v_vals,
+			const DofValueCache<QuadRule_t>* 	v_vals,
 			const DofGradCache<QuadRule_t>*, 
-			const QuadRule_t& qr) const noexcept requires(!NEEDS_GEO_POINTS) {
+			const ScalarValueCache<QuadRule_t>* wt,
+			const QuadRule_t& qr) const noexcept {
+
 			using Scalar_t = typename QuadRule_t::Scalar_t;
 			constexpr int N = QuadRule_t::TOTAL_QUAD_POINTS;
-			GUTIL_ASSERT(u_vals && v_vals);
 			
-			//accumulation
-			auto qw = qr.quad_w();
-			Scalar_t result{0};
-			GUTIL_SIMD(reduction(+:result))
-			for (int i=0; i<N; ++i) {
-				result += (*u_vals)[i]*(*v_vals)[i]*qw[i];
-			}
-			return result * qr.jacobian_det[qr.q_el.depth()];
-		}
-
-		template<typename QuadRule_t>
-		[[nodiscard]] constexpr typename QuadRule_t::Scalar_t cached_eval(
-			const DofValueCache<QuadRule_t>* u_vals, 
-			const DofGradCache<QuadRule_t>*, 
-			const DofValueCache<QuadRule_t>* v_vals,
-			const DofGradCache<QuadRule_t>*, 
-			const QuadRule_t& qr) const noexcept requires(NEEDS_GEO_POINTS) {
-			using Scalar_t = typename QuadRule_t::Scalar_t;
-			constexpr int N = QuadRule_t::TOTAL_QUAD_POINTS;
 			GUTIL_ASSERT(u_vals && v_vals);
-
-			//measure/weight evalutation
-			Scalar_t f_vals[N];
-			Derived::eval_weight(std::span<Scalar_t,N>{f_vals},
-						qr.geo_x(),qr.geo_y(),qr.geo_z());
+			if constexpr (NEEDS_WEIGHT) {GUTIL_ASSERT(wt);}
 
 			//accumulation
 			auto qw = qr.quad_w();
 			Scalar_t result{0};
-			GUTIL_SIMD(reduction(+:result))
-			for (int i=0; i<N; ++i) {
-				result += (*u_vals)[i]*(*v_vals)[i]*f_vals[i]*qw[i];
+			if constexpr (NEEDS_WEIGHT) {
+				GUTIL_SIMD(reduction(+:result))
+				for (int i=0; i<N; ++i) {
+					result += (*u_vals)[i] * (*v_vals)[i] * (*wt)[i] * qw[i];
+				}
 			}
+			else {
+				GUTIL_SIMD(reduction(+:result))
+				for (int i=0; i<N; ++i) {
+					result += (*u_vals)[i] * (*v_vals)[i] * qw[i];
+				}
+			}
+
 			return result * qr.jacobian_det[qr.q_el.depth()];
-		}
-
-		template<typename TrialDof_t, typename TestDof_t, typename QuadRule_t>
-		[[nodiscard]] constexpr typename QuadRule_t::Scalar_t operator()(
-				TrialDof_t u, TestDof_t v, const QuadRule_t& qr) const noexcept {
-
-			static_assert(!IS_SYMMETRIC || std::same_as<TestDof_t,TrialDof_t>, 
-				"for a symmetric form, the test and trial dofs must be the same type");
-
-			DofValueCache<QuadRule_t> v_vals(v, qr);
-			DofValueCache<QuadRule_t> u_vals(u, qr);
-			return cached_eval<QuadRule_t>(&u_vals, nullptr, &v_vals, nullptr, qr);
 		}
 	};
 
-	template<bool IsSymmetric=false, typename Derived=void>
+	template<bool IsSymmetric=false, bool NeedsWeight=false>
 	struct H1BilinearKernel {
 		//kernel for the linear form B(u,v) = int_D(grad(u)*grad(v))
 		//optionally B(u,v) = int_D(grad(u)*grad(v)*f) where f is supplied by CRTP in the Derived class
 		//f must be a function of x,y,z.
-		static constexpr bool NEEDS_GEO_POINTS = !std::same_as<Derived,void>;
+		static constexpr bool NEEDS_WEIGHT     = NeedsWeight;
 		static constexpr bool IS_SYMMETRIC     = IsSymmetric;
 		static constexpr bool NEEDS_DOF_VALS   = false;
 		static constexpr bool NEEDS_DOF_GRAD   = true;
 
+		
 		template<typename QuadRule_t>
 		[[nodiscard]] constexpr typename QuadRule_t::Scalar_t cached_eval(
 			const DofValueCache<QuadRule_t>*, 
-			const DofGradCache<QuadRule_t>* u_grad, 
+			const DofGradCache<QuadRule_t>* 	u_grad, 
 			const DofValueCache<QuadRule_t>*,
-			const DofGradCache<QuadRule_t>* v_grad, 
-			const QuadRule_t& qr) const noexcept requires(!NEEDS_GEO_POINTS) {
+			const DofGradCache<QuadRule_t>* 	v_grad, 
+			const ScalarValueCache<QuadRule_t>* wt,
+			const QuadRule_t& qr) const noexcept {
+
 			using Scalar_t = typename QuadRule_t::Scalar_t;
 			constexpr int N = QuadRule_t::TOTAL_QUAD_POINTS;
+
 			GUTIL_ASSERT(u_grad && v_grad);
-			
-			//accumulation
-			auto qw = qr.quad_w();
-			const Scalar_t j_i_xx = qr.jacobian_diag_inv[v_grad->depth][0]*qr.jacobian_diag_inv[u_grad->depth][0];
-			const Scalar_t j_i_yy = qr.jacobian_diag_inv[v_grad->depth][1]*qr.jacobian_diag_inv[u_grad->depth][1];
-			const Scalar_t j_i_zz = qr.jacobian_diag_inv[v_grad->depth][2]*qr.jacobian_diag_inv[u_grad->depth][2];
-
-			Scalar_t result{0};
-			GUTIL_SIMD(reduction(+:result))
-			for (int i=0; i<N; ++i) {
-				result += ( v_grad->gx[i]*u_grad->gx[i]*j_i_xx +
-							v_grad->gy[i]*u_grad->gy[i]*j_i_yy +
-							v_grad->gz[i]*u_grad->gz[i]*j_i_zz )*qw[i];
-			}
-			return result * qr.jacobian_det[qr.q_el.depth()];
-		}
-
-		template<typename QuadRule_t>
-		[[nodiscard]] constexpr typename QuadRule_t::Scalar_t cached_eval(
-			const DofValueCache<QuadRule_t>*, 
-			const DofGradCache<QuadRule_t>* u_grad, 
-			const DofValueCache<QuadRule_t>*,
-			const DofGradCache<QuadRule_t>* v_grad, 
-			const QuadRule_t& qr) const noexcept requires(NEEDS_GEO_POINTS) {
-			using Scalar_t = typename QuadRule_t::Scalar_t;
-			constexpr int N = QuadRule_t::TOTAL_QUAD_POINTS;
-			GUTIL_ASSERT(u_grad && v_grad);
-
-			//measure/weight evalutation
-			Scalar_t f_vals[N];
-			Derived::eval_weight(std::span<Scalar_t,N>{f_vals},
-						qr.geo_x(),qr.geo_y(),qr.geo_z());
+			if constexpr (NEEDS_WEIGHT) {GUTIL_ASSERT(wt);}
 
 			//accumulation
 			auto qw = qr.quad_w();
@@ -211,25 +161,24 @@ namespace GV {
 			const Scalar_t j_i_zz = qr.jacobian_diag_inv[v_grad->depth][2]*qr.jacobian_diag_inv[u_grad->depth][2];
 
 			Scalar_t result{0};
-			GUTIL_SIMD(reduction(+:result))
-			for (int i=0; i<N; ++i) {
-				result += ( v_grad->gx[i]*u_grad->gx[i]*j_i_xx +
-							v_grad->gy[i]*u_grad->gy[i]*j_i_yy +
-							v_grad->gz[i]*u_grad->gz[i]*j_i_zz )*f_vals[i]*qw[i];
+			if constexpr (NEEDS_WEIGHT) {
+				GUTIL_SIMD(reduction(+:result))
+				for (int i=0; i<N; ++i) {
+					result += ( (*v_grad)[0][i] * (*u_grad)[0][i] * j_i_xx +
+								(*v_grad)[1][i] * (*u_grad)[1][i] * j_i_yy +
+								(*v_grad)[2][i] * (*u_grad)[2][i] * j_i_zz ) * (*wt)[i] * qw[i];
+				}
 			}
+			else {
+				GUTIL_SIMD(reduction(+:result))
+				for (int i=0; i<N; ++i) {
+					result += ( (*v_grad)[0][i] * (*u_grad)[0][i] * j_i_xx +
+								(*v_grad)[1][i] * (*u_grad)[1][i] * j_i_yy +
+								(*v_grad)[2][i] * (*u_grad)[2][i] * j_i_zz ) * qw[i];
+				}
+			}
+
 			return result * qr.jacobian_det[qr.q_el.depth()];
-		}
-
-
-		template<typename TrialDof_t, typename TestDof_t, typename QuadRule_t>
-		[[nodiscard]] constexpr typename QuadRule_t::Scalar_t operator()(
-				TrialDof_t u, TestDof_t v, const QuadRule_t& qr) const {
-			static_assert(!IS_SYMMETRIC || std::same_as<TestDof_t,TrialDof_t>, 
-				"for a symmetric form, the test and trial dofs must be the same type");
-			
-			DofGradCache<QuadRule_t> v_grad(v,qr);
-			DofGradCache<QuadRule_t> u_grad(u,qr);
-			return cached_eval<QuadRule_t>(nullptr, &u_grad, nullptr, &v_grad, qr);
 		}
 	};
 
@@ -240,7 +189,7 @@ namespace GV {
 	///////////////////////////////////////////////////////////////
 	template<typename T, IsBilinearKernel K>
 	struct ScaledBilinearKernel {
-		static constexpr bool NEEDS_GEO_POINTS = K::NEEDS_GEO_POINTS;
+		static constexpr bool NEEDS_WEIGHT     = K::NEEDS_WEIGHT;
 		static constexpr bool IS_SYMMETRIC 	   = K::IS_SYMMETRIC;
 		static constexpr bool NEEDS_DOF_VALS   = K::NEEDS_DOF_VALS;
 		static constexpr bool NEEDS_DOF_GRAD   = K::NEEDS_DOF_GRAD;
@@ -256,8 +205,9 @@ namespace GV {
 			const DofGradCache<QuadRule_t>*  u_grad, 
 			const DofValueCache<QuadRule_t>* v_vals,
 			const DofGradCache<QuadRule_t>*  v_grad, 
+			const ScalarValueCache<QuadRule_t>*  wt,
 			const QuadRule_t& qr) const noexcept {
-			return scale * kernel.template cached_eval<QuadRule_t>(u_vals, u_grad, v_vals, v_grad, qr);
+			return scale * kernel.template cached_eval<QuadRule_t>(u_vals, u_grad, v_vals, v_grad, wt, qr);
 		}
 
 		template<typename TrialDof_t, typename TestDof_t, typename QuadRule_t>
@@ -268,7 +218,8 @@ namespace GV {
 
 	template<IsBilinearKernel K1, IsBilinearKernel K2>
 	struct SumBilinearKernel {
-		static constexpr bool NEEDS_GEO_POINTS = K1::NEEDS_GEO_POINTS || K2::NEEDS_GEO_POINTS;
+		//note that the weight must be the same for both kernels
+		static constexpr bool NEEDS_WEIGHT     = K1::NEEDS_WEIGHT     || K2::NEEDS_WEIGHT;
 		static constexpr bool IS_SYMMETRIC 	   = K1::IS_SYMMETRIC     && K2::IS_SYMMETRIC;
 		static constexpr bool NEEDS_DOF_VALS   = K1::NEEDS_DOF_VALS   || K2::NEEDS_DOF_VALS;
 		static constexpr bool NEEDS_DOF_GRAD   = K1::NEEDS_DOF_GRAD   || K2::NEEDS_DOF_GRAD;
@@ -283,34 +234,11 @@ namespace GV {
 			const DofValueCache<QuadRule_t>* u_vals, 
 			const DofGradCache<QuadRule_t>*  u_grad, 
 			const DofValueCache<QuadRule_t>* v_vals,
-			const DofGradCache<QuadRule_t>*  v_grad, 
+			const DofGradCache<QuadRule_t>*  v_grad,
+			const ScalarValueCache<QuadRule_t>*  wt,
 			const QuadRule_t& qr) const noexcept {
-			return left.template cached_eval<QuadRule_t>(u_vals, u_grad, v_vals, v_grad, qr) 
-				 + right.template cached_eval<QuadRule_t>(u_vals, u_grad, v_vals, v_grad, qr);
-		}
-
-		template<typename TrialDof_t, typename TestDof_t, typename QuadRule_t>
-		[[nodiscard]] constexpr typename QuadRule_t::Scalar_t operator()(TrialDof_t u, TestDof_t v, const QuadRule_t& qr) const noexcept {
-			if constexpr (NEEDS_DOF_VALS && NEEDS_DOF_GRAD) {
-				DofValueCache<QuadRule_t> u_vals(u,qr);
-				DofValueCache<QuadRule_t> v_vals(v,qr);
-				DofGradCache<QuadRule_t>  u_grad(u,qr);
-				DofGradCache<QuadRule_t>  v_grad(v,qr);
-				return cached_eval<QuadRule_t>(&u_vals, &u_grad, &v_vals, &v_grad, qr);
-			}
-			else if constexpr (NEEDS_DOF_VALS) {
-				DofValueCache<QuadRule_t> u_vals(u,qr);
-				DofValueCache<QuadRule_t> v_vals(v,qr);
-				return cached_eval<QuadRule_t>(&u_vals, nullptr, &v_vals, nullptr, qr);
-			}
-			else if constexpr (NEEDS_DOF_GRAD) {
-				DofGradCache<QuadRule_t>  u_grad(u,qr);
-				DofGradCache<QuadRule_t>  v_grad(v,qr);
-				return cached_eval<QuadRule_t>(nullptr, &u_grad, nullptr, &v_grad, qr);
-			}
-			else {
-				return left(u,v,qr) + right(u,v,qr);
-			}
+			return left.template cached_eval<QuadRule_t>(u_vals, u_grad, v_vals, v_grad, wt, qr) 
+				 + right.template cached_eval<QuadRule_t>(u_vals, u_grad, v_vals, v_grad, wt, qr);
 		}
 	};
 

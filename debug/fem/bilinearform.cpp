@@ -25,18 +25,9 @@ using DofElem_t     = typename DofHandler_t::DofElem_t;
 
 using CoefHandler_t = GV::CoefHandler<DofHandler_t,Scalar_t,1>;
 
-using Kernel_t      = GV::H1BilinearKernel<true>;
-// using Kernel_t      = GV::L2BilinearKernel<>;
-// struct Kernel_t : public GV::H1BilinearKernel<true,Kernel_t> {
-// 	template<typename T, size_t N>
-// 	static void eval_weight(std::span<T,N> vals, std::span<const T,N> x, std::span<const T,N> y, std::span<const T,N> z) noexcept {
-// 		GUTIL_SIMD()
-// 		for (size_t i=0; i<N; ++i) {
-// 			vals[i] = x[i]*y[i]*z[i];
-// 		}
-// 	}
-// };
-using BilinearForm_t    = GV::BilinearForm<DofHandler_t, DofHandler_t, Kernel_t, 4, Scalar_t>;
+// using Kernel_t      = GV::L2BilinearKernel<true,false>;
+using Kernel_t      = GV::H1BilinearKernel<true,false>;
+using BilinearForm_t    = GV::BilinearForm<4, Scalar_t, DofHandler_t, DofHandler_t, Kernel_t>;
 
 inline constexpr Box_t domain{ {-1,-1,-1},
 							   { 1, 1, 1} };

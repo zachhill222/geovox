@@ -25,22 +25,31 @@ using DofElem_t     = typename DofHandler_t::DofElem_t;
 
 using CoefHandler_t = GV::CoefHandler<DofHandler_t,Scalar_t,1>;
 
-// using Kernel_t      = GV::IdentityLinearKernel;
-struct Kernel_t : public GV::WeightedLinearKernel<Kernel_t> {
-	template<typename T, size_t N>
-	static void eval_weight(std::span<T,N> vals, std::span<const T,N> x, std::span<const T,N> y, std::span<const T,N> z) noexcept {
+using Kernel_t = GV::L2LinearKernel<false>;
+
+struct Weight_t {
+	static constexpr bool NEEDS_GEO_POINTS = true;
+	static constexpr bool NEEDS_SCALAR_VALS = false;
+
+	template<typename QuadRule_t>
+	static GV::ScalarValueCache<QuadRule_t> build_weights(const GV::ScalarValueCache<QuadRule_t>*, const QuadRule_t& qr) noexcept {
+		GV::ScalarValueCache<QuadRule_t> wt;
+		
+		auto x = qr.geo_x(), y=qr.geo_y(), z=qr.geo_z();
 		GUTIL_SIMD()
-		for (size_t i=0; i<N; ++i) {
-			vals[i] = x[i]*y[i]*z[i];
+		for (size_t i=0; i<wt.size(); ++i) {
+			wt[i] = x[i]*y[i]*z[i];
 		}
+		return wt;
 	}
 };
-using LinearForm    = GV::LinearForm<DofHandler_t, Kernel_t, 4, Scalar_t>;
+
+using LinearForm    = GV::LinearForm<4, Scalar_t, DofHandler_t, Kernel_t>;
 
 inline constexpr Box_t domain{ {-1,-1,-1},
 							   { 1, 1, 1} };
 
-inline constexpr Scalar_t exact{0};
+inline constexpr Scalar_t exact{8};
 
 /////////////////////////////////////////////////////////////////
 /// Runtime test configuration (from argv)

@@ -117,7 +117,7 @@ void evaluate_and_save(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_han
 				auto d_vtx = handler.get_dof_vertex(vtx);
 				int val = -1;
 				if (d_vtx.exists() && handler.is_active_stable(DOF_t{d_vtx}) ) {
-					val = 10*(int)handler.is_refinable(DOF_t{d_vtx}) + (int)handler.is_unrefinable(DOF_t{d_vtx});
+					val = 10*(int)handler.can_refine(DOF_t{d_vtx}) + (int)handler.can_unrefine(DOF_t{d_vtx});
 				}
 				return val;
 			}, "dof_ref_unref");

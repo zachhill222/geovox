@@ -67,14 +67,14 @@ inline auto make_helmholtz_kernel() noexcept {
 	return GV::H1BilinearKernel<true>{} + ALPHA*GV::L2BilinearKernel<true>{};
 }
 using HelmholtzKernel_t = decltype(make_helmholtz_kernel());
-using BilinearForm_t = GV::BilinearForm<DofHandler_t, DofHandler_t, HelmholtzKernel_t, 4, Scalar_t>;
+using BilinearForm_t    = GV::BilinearForm<4, Scalar_t, DofHandler_t, DofHandler_t, HelmholtzKernel_t>;
 
 
 ///////////////////////////////////////////////////////////////////////////
 /// Use c[i]^2 int_D |grad(dof[i])|^2 as a per-dof error indicator
 ///////////////////////////////////////////////////////////////////////////
 using ErrorIndicatorKernel_t = GV::H1BilinearKernel<true>;
-using ErrorIndicatorForm_t = GV::BilinearForm<DofHandler_t, DofHandler_t, ErrorIndicatorKernel_t, 2, Scalar_t>;
+using ErrorIndicatorForm_t   = GV::BilinearForm<2, Scalar_t, DofHandler_t, DofHandler_t, ErrorIndicatorKernel_t>;
 
 
 ///////////////////////////////////////////////////////////////////////////
@@ -83,17 +83,24 @@ using ErrorIndicatorForm_t = GV::BilinearForm<DofHandler_t, DofHandler_t, ErrorI
 /// established earlier -- eval_weight receives the physical (x,y,z)
 /// coordinates at each quadrature point and must fill in f there.
 ///////////////////////////////////////////////////////////////////////////
-struct HelmholtzForcingKernel : public GV::WeightedLinearKernel<HelmholtzForcingKernel> {
-	template<typename T, size_t N>
-	static void eval_weight(std::span<T,N> vals, std::span<const T,N> x, std::span<const T,N> y, std::span<const T,N> z) noexcept {
+struct HelmholtzForcingWeight {
+	static constexpr bool NEEDS_GEO_POINTS  = true;
+	static constexpr bool NEEDS_SCALAR_VALS = false;
+
+	template<typename QuadRule_t>
+	static GV::ScalarValueCache<QuadRule_t> build_weights(const GV::ScalarValueCache<QuadRule_t>*, const QuadRule_t& qr) noexcept {
+		GV::ScalarValueCache<QuadRule_t> wt;
+		
+		auto x = qr.geo_x(), y=qr.geo_y(), z=qr.geo_z();
 		GUTIL_SIMD()
-		for (size_t i=0; i<N; ++i) {
-			const T f = std::cos(PI*x[i]) * std::cos(PI*y[i]) * std::cos(PI*z[i]);
-			vals[i] = (3*PI*PI + ALPHA) * f;
+		for (size_t i=0; i<wt.size(); ++i) {
+			const Scalar_t f = std::cos(PI*x[i]) * std::cos(PI*y[i]) * std::cos(PI*z[i]);
+			wt[i] = (3*PI*PI + ALPHA) * f;
 		}
+		return wt;
 	}
 };
-using LinearForm_t = GV::LinearForm<DofHandler_t, HelmholtzForcingKernel, 4, Scalar_t>;
+using ForcingForm_t = GV::LinearForm<4, Scalar_t, DofHandler_t, GV::L2LinearKernel<true>, HelmholtzForcingWeight>;
 
 
 
@@ -157,7 +164,7 @@ void update_solution(DofHandler_t& d_handler, CoefHandler_t& c_handler) {
 	triplets.clear(); triplets.shrink_to_fit();
 
 	// ---- Assemble the right-hand side b, via the linear form ----
-	LinearForm_t l_form(d_handler, HelmholtzForcingKernel{});
+	ForcingForm_t l_form(d_handler);
 	Eigen::VectorXd b(n);
 	b.setZero();
 	{

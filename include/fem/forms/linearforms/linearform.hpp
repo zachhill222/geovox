@@ -8,7 +8,7 @@
 #include "fem/dofhandler.hpp"
 
 #include "fem/mesh_quadrature.hpp"
-#include "fem/linearforms/linear_kernels.hpp"
+#include "fem/forms/linearforms/linear_kernels.hpp"
 
 namespace GV {
 
@@ -27,7 +27,7 @@ namespace GV {
 	/// quadrature points and weights on the current element as well as projections
 	/// of to relevant lower depths.
 	/////////////////////////////////////////////////////////////////////
-	template<typename TestHandlerType, typename KernelType, int N, typename T>
+	template<int N, typename T, typename TestHandlerType, typename KernelType, typename KernelWeightType=NoKernelWeight>
 	struct LinearForm {
 
 
@@ -35,6 +35,7 @@ namespace GV {
 		/// Aliases and sanity checks
 		//////////////////////////////////////////////////////////////////
 		using Kernel_t      = KernelType;
+		using Weight_t   	= KernelWeightType;
 		using TestHandler_t	= TestHandlerType;
 		using QuadRule_t 	= MeshQuadratureRule<N,T>;
 		using Scalar_t   	= T;
@@ -42,8 +43,24 @@ namespace GV {
 		using MeshElem_t 	= typename Mesh_t::Elem_t;
 		using TestDof_t  	= typename TestHandlerType::DOF_t;
 
-		static_assert(std::is_invocable_r_v<T,KernelType,TestDof_t,const QuadRule_t&>, 
-			"The Kernel must have the signature T(TestDof_t,const QuadRule_t&)");
+		using ElementTestCache_t = ElementDofCache<Kernel_t,TestHandler_t,QuadRule_t>;
+		using WeightCache_t      = ScalarValueCache<QuadRule_t>;
+
+		struct KernelEval {
+			const Kernel_t& 			kernel;
+			const ElementTestCache_t& 	cache;
+			const QuadRule_t& 			qr;
+
+			KernelEval(const Kernel_t& k, const ElementTestCache_t& c, const QuadRule_t& q) : kernel(k), cache(c), qr(q) {}
+
+			[[nodiscard]] Scalar_t operator()(size_t i, const WeightCache_t* wt = nullptr) const noexcept {
+				const DofValueCache<QuadRule_t>* vals{nullptr};
+				const DofGradCache<QuadRule_t>*  grad{nullptr};
+				if constexpr (Kernel_t::NEEDS_DOF_VALS) {vals = &cache.vals[i];}
+				if constexpr (Kernel_t::NEEDS_DOF_GRAD) {grad = &cache.grad[i];}
+				return kernel.cached_eval(vals, grad, wt, qr);
+			}
+		};
 
 
 		//////////////////////////////////////////////////////////////////
@@ -62,6 +79,7 @@ namespace GV {
 		//////////////////////////////////////////////////////////////////
 		void evaluate_vector_colored(std::span<T> result) noexcept {
 			// compute result[i]=L(dof[i])
+			static_assert(!Weight_t::NEEDS_SCALAR_VALS);
 			GUTIL_ASSERT(test_handler.is_current());
 			GUTIL_ASSERT(result.size() == test_handler.n_dofs());
 			GUTIL_ASSERT(mesh.is_color_sorted());
@@ -72,24 +90,29 @@ namespace GV {
 				GUTIL_OMP(parallel)
 				{
 					QuadRule_t 						quad_rule(mesh);
-					std::vector<TestDof_t> 			test_dofs_on_elem;
+					ElementTestCache_t				test_cache(test_handler,quad_rule);	
+					KernelEval						k_eval(kernel, test_cache, quad_rule);
+					WeightCache_t					wt;
 
 					const size_t n_threads 		  = GUTIL_OMP_TERNARY(omp_get_num_threads(), 1);
 					const size_t n_els_per_thread = quad_elems.size()/n_threads;
-					const size_t tid 			  = GUTIL_OMP_TERNARY(omp_get_thread_num(), 0);\
+					const size_t tid 			  = GUTIL_OMP_TERNARY(omp_get_thread_num(), 0);
 					const size_t start 			  = tid*n_els_per_thread;
 					const size_t end 			  = (tid==n_threads-1) ? quad_elems.size() : start + n_els_per_thread;
 					
 					for (size_t j=start; j<end; ++j) {
 						const MeshElem_t el = quad_elems[j];
+						
 						quad_rule.set_element(el,2);
-						if constexpr (Kernel_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
-						test_dofs_on_elem = test_handler.get_active_dofs_quasi_hierarchical(el);
+						if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
+						
+						test_cache.gather_qh();
+						if constexpr (!std::same_as<Weight_t,NoKernelWeight>) {
+							wt = Weight_t::template build_weights<QuadRule_t>(nullptr, quad_rule);
+						}
 
-						for (TestDof_t dof : test_dofs_on_elem) {
-							size_t global_n = test_handler.global_number(dof);
-							GUTIL_ASSERT(global_n<result.size());
-							result[global_n] += kernel(dof,quad_rule);
+						for (size_t i=0; i<test_cache.size(); ++i) {
+							result[test_cache.global_idx[i]] += k_eval(i, &wt);
 						}
 					}
 				}
@@ -98,6 +121,7 @@ namespace GV {
 
 		void evaluate_vector(std::span<T> result) noexcept {
 			// compute result[i]=L(dof[i])
+			static_assert(!Weight_t::NEEDS_SCALAR_VALS);
 			GUTIL_ASSERT(test_handler.is_current());
 			GUTIL_ASSERT(result.size() == test_handler.n_dofs());
 
@@ -105,20 +129,25 @@ namespace GV {
 
 			GUTIL_OMP(parallel)
 			{
-				QuadRule_t 				quad_rule(mesh);
-				std::vector<TestDof_t> 	test_dofs_on_elem;
+				QuadRule_t 					quad_rule(mesh);
+				ElementTestCache_t			test_cache(test_handler,quad_rule);
+				KernelEval					k_eval(kernel, test_cache, quad_rule);
+				WeightCache_t				wt;
 
 				GUTIL_OMP(for)
 				for (size_t i=0; i<quad_elems.size(); ++i) {
 					const MeshElem_t el = quad_elems[i];
+					
 					quad_rule.set_element(el,2);
-					if constexpr (Kernel_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
-					test_dofs_on_elem = test_handler.get_active_dofs_quasi_hierarchical(el);
-
-					for (TestDof_t dof : test_dofs_on_elem) {
-						size_t global_n = test_handler.global_number(dof);
-						GUTIL_ASSERT(global_n<result.size());
-						GUTIL_OMP(atomic) result[global_n] += kernel(dof,quad_rule);
+					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
+					
+					test_cache.gather_qh();
+					if constexpr (!std::same_as<Weight_t,NoKernelWeight>) {
+						wt = Weight_t::template build_weights<QuadRule_t>(nullptr, quad_rule);
+					}
+					
+					for (size_t i=0; i<test_cache.size(); ++i) {
+						GUTIL_OMP(atomic) result[test_cache.global_idx[i]] += k_eval(i, &wt);
 					}
 				}
 			}
@@ -138,21 +167,26 @@ namespace GV {
 
 			GUTIL_OMP(parallel)
 			{
-				Scalar_t 				thread_result{0};
-				QuadRule_t 				quad_rule(mesh);
-				std::vector<TestDof_t> 	test_dofs_on_elem;
+				Scalar_t 					thread_result{0};
+				QuadRule_t 					quad_rule(mesh);
+				ElementTestCache_t			test_cache(test_handler,quad_rule);	
+				KernelEval					k_eval(kernel, test_cache, quad_rule);
+				WeightCache_t				wt;
 
 				GUTIL_OMP(for)
 				for (size_t i=0; i<quad_elems.size(); ++i) {
 					const MeshElem_t el = quad_elems[i];
+					
 					quad_rule.set_element(el,2);
-					if constexpr (Kernel_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
-					test_dofs_on_elem = test_handler.get_active_dofs_quasi_hierarchical(el);
-
-					for (TestDof_t dof : test_dofs_on_elem) {
-						size_t global_n = test_handler.global_number(dof);
-						GUTIL_ASSERT(global_n<coefs.size());
-						thread_result += coefs[global_n]*kernel(dof,quad_rule);
+					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
+					
+					test_cache.gather_qh();
+					if constexpr (!std::same_as<Weight_t,NoKernelWeight>) {
+						wt = Weight_t::template build_weights<QuadRule_t>(nullptr, quad_rule);
+					}
+					
+					for (size_t i=0; i<test_cache.size(); ++i) {
+						thread_result += k_eval(i,&wt);
 					}
 				}
 
