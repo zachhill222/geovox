@@ -105,6 +105,7 @@ namespace GV {
 		[[nodiscard]] size_t n_cols() const noexcept {return trial_handler.n_dofs();}
 
 
+
 		//////////////////////////////////////////////////////////////////
 		/// Given trial coefficients X, compute Y += alpha*A*X
 		//////////////////////////////////////////////////////////////////
@@ -130,13 +131,9 @@ namespace GV {
 					std::vector<Scalar_t>			local_y;
 					std::vector<Scalar_t>			local_x;
 
-					const size_t n_threads 		  = GUTIL_OMP_TERNARY(omp_get_num_threads(), 1);
-					const size_t n_els_per_thread = quad_elems.size()/n_threads;
-					const size_t tid 			  = GUTIL_OMP_TERNARY(omp_get_thread_num(), 0);
-					const size_t start 			  = tid*n_els_per_thread;
-					const size_t end 			  = (tid==n_threads-1) ? quad_elems.size() : start + n_els_per_thread;
-					
-					for (size_t q=start; q<end; ++q) {
+					OmpIndexRange 					range(quad_elems.size());
+
+					for (size_t q=range.start; q<range.end; ++q) {
 						const MeshElem_t el = quad_elems[q];
 						
 						quad_rule.set_element(el,2);
@@ -197,13 +194,8 @@ namespace GV {
 					std::vector<Scalar_t>			local_y;
 					std::vector<Scalar_t>			local_x;
 
-					const size_t n_threads 		  = GUTIL_OMP_TERNARY(omp_get_num_threads(), 1);
-					const size_t n_els_per_thread = quad_elems.size()/n_threads;
-					const size_t tid 			  = GUTIL_OMP_TERNARY(omp_get_thread_num(), 0);
-					const size_t start 			  = tid*n_els_per_thread;
-					const size_t end 			  = (tid==n_threads-1) ? quad_elems.size() : start + n_els_per_thread;
-					
-					for (size_t q=start; q<end; ++q) {
+					OmpIndexRange 					range(quad_elems.size());
+					for (size_t q=range.start; q<range.end; ++q) {
 						const MeshElem_t el = quad_elems[q];
 						
 						quad_rule.set_element(el,2);
@@ -260,16 +252,9 @@ namespace GV {
 				std::vector<Scalar_t>			local_y;
 				std::vector<Scalar_t>			local_x;
 
-				const size_t n_threads 		  = GUTIL_OMP_TERNARY(omp_get_num_threads(), 1);
-				const size_t n_els_per_thread = mesh.n_elements()/n_threads;
-				const size_t tid 			  = GUTIL_OMP_TERNARY(omp_get_thread_num(), 0);
-				const size_t start 			  = tid*n_els_per_thread;
-				const size_t end 			  = (tid==n_threads-1) ? mesh.n_elements() : start + n_els_per_thread;
-				
-				std::span<const MeshElem_t> quad_elems(mesh.element_begin()+start, mesh.element_begin()+end);
-
-				for (size_t q=0; q<quad_elems.size(); ++q) {
-					const MeshElem_t el = quad_elems[q];
+				OmpIteratorRange	range(mesh.element_begin(), mesh.element_end());
+				for (auto it=range.start; it!=range.end; ++it) {
+					const MeshElem_t el = *it;
 						
 					quad_rule.set_element(el,2);
 					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
@@ -323,16 +308,9 @@ namespace GV {
 				std::vector<Scalar_t>			local_y;
 				std::vector<Scalar_t>			local_x;
 
-				const size_t n_threads 		  = GUTIL_OMP_TERNARY(omp_get_num_threads(), 1);
-				const size_t n_els_per_thread = mesh.n_elements()/n_threads;
-				const size_t tid 			  = GUTIL_OMP_TERNARY(omp_get_thread_num(), 0);
-				const size_t start 			  = tid*n_els_per_thread;
-				const size_t end 			  = (tid==n_threads-1) ? mesh.n_elements() : start + n_els_per_thread;
-				
-				std::span<const MeshElem_t> quad_elems(mesh.element_begin()+start, mesh.element_begin()+end);
-
-				for (size_t q=0; q<quad_elems.size(); ++q) {
-					const MeshElem_t el = quad_elems[q];
+				OmpIteratorRange	range(mesh.element_begin(), mesh.element_end());
+				for (auto it=range.start; it!=range.end; ++it) {
+					const MeshElem_t el = *it;
 						
 					quad_rule.set_element(el,2);
 					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
@@ -389,13 +367,8 @@ namespace GV {
 					KernelEval						k_eval(kernel, sym_cache, sym_cache, quad_rule);
 					WeightCache_t					wt;
 					
-					const size_t n_threads 		  = GUTIL_OMP_TERNARY(omp_get_num_threads(), 1);
-					const size_t n_els_per_thread = quad_elems.size()/n_threads;
-					const size_t tid 			  = GUTIL_OMP_TERNARY(omp_get_thread_num(), 0);
-					const size_t start 			  = tid*n_els_per_thread;
-					const size_t end 			  = (tid==n_threads-1) ? quad_elems.size() : start + n_els_per_thread;
-					
-					for (size_t q=start; q<end; ++q) {
+					OmpIndexRange 					range(quad_elems.size());
+					for (size_t q=range.start; q<range.end; ++q) {
 						const MeshElem_t el = quad_elems[q];
 						
 						quad_rule.set_element(el,2);
@@ -427,17 +400,10 @@ namespace GV {
 				KernelEval						k_eval(kernel, sym_cache, sym_cache, quad_rule);
 				WeightCache_t					wt;
 				
-				const size_t n_threads 		  = GUTIL_OMP_TERNARY(omp_get_num_threads(), 1);
-				const size_t n_els_per_thread = mesh.n_elements()/n_threads;
-				const size_t tid 			  = GUTIL_OMP_TERNARY(omp_get_thread_num(), 0);
-				const size_t start 			  = tid*n_els_per_thread;
-				const size_t end 			  = (tid==n_threads-1) ? mesh.n_elements() : start + n_els_per_thread;
-				
-				std::span<const MeshElem_t> quad_elems(mesh.element_begin()+start, mesh.element_begin()+end);
+				OmpIteratorRange				range(mesh.element_begin(), mesh.element_end());
+				for (auto it=range.begin; it!=range.end; ++it) {
+					const MeshElem_t el = *it;
 
-				for (size_t q=0; q<quad_elems.size(); ++q) {
-					const MeshElem_t el = quad_elems[q];
-						
 					quad_rule.set_element(el,2);
 					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 					
@@ -475,18 +441,11 @@ namespace GV {
 				
 				std::vector<Triplet_t>			thread_triplets;
 
-				const size_t n_threads 		  = GUTIL_OMP_TERNARY(omp_get_num_threads(), 1);
-				const size_t n_els_per_thread = mesh.n_elements()/n_threads;
-				const size_t tid 			  = GUTIL_OMP_TERNARY(omp_get_thread_num(), 0);
-				const size_t start 			  = tid*n_els_per_thread;
-				const size_t end 			  = (tid==n_threads-1) ? mesh.n_elements() : start + n_els_per_thread;
-				
-				std::span<const MeshElem_t> quad_elems(mesh.element_begin()+start, mesh.element_begin()+end);
-				thread_triplets.reserve(quad_elems.size() * TrialDof_t::N_DOF_PER_ELEM * TestDof_t::N_DOF_PER_ELEM);
+				OmpIteratorRange				range(mesh.element_begin(), mesh.element_end());
+				thread_triplets.reserve(range.count * TrialDof_t::N_DOF_PER_ELEM * TestDof_t::N_DOF_PER_ELEM);
 
-
-				for (size_t q=0; q<quad_elems.size(); ++q) {
-					const MeshElem_t el = quad_elems[q];
+				for (auto it=range.begin; it!=range.end; ++it) {
+					const MeshElem_t el = *it;
 						
 					quad_rule.set_element(el,2);
 					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
@@ -541,19 +500,13 @@ namespace GV {
 				WeightCache_t					wt;
 				
 				std::vector<Triplet_t>			thread_triplets;
-
-				const size_t n_threads 		  = GUTIL_OMP_TERNARY(omp_get_num_threads(), 1);
-				const size_t n_els_per_thread = mesh.n_elements()/n_threads;
-				const size_t tid 			  = GUTIL_OMP_TERNARY(omp_get_thread_num(), 0);
-				const size_t start 			  = tid*n_els_per_thread;
-				const size_t end 			  = (tid==n_threads-1) ? mesh.n_elements() : start + n_els_per_thread;
 				
-				std::span<const MeshElem_t> quad_elems(mesh.element_begin()+start, mesh.element_begin()+end);
-				thread_triplets.reserve(quad_elems.size() * TrialDof_t::N_DOF_PER_ELEM * TestDof_t::N_DOF_PER_ELEM);
+				OmpIteratorRange				range(mesh.element_begin(), mesh.element_end());
+				
+				thread_triplets.reserve(range.count * TrialDof_t::N_DOF_PER_ELEM * TestDof_t::N_DOF_PER_ELEM);
 
-
-				for (size_t q=0; q<quad_elems.size(); ++q) {
-					const MeshElem_t el = quad_elems[q];
+				for (auto it=range.start; it!=range.end; ++it) {
+					const MeshElem_t el = *it;
 						
 					quad_rule.set_element(el,2);
 					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
