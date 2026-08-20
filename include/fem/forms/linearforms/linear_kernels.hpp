@@ -61,7 +61,7 @@ namespace GV {
 			const DofValueCache<QuadRule_t>* v_vals,
 			const DofGradCache<QuadRule_t>*,
 			const ScalarValueCache<QuadRule_t>*  wt,
-			const QuadRule_t&				 qr) const noexcept requires(NEEDS_WEIGHT) {
+			const QuadRule_t& qr) const noexcept requires(NEEDS_WEIGHT) {
 			
 			using Scalar_t = typename QuadRule_t::Scalar_t;
 			constexpr int N = QuadRule_t::TOTAL_QUAD_POINTS;

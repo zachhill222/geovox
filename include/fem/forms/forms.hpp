@@ -1,6 +1,7 @@
 #pragma once
 
 #include "fem/forms/util.hpp"
+#include "fem/forms/weights.hpp"
 
 #include "fem/forms/linearforms/linearform.hpp"
 #include "fem/forms/linearforms/linear_kernels.hpp"

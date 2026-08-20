@@ -69,9 +69,10 @@ namespace GV {
 		const TestHandler_t&	test_handler;
 		const Mesh_t&	 		mesh;
 		const Kernel_t 			kernel;
+		const Weight_t 			weight;
 
-		LinearForm(const TestHandler_t& handler, KernelType&& kernel = KernelType{}) :
-			test_handler(handler), mesh(test_handler.mesh), kernel(std::move(kernel)) {}
+		LinearForm(const TestHandler_t& handler, KernelType kernel = KernelType{}, KernelWeightType weight = KernelWeightType{}) :
+			test_handler(handler), mesh(test_handler.mesh), kernel(std::move(kernel)), weight(std::move(weight)) {}
 
 
 		//////////////////////////////////////////////////////////////////
@@ -108,7 +109,7 @@ namespace GV {
 						
 						test_cache.gather_qh();
 						if constexpr (!std::same_as<Weight_t,NoKernelWeight>) {
-							wt = Weight_t::template build_weights<QuadRule_t>(nullptr, quad_rule);
+							wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 						}
 
 						for (size_t i=0; i<test_cache.size(); ++i) {
@@ -143,7 +144,7 @@ namespace GV {
 					
 					test_cache.gather_qh();
 					if constexpr (!std::same_as<Weight_t,NoKernelWeight>) {
-						wt = Weight_t::template build_weights<QuadRule_t>(nullptr, quad_rule);
+						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}
 					
 					for (size_t i=0; i<test_cache.size(); ++i) {
@@ -182,11 +183,11 @@ namespace GV {
 					
 					test_cache.gather_qh();
 					if constexpr (!std::same_as<Weight_t,NoKernelWeight>) {
-						wt = Weight_t::template build_weights<QuadRule_t>(nullptr, quad_rule);
+						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}
 					
 					for (size_t i=0; i<test_cache.size(); ++i) {
-						thread_result += k_eval(i,&wt);
+						thread_result += coefs[test_cache.global_idx[i]] * k_eval(i,&wt);
 					}
 				}
 

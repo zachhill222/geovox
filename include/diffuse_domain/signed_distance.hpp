@@ -65,7 +65,7 @@ namespace GV {
 
 		[[nodiscard]] T heaviside_tanh(const Point_t& point, T eps) const noexcept {
 			GUTIL_ASSERT(eps>T{0});
-			return T{0.5} * (T{1} - fast_tanh(signed_distance(point)/eps));
+			return T{0.5} * (T{1} - fast_tanh(T{3}*signed_distance(point)/eps)); //scale by 3, see https://arxiv.org/pdf/2509.25115v1
 		}
 
 		[[nodiscard]] Point_t heaviside_tanh_grad(const Point_t& point, T eps) const noexcept {
@@ -75,21 +75,13 @@ namespace GV {
 			const Particle_t& nearest = this->data_[idx];
 
 			const T sdf = nearest.signed_distance(point);
-			const T eps_inv = T{1}/eps;
+			const T eps_inv = T{3}/eps;	//scale by 3, see https://arxiv.org/pdf/2509.25115v1
 
-			const T heavi = T{0.5} * (fast_tanh(sdf * eps_inv) - T{1});
+			const T heavi = T{0.5} * (T{1} - fast_tanh(sdf * eps_inv));
 
 			return T{-2} * eps_inv * heavi * (T{1} - heavi) * (nearest.grad_signed_distance(point));
 		}
-
-
-
-
-
-
 	};
-
-
 }
 
 

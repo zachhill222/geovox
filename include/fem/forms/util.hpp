@@ -290,34 +290,6 @@ namespace GV {
 
 
 	///////////////////////////////////////////////////////////////////
-	/// Many forms require some sort of weight that only needs to be computed once per
-	/// quadrature point. These weights could be of the form f(x,y,z) where
-	/// x,y,z are the geometric coordinates of a quadrature point or
-	/// it could be h(u(x,y,z)) where u(x,y,z) is the evaluation of a scalar field
-	/// at the quadrature points.
-	///////////////////////////////////////////////////////////////////
-	template<typename W>
-	concept IsKernelWeight = requires {
-		{W::NEEDS_GEO_POINTS} 	-> std::convertible_to<bool>;
-		{W::NEEDS_SCALAR_VALS} -> std::convertible_to<bool>;
-		//also needs a templated build_weights(scalarvals, quad_rule)
-		//the quad rule will hold geometric points while scalarvals will
-		//point to the values of the scalar field at the quadrature points.
-	};
-
-
-	struct NoKernelWeight {
-		static constexpr bool NEEDS_GEO_POINTS = false;
-		static constexpr bool NEEDS_SCALAR_VALS = false;
-
-		template<typename QuadRule_t>
-		static ScalarValueCache<QuadRule_t> build_weights(const ScalarValueCache<QuadRule_t>*, const QuadRule_t&) noexcept {
-			return ScalarValueCache<QuadRule_t>::Filled(typename QuadRule_t::Scalar_t{1});
-		}
-	};
-
-
-	///////////////////////////////////////////////////////////////////
 	/// When computing values of a linear or bilinear form, it is best to 
 	/// pre-compute values per-dof and cache the values rather than compute 
 	/// values per dof pair on the fly. This is more applicable to bilinear forms,

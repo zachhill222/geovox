@@ -90,12 +90,13 @@ namespace GV {
 		const TestHandler_t&	test_handler;
 		const Mesh_t&	 		mesh;
 		const Kernel_t 			kernel;
+		const Weight_t 			weight;
 
-		BilinearForm(const TrialHandler_t& u_handler, const TestHandler_t& v_handler, KernelType kernel = KernelType{}) :
-			trial_handler(u_handler), test_handler(v_handler), mesh(test_handler.mesh), kernel(std::move(kernel)) {}
+		BilinearForm(const TrialHandler_t& u_handler, const TestHandler_t& v_handler, KernelType kernel = KernelType{}, KernelWeightType weight = KernelWeightType{}) :
+			trial_handler(u_handler), test_handler(v_handler), mesh(test_handler.mesh), kernel(std::move(kernel)), weight(std::move(weight)) {}
 
-		BilinearForm(const TrialHandler_t& sym_handler, KernelType kernel=KernelType{}) requires(Kernel_t::IS_SYMMETRIC) :
-			trial_handler(sym_handler), test_handler(sym_handler), mesh(sym_handler.mesh), kernel(std::move(kernel)) {}
+		BilinearForm(const TrialHandler_t& sym_handler, KernelType kernel=KernelType{}, KernelWeightType weight = KernelWeightType{}) requires(Kernel_t::IS_SYMMETRIC) :
+			trial_handler(sym_handler), test_handler(sym_handler), mesh(sym_handler.mesh), kernel(std::move(kernel)), weight(std::move(weight)) {}
 
 
 		//////////////////////////////////////////////////////////////////
@@ -142,7 +143,7 @@ namespace GV {
 						trial_cache.gather_qh();	const size_t u_size = trial_cache.size();
 						test_cache.gather_qh();		const size_t v_size = test_cache.size();
 						if constexpr (!std::same_as<Weight_t,NoKernelWeight>) {
-							wt = Weight_t::template build_weights<QuadRule_t>(nullptr, quad_rule);
+							wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 						}
 
 						local_y.assign(v_size, 0);
@@ -203,7 +204,7 @@ namespace GV {
 						
 						sym_cache.gather_qh();		const size_t v_size = sym_cache.size();
 						if constexpr (!std::same_as<Weight_t,NoKernelWeight>) {
-							wt = Weight_t::template build_weights<QuadRule_t>(nullptr, quad_rule);
+							wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 						}
 
 						local_y.assign(v_size, 0);
@@ -242,17 +243,17 @@ namespace GV {
 			
 			GUTIL_OMP(parallel)
 			{
-				QuadRule_t 						quad_rule(mesh);
-				ElementTrialCache_t				trial_cache(trial_handler,quad_rule);
-				ElementTestCache_t				test_cache(test_handler,quad_rule);
-				KernelEval						k_eval(kernel, trial_cache, test_cache, quad_rule);
-				WeightCache_t					wt;
+				QuadRule_t 				quad_rule(mesh);
+				ElementTrialCache_t		trial_cache(trial_handler,quad_rule);
+				ElementTestCache_t		test_cache(test_handler,quad_rule);
+				KernelEval				k_eval(kernel, trial_cache, test_cache, quad_rule);
+				WeightCache_t			wt;
 				
-				std::vector<Scalar_t>			local_matrix;
-				std::vector<Scalar_t>			local_y;
-				std::vector<Scalar_t>			local_x;
+				std::vector<Scalar_t>	local_matrix;
+				std::vector<Scalar_t>	local_y;
+				std::vector<Scalar_t>	local_x;
 
-				OmpIteratorRange	range(mesh.element_begin(), mesh.element_end());
+				OmpIteratorRange		range(mesh.element_begin(), mesh.element_end());
 				for (auto it=range.start; it!=range.end; ++it) {
 					const MeshElem_t el = *it;
 						
@@ -262,7 +263,7 @@ namespace GV {
 					trial_cache.gather_qh();	const size_t u_size = trial_cache.size();
 					test_cache.gather_qh();		const size_t v_size = test_cache.size();
 					if constexpr (!std::same_as<Weight_t,NoKernelWeight>) {
-						wt = Weight_t::template build_weights<QuadRule_t>(nullptr, quad_rule);
+						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}
 
 					local_y.assign(v_size, 0);
@@ -317,7 +318,7 @@ namespace GV {
 					
 					sym_cache.gather_qh();		const size_t v_size = sym_cache.size();
 					if constexpr (!std::same_as<Weight_t,NoKernelWeight>) {
-						wt = Weight_t::template build_weights<QuadRule_t>(nullptr, quad_rule);
+						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}
 
 					local_y.assign(v_size, 0);
@@ -376,7 +377,7 @@ namespace GV {
 						
 						sym_cache.gather_qh();		const size_t v_size = sym_cache.size();
 						if constexpr (!std::same_as<Weight_t,NoKernelWeight>) {
-							wt = Weight_t::template build_weights<QuadRule_t>(nullptr, quad_rule);
+							wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 						}
 
 						//scatter local result
@@ -409,7 +410,7 @@ namespace GV {
 					
 					sym_cache.gather_qh();		const size_t v_size = sym_cache.size();
 					if constexpr (!std::same_as<Weight_t,NoKernelWeight>) {
-						wt = Weight_t::template build_weights<QuadRule_t>(nullptr, quad_rule);
+						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}
 
 					//scatter local result
@@ -453,7 +454,7 @@ namespace GV {
 					trial_cache.gather_qh();	const size_t u_size = trial_cache.size();
 					test_cache.gather_qh();		const size_t v_size = test_cache.size();
 					if constexpr (!std::same_as<Weight_t,NoKernelWeight>) {
-						wt = Weight_t::template build_weights<QuadRule_t>(nullptr, quad_rule);
+						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}
 
 					//add triplets
@@ -513,7 +514,7 @@ namespace GV {
 					
 					sym_cache.gather_qh();		const size_t v_size = sym_cache.size();
 					if constexpr (!std::same_as<Weight_t,NoKernelWeight>) {
-						wt = Weight_t::template build_weights<QuadRule_t>(nullptr, quad_rule);
+						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}
 
 					//add triplets
