@@ -616,62 +616,6 @@ namespace Keys {
 		}
 
 
-		// template<typename Container_A, typename Container_B>
-		// [[nodiscard]] static bool are_spans_same_data(const Container_A& A, const Container_B& B) noexcept {
-		// 	using A_t = typename Container_A::value_type;
-		// 	using B_t = typename Container_B::value_type;
-		// 	if constexpr (sizeof(A_t) != sizeof(B_t)) {return false;}
-		// 	if constexpr (alignof(A_t) != alignof(B_t)) {return false;}
-
-		// 	if (A.size() != B.size()) {return false;}
-		// 	if (reinterpret_cast<uintptr_t>(A.data()) != reinterpret_cast<uintptr_t>(B.data())) {return false;}
-		// 	if (reinterpret_cast<uintptr_t>(A.data()+A.size()) != reinterpret_cast<uintptr_t>(B.data()+B.size())) {return false;}
-		// 	return true; 
-		// }
-
-		// template<typename KeyTypeOut, typename Container_A> 
-		// 		requires( 	sizeof(KeyTypeOut) == sizeof(typename Container_A::value_type) &&
-		// 					alignof(KeyTypeOut) == alignof(typename Container_A::value_type) &&
-		// 					std::contiguous_iterator<typename Container_A::iterator> )
-		// [[nodiscard]] static std::span<KeyTypeOut> reinterpret_key_span(Container_A& list) noexcept {
-		// 	using KeyTypeIn = typename Container_A::value_type;
-		// 	std::span<KeyTypeOut> view = reinterpret_key_span<KeyTypeOut,KeyTypeIn>(std::span<KeyTypeIn>(list));
-		// 	GUTIL_ASSERT(are_spans_same_data(view,list));
-		// 	return view;
-		// }
-
-		// template<typename KeyTypeOut, typename Container_A> 
-		// 		requires( 	sizeof(KeyTypeOut) == sizeof(typename Container_A::value_type) &&
-		// 					alignof(KeyTypeOut) == alignof(typename Container_A::value_type) &&
-		// 					std::contiguous_iterator<typename Container_A::iterator> )
-		// [[nodiscard]] static std::span<const KeyTypeOut> reinterpret_key_span(const Container_A& list) noexcept {
-		// 	using KeyTypeIn = typename Container_A::value_type;
-		// 	std::span<KeyTypeOut> view = reinterpret_key_span<KeyTypeOut,KeyTypeIn>(std::span<const KeyTypeIn>(list));
-		// 	GUTIL_ASSERT(are_spans_same_data(view,list));
-		// 	return view;
-		// }
-
-		// template<typename KeyTypeOut, typename KeyTypeIn>
-		// 	requires(sizeof(KeyTypeIn)==8 && sizeof(KeyTypeOut)==8 && alignof(KeyTypeOut)==alignof(KeyTypeIn))
-		// [[nodiscard]] static std::span<KeyTypeOut> reinterpret_key_span(std::span<KeyTypeIn> list) noexcept {
-		// 	if constexpr (std::same_as<KeyTypeIn, KeyTypeOut>) {return list;}
-		// 	else {
-		// 		std::span<KeyTypeOut> view {reinterpret_cast<KeyTypeOut*>(list.data()), list.size()};
-		// 		#ifndef NDEBUG
-		// 			//make sure that the span is correctly interprets the raw values
-		// 			GUTIL_ASSERT(are_spans_same_data(view,list));
-		// 			for (size_t i=0; i<std::min(size_t{100},view.size()); ++i) {
-		// 				uint64_t raw  = static_cast<uint64_t>(list[i]);
-		// 				GUTIL_ASSERT(raw == static_cast<uint64_t>(view[i]) && "raw bytes changed");
-		// 				GUTIL_ASSERT(KeyTypeIn{raw} == list[i] && "reconstructing in type failed");
-		// 				GUTIL_ASSERT(KeyTypeOut{raw} == view[i] && "reconstructing out type failed");
-		// 			}
-		// 		#endif
-		// 		return view;
-		// 	}
-		// }
-
-
 
 
 		/////////////////////////////////////////////////////////////////////////
@@ -700,7 +644,7 @@ namespace Keys {
 		/// wish to reduce the number of threads in this thread pool by using set_thread_pool_size().
 		/// Ideally, you can use the full number of hardware threads and use SIMD within each task.
 		/////////////////////////////////////////////////////////////////////////
-		template<typename Task, typename...Args>
+		template<typename Key_t=uint64_t, typename Task, typename...Args>
 		void dispatch_parallel_active_keys(Task&& action, Args&&... args) noexcept {
 			GUTIL_ASSERT(is_current() && "the active keys are stale");
 			GUTIL_ASSERT(active_keys.size()>0 && "HybridKeyTracker - no keys found. Did you forget to collect them?");
@@ -717,12 +661,12 @@ namespace Keys {
 				const size_t start = tid * dof_per_thread;
 				const size_t end = (tid==n_threads-1) ? n_keys : start + dof_per_thread;
 
-				if constexpr (std::is_invocable_r_v<void, Task, std::span<uint64_t>, int, Args...>) {
-					std::span<uint64_t> list(active_keys.begin()+start, active_keys.begin()+end);
+				if constexpr (std::is_invocable_r_v<void, Task, std::span<Key_t>, int, Args...>) {
+					std::span<Key_t> list = reinterpret_key_span<Key_t,uint64_t>(std::span<uint64_t>(active_keys.begin()+start, active_keys.begin()+end));
 					threads.submit(action, list, tid, std::forward<Args>(args)...);
 				}
-				else if constexpr (std::is_invocable_r_v<void, Task, std::span<uint64_t>, Args...>) {
-					std::span<uint64_t> list(active_keys.begin()+start, active_keys.begin()+end);
+				else if constexpr (std::is_invocable_r_v<void, Task, std::span<Key_t>, Args...>) {
+					std::span<Key_t> list = reinterpret_key_span<Key_t,uint64_t>(std::span<uint64_t>(active_keys.begin()+start, active_keys.begin()+end));
 					threads.submit(action, list, std::forward<Args>(args)...);
 				}
 				else {
@@ -732,7 +676,7 @@ namespace Keys {
 			}
 		}
 
-		template<typename Task, typename...Args>
+		template<typename Key_t=uint64_t, typename Task, typename...Args>
 		void dispatch_parallel_active_keys_const(Task&& action, Args&&... args) const noexcept {
 			GUTIL_ASSERT(is_current() && "the active keys are stale");
 			GUTIL_ASSERT(active_keys.size()>0 && "HybridKeyTracker - no keys found. Did you forget to collect them?");
@@ -749,12 +693,12 @@ namespace Keys {
 				const size_t start = tid * dof_per_thread;
 				const size_t end = (tid==n_threads-1) ? n_keys : start + dof_per_thread;
 
-				if constexpr (std::is_invocable_r_v<void, Task, std::span<uint64_t>, int, Args...>) {
-					std::span<const uint64_t> list(active_keys.begin()+start, active_keys.begin()+end);
+				if constexpr (std::is_invocable_r_v<void, Task, std::span<Key_t>, int, Args...>) {
+					std::span<const Key_t> list = reinterpret_key_span<Key_t,uint64_t>(std::span<const uint64_t>(active_keys.begin()+start, active_keys.begin()+end));
 					threads.submit(action, list, tid, std::forward<Args>(args)...);
 				}
-				else if constexpr (std::is_invocable_r_v<void, Task, std::span<uint64_t>, Args...>) {
-					std::span<const uint64_t> list(active_keys.begin()+start, active_keys.begin()+end);
+				else if constexpr (std::is_invocable_r_v<void, Task, std::span<Key_t>, Args...>) {
+					std::span<const Key_t> list = reinterpret_key_span<Key_t,uint64_t>(std::span<const uint64_t>(active_keys.begin()+start, active_keys.begin()+end));
 					threads.submit(action, list, std::forward<Args>(args)...);
 				}
 				else {

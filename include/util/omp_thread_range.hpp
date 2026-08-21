@@ -28,7 +28,7 @@ namespace GV {
 	/////////////////////////////////////////////////////////////////////////
 	template<std::integral T>
 	struct OmpIndexRange {
-		T start;			//this thread start of range
+		T begin;			//this thread begin of range
 		T end;				//this thread end of range
 		T count;			//the size of this thread's range
 		const T tid;		//this thread's openmp number
@@ -38,16 +38,16 @@ namespace GV {
 			n_threads{GUTIL_OMP_TERNARY(static_cast<T>(omp_get_num_threads()), 1)} {
 			
 			const T n_idx_per_thread = global_count/n_threads;
-			start 					 = tid*n_idx_per_thread;
-			end   					 = (tid==n_threads-1) ? global_count : start + n_idx_per_thread;
-			count 					 = end - start;
+			begin 					 = tid*n_idx_per_thread;
+			end   					 = (tid==n_threads-1) ? global_count : begin + n_idx_per_thread;
+			count 					 = end - begin;
 		}
 	};
 
 
 	template<std::random_access_iterator I>
 	struct OmpIteratorRange {
-		I start;				//this thread start of range
+		I begin;				//this thread start of range
 		I end;					//this thread end of range
 		size_t count;			//the size of this thread's range 
 		const size_t tid;		//this thread's openmp number
@@ -58,9 +58,9 @@ namespace GV {
 			
 			const size_t total 			  = static_cast<size_t>(std::distance(global_start,global_end));
 			const size_t n_idx_per_thread = total/n_threads;
-			start 						  = global_start + tid*n_idx_per_thread;
-			end   						  = (tid==n_threads-1) ? global_end : start + n_idx_per_thread;
-			count 						  = static_cast<size_t>(std::distance(start,end));
+			begin 						  = global_start + tid*n_idx_per_thread;
+			end   						  = (tid==n_threads-1) ? global_end : begin + n_idx_per_thread;
+			count 						  = static_cast<size_t>(std::distance(begin,end));
 		}
 	};
 }

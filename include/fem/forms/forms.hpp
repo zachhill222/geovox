@@ -9,3 +9,4 @@
 #include "fem/forms/bilinearforms/bilinearform.hpp"
 #include "fem/forms/bilinearforms/bilinear_kernels.hpp"
 #include "fem/forms/bilinearforms/dense_linalg.hpp"
+#include "fem/forms/bilinearforms/eigen_wrapper.hpp"

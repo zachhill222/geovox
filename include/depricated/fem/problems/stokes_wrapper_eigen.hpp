@@ -89,7 +89,8 @@ namespace GV
 		
 		StokesPreconditioner& compute(const StokesOperator<V_BC,P_BC,MAX_DEPTH>& op) {
 			stokes = &op.stokes;
-			return *this;}
+			return *this;
+		}
 
 		Eigen::ComputationInfo info() const {return Eigen::Success;}
 

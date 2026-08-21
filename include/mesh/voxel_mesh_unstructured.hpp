@@ -346,12 +346,16 @@ namespace GV {
 			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
 			GV_ASSERT_KEY_MASK_STABLE_STATE
 
+			const bool old_encoding = is_encoded();
+			set_encoded(false);
 			GUTIL_ASSERT(!is_encoded());
 
 			GUTIL_PROFILE("sorting elements by color");
 			BASE::sort_active_keys(54, &UnstructuredVoxelMesh::element_key_color54_bin);
 			is_elements_color_sorted_.store(true);
 			is_elements_depth_sorted_.store(false);
+
+			set_encoded(old_encoding);
 		}
 
 		void collect_vertices() noexcept {
@@ -478,6 +482,9 @@ namespace GV {
 				}
 			#endif
 			
+			if (is_encoded() == val) {return;}
+
+
 			GV_BEGIN_ACTIVE_UNSTABLE
 			GUTIL_PROFILE("Setting encoding to ", val ? "morton" : "cartesian");
 
@@ -506,6 +513,31 @@ namespace GV {
 			threads.wait_idle();
 			is_elements_encoded_.store(val);
 			GV_END_ACTIVE_UNSTABLE
+		}
+
+
+		//select the subset of the active elements that satisfy some predicate
+		template<typename Predicate> requires(std::is_invocable_r_v<bool,Predicate,Elem_t>)
+		std::vector<Elem_t> select_elements(Predicate&& pred) const noexcept {
+			//collect elements in parallel per-thread
+			std::vector<std::vector<Elem_t>> thread_elems(threads.n_threads());
+			BASE::template dispatch_parallel_active_keys_const<Elem_t>([pred, &thread_elems](std::span<const Elem_t> list, int tid) {
+				for (auto it=list.begin(); it!=list.end(); ++it)
+				if (pred(*it)) {thread_elems[tid].push_back(*it);}
+			});
+			threads.wait_idle();
+
+			//join the per-thread results
+			size_t count=0;
+			for (auto& list : thread_elems) {count+=list.size();}
+
+			std::vector<Elem_t> result; result.reserve(count);
+			for (auto& list : thread_elems) {
+				result.insert(result.end(), std::make_move_iterator(list.begin()), std::make_move_iterator(list.end()));
+				list.clear();
+			}
+
+			return result;
 		}
 
 

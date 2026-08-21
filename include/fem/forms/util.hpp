@@ -35,6 +35,7 @@ namespace GV {
 
 		static constexpr size_t size() noexcept {return static_cast<size_t>(N);}
 		constexpr Scalar_t* data() noexcept {return val;}
+		constexpr const Scalar_t* data() const noexcept {return val;}
 
 		constexpr ScalarValueCache() : val{} {}
 		constexpr ScalarValueCache(const ScalarValueCache&) noexcept = default;
@@ -46,6 +47,12 @@ namespace GV {
 			ScalarValueCache result;
 			std::fill(result.val, result.val + N, c);
 			return result;
+		}
+
+		explicit ScalarValueCache(const Scalar_t* other_val) {
+			GUTIL_ASSERT(other_val);
+			GUTIL_SIMD()
+			for (int i=0; i<N; ++i) {val[i]==other_val[i];}
 		}
 
 		///////////////////////////////////////////////////////////////
@@ -289,6 +296,43 @@ namespace GV {
 	};
 
 
+	//////////////////////////////////////////////////////////////////
+	/// When using diffuse domain methods, we may need the signed distance
+	/// at each quadrature point multiple times. Each evaluation may be
+	/// expensive and require an octree lookup of a nearest object.
+	/// Thus, it is best to cache the sdf values and re-use them when possible.
+	///////////////////////////////////////////////////////////////////
+	template<typename QuadRule_t>
+	struct SdfValueCache :  public ScalarValueCache<QuadRule_t> {
+		using Scalar_t = typename QuadRule_t::Scalar_t;
+		using BASE = ScalarValueCache<QuadRule_t>;
+		using BASE::BASE;
+		using BASE::N;
+		using BASE::val;
+
+		template<typename Assembly_t>
+		SdfValueCache(const Assembly_t& assembly, const QuadRule_t& qr) {
+			static_assert( std::same_as<typename QuadRule_t::Scalar_t, typename Assembly_t::Scalar_t> );
+			assembly.signed_distance({val, N}, qr.geo_x(), qr.geo_y(), qr.geo_z());
+		}
+	};
+
+	template<typename QuadRule_t>
+	struct SdfGradCache :  public VectorValueCache<QuadRule_t> {
+		using Scalar_t = typename QuadRule_t::Scalar_t;
+		using BASE = VectorValueCache<QuadRule_t>;
+		using BASE::BASE;
+		using BASE::N;
+		using BASE::val;
+
+		template<typename Assembly_t>
+		SdfGradCache(const Assembly_t& assembly, const QuadRule_t& qr) {
+			static_assert( std::same_as<typename QuadRule_t::Scalar_t, typename Assembly_t::Scalar_t> );
+			assembly.grad_signed_distance({val, 3*N}, qr.geo_x(), qr.geo_y(), qr.geo_z());
+		}
+	};
+
+
 	///////////////////////////////////////////////////////////////////
 	/// When computing values of a linear or bilinear form, it is best to 
 	/// pre-compute values per-dof and cache the values rather than compute 
@@ -358,13 +402,13 @@ namespace GV {
 			GUTIL_ASSERT(vals.size() == dofs.size());
 
 			//gather local coefficients
-			std::vector<Scalar_t> local_coefs(dofs.size());
+			ScalarValueCache<QuadRule_t> result{};
 			for (size_t j=0; j<dofs.size(); ++j) {
-				local_coefs[j] = global_coefs[global_idx[j]];
+				result += global_coefs[global_idx[j]] * vals[j];
 			}
 
 			//evaluate and return
-			return ScalarValueCache<QuadRule_t>(as_span(local_coefs), as_span(vals));
+			return result;
 		}
 	};
 

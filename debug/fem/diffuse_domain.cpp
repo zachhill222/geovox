@@ -37,10 +37,10 @@ using BilinearForm_t    = GV::BilinearForm<4, Scalar_t, DofHandler_t, DofHandler
 using LKernel_t      	= GV::L2LinearKernel<true>;
 using LinearForm_t      = GV::LinearForm<4,Scalar_t,DofHandler_t,LKernel_t,ExteriorWeight_t>;
 
-inline constexpr Box_t domain{ {-1,-1,-1},
-							   { 1, 1, 1} };
+inline constexpr Box_t domain{ {-1.1,-1.1,-1.1},
+							   { 1.1, 1.1, 1.1} };
 inline constexpr Scalar_t interior_exact{4.18879020479};
-inline constexpr Scalar_t exterior_exact{8.0 - 4.18879020479};
+inline constexpr Scalar_t exterior_exact{domain.sidelength().prod() - interior_exact};
 
 /////////////////////////////////////////////////////////////////
 /// Runtime test configuration (from argv)
@@ -83,6 +83,9 @@ int main(int argc, char* argv[]) {
 	CoefHandler_t c_handler(d_handler);
 	c_handler.init_coefs(0,[](auto dof){return Scalar_t{1};});
 
+	//link the diffuse domain weights to the assembly
+	InteriorWeight_t::SetAssembly(mesh_handler.assembly);
+
 
 	//refine the mesh near the interface and measure the volume
 	{
@@ -90,10 +93,9 @@ int main(int argc, char* argv[]) {
 			std::cout << "\n";
 			GUTIL_TIMER("Refinement ", r+1, "/", cfg.n_refine);
 
-			Scalar_t eps = mesh_handler.min_element_size();
-			InteriorWeight_t w_int(mesh_handler.assembly,eps);
-			ExteriorWeight_t w_ext(mesh_handler.assembly,eps);
-			
+			Scalar_t eps = 3.0 * mesh_handler.min_element_size();
+			InteriorWeight_t::SetEps(eps);
+
 			//note that refine requests can be made via const reference
 			const Mesh_t& mesh = mesh_handler.mesh;
 
@@ -108,12 +110,7 @@ int main(int argc, char* argv[]) {
 				return std::abs(sd) < 1.5*gutil::norm2(diag);
 			};
 
-			std::vector<Elem_t> ref_elems;
-			for (auto it=mesh.element_begin(); it!=mesh.element_end(); ++it) {
-				if (near_surface(*it)) {
-					ref_elems.push_back(*it);
-				}
-			}
+			std::vector<Elem_t> ref_elems = mesh_handler.mesh.select_elements(near_surface);
 
 			d_handler.refine_quasi_hierarchical(ref_elems);
 			c_handler.prolong_coefs();
@@ -128,14 +125,14 @@ int main(int argc, char* argv[]) {
 
 			//Test the exterior volume
 			{
-				LinearForm_t l_form(d_handler, LKernel_t{}, w_ext);
+				LinearForm_t l_form(d_handler);
 				Scalar_t approx = l_form.evaluate_form(c_handler.get_coefs(0));
 				GUTIL_LOG("Exteror: exact=", exterior_exact, " approx=", approx, " err=", std::abs(approx-exterior_exact));
 			}
 
 			//Test the interior volume
 			{
-				BilinearForm_t b_form(d_handler, BKernel_t{}, w_int);
+				BilinearForm_t b_form(d_handler);
 				std::vector<Scalar_t> vec(d_handler.n_dofs(), 0);
 
 				b_form.mat_vec_multiply_accumulate(GV::as_span(vec), c_handler.get_coefs(0));
@@ -164,7 +161,7 @@ int main(int argc, char* argv[]) {
 		
 		mesh_handler.mesh.save_as_binary(filename);
 
-		Scalar_t eps = mesh_handler.min_element_size();
+		Scalar_t eps = 3.0 * mesh_handler.min_element_size();
 		
 		auto sd_lookup = GV::make_feature_lookup<Vert_t>(
 			[&](Vert_t vtx) {

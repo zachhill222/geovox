@@ -194,9 +194,11 @@ namespace GV {
 		static constexpr bool NEEDS_DOF_VALS   = K::NEEDS_DOF_VALS;
 		static constexpr bool NEEDS_DOF_GRAD   = K::NEEDS_DOF_GRAD;
 
-		T scale;
-		K kernel;
+		T scale{1};
+		K kernel{};
 
+		constexpr ScaledBilinearKernel() {}
+		constexpr ScaledBilinearKernel(T scl) : scale(scl) {}
 		constexpr ScaledBilinearKernel(T scl, K krnl) : scale(scl), kernel(std::move(krnl)) {}
  
 		template<typename QuadRule_t>
@@ -224,9 +226,10 @@ namespace GV {
 		static constexpr bool NEEDS_DOF_VALS   = K1::NEEDS_DOF_VALS   || K2::NEEDS_DOF_VALS;
 		static constexpr bool NEEDS_DOF_GRAD   = K1::NEEDS_DOF_GRAD   || K2::NEEDS_DOF_GRAD;
 
-		K1 left;
-		K2 right;
+		K1 left{};
+		K2 right{};
 
+		constexpr SumBilinearKernel() {}
 		constexpr SumBilinearKernel(K1 L, K2 R) : left(std::move(L)), right(std::move(R)) {}
 
 		template<typename QuadRule_t>

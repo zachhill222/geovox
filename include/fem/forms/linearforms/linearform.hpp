@@ -27,7 +27,7 @@ namespace GV {
 	/// quadrature points and weights on the current element as well as projections
 	/// of to relevant lower depths.
 	/////////////////////////////////////////////////////////////////////
-	template<int N, typename T, typename TestHandlerType, typename KernelType, typename KernelWeightType=NoKernelWeight>
+	template<int N, typename T, typename TestHandlerType, typename KernelType, typename KernelWeightType=IdentityKernelWeight>
 	struct LinearForm {
 
 
@@ -79,7 +79,7 @@ namespace GV {
 		/// Implementation of evaluation methods to scatter to a global vector
 		//////////////////////////////////////////////////////////////////
 		void evaluate_vector_colored(std::span<T> result) noexcept {
-			// compute result[i]=L(dof[i])
+			// compute result[i]+=L(dof[i])
 			static_assert(!Weight_t::NEEDS_SCALAR_VALS);
 			GUTIL_ASSERT(test_handler.is_current());
 			GUTIL_ASSERT(result.size() == test_handler.n_dofs());
@@ -108,7 +108,7 @@ namespace GV {
 						if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 						
 						test_cache.gather_qh();
-						if constexpr (!std::same_as<Weight_t,NoKernelWeight>) {
+						if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 							wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 						}
 
@@ -121,7 +121,7 @@ namespace GV {
 		}
 
 		void evaluate_vector(std::span<T> result) noexcept {
-			// compute result[i]=L(dof[i])
+			// compute result[i]+=L(dof[i])
 			static_assert(!Weight_t::NEEDS_SCALAR_VALS);
 			GUTIL_ASSERT(test_handler.is_current());
 			GUTIL_ASSERT(result.size() == test_handler.n_dofs());
@@ -143,7 +143,7 @@ namespace GV {
 					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 					
 					test_cache.gather_qh();
-					if constexpr (!std::same_as<Weight_t,NoKernelWeight>) {
+					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}
 					
@@ -182,13 +182,64 @@ namespace GV {
 					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 					
 					test_cache.gather_qh();
-					if constexpr (!std::same_as<Weight_t,NoKernelWeight>) {
+					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}
 					
 					for (size_t i=0; i<test_cache.size(); ++i) {
 						thread_result += coefs[test_cache.global_idx[i]] * k_eval(i,&wt);
 					}
+				}
+
+				GUTIL_OMP(atomic) result += thread_result;
+			}
+			return result;
+		}
+
+
+		//////////////////////////////////////////////////////////////////
+		/// For computing errors, it is convenient to just integrate the weight.
+		/// We assume that when using this function, any required scalar field is
+		/// from the test handler.
+		///
+		/// TODO: maybe move out of linearform.
+		//////////////////////////////////////////////////////////////////
+		T integrate_weight(std::span<const Scalar_t> coefs) const noexcept {
+			GUTIL_ASSERT(test_handler.is_current());
+			GUTIL_ASSERT(coefs.size() == test_handler.n_dofs());
+
+			Scalar_t result{0};
+
+			GUTIL_OMP(parallel)
+			{
+				Scalar_t 						thread_result{0};
+				QuadRule_t 						quad_rule(mesh);
+				ElementTestCache_t				test_cache(test_handler,quad_rule);	
+				ScalarValueCache<QuadRule_t>	field_cache;
+				WeightCache_t					wt;
+
+				OmpIteratorRange				range(mesh.element_begin(), mesh.element_end());
+
+				GUTIL_OMP(for)
+				for (auto it=range.begin; it!=range.end; ++it) {
+					const MeshElem_t el = *it;
+					
+					quad_rule.set_element(el,2);
+					test_cache.gather_qh();
+
+					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
+					if constexpr (Weight_t::NEEDS_SCALAR_VALS) {field_cache = test_cache.reconstruct_field(coefs);}
+
+					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
+						wt = weight.template build_weights<QuadRule_t>(&field_cache, quad_rule);
+					}
+					
+					Scalar_t el_result{0};
+					auto q_wt = quad_rule.quad_w();
+					for (size_t i=0; i<test_cache.size(); ++i) {
+						el_result += wt[i]*q_wt[i];
+					}
+					thread_result += el_result*quad_rule.jacobian_det[el.depth()];
 				}
 
 				GUTIL_OMP(atomic) result += thread_result;
