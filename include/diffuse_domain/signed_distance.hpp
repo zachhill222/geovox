@@ -173,21 +173,21 @@ namespace GV {
 		}
 
 		static void heaviside_tanh_grad(std::span<T> result, std::span<const T> sdf, std::span<const T> sdf_grad, const T eps) noexcept {
-		GUTIL_ASSERT(result.size()==3*sdf.size());
-		GUTIL_ASSERT(result.size()==sdf_grad.size());
-		GUTIL_ASSERT(eps>0);
+			GUTIL_ASSERT(result.size()==3*sdf.size());
+			GUTIL_ASSERT(result.size()==sdf_grad.size());
+			GUTIL_ASSERT(eps>0);
 
-		const size_t N = sdf.size();
-		const T scale = T{3}/eps;
-		for (size_t i=0; i<N; ++i) {
-			const T phi = T{0.5} * (T{1} - fast_tanh(scale * sdf[i]));
-			const T coef = -(T{6}/eps) * phi * (T{1} - phi);
+			const size_t N = sdf.size();
+			const T scale = T{3}/eps;
+			for (size_t i=0; i<N; ++i) {
+				const T phi = T{0.5} * (T{1} - fast_tanh(scale * sdf[i]));
+				const T coef = -(T{6}/eps) * phi * (T{1} - phi);
 
-			result[i]     = coef * sdf_grad[i];
-			result[i+N]   = coef * sdf_grad[i+N];
-			result[i+2*N] = coef * sdf_grad[i+2*N];
+				result[i]     = coef * sdf_grad[i];
+				result[i+N]   = coef * sdf_grad[i+N];
+				result[i+2*N] = coef * sdf_grad[i+2*N];
+			}
 		}
-	}
 	};
 }
 

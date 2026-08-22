@@ -236,7 +236,7 @@ namespace GV {
 					
 					Scalar_t el_result{0};
 					auto q_wt = quad_rule.quad_w();
-					for (size_t i=0; i<test_cache.size(); ++i) {
+					for (size_t i=0; i<wt.size(); ++i) {
 						el_result += wt[i]*q_wt[i];
 					}
 					thread_result += el_result*quad_rule.jacobian_det[el.depth()];

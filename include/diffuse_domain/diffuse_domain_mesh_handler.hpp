@@ -84,7 +84,7 @@ namespace GV {
 			for (int dd=(int)mesh.max_depth; dd>=0; --dd) {
 				if (mesh.get_depth(dd).size()>0) {
 					Scalar_t scale = gutil::ldexp(Scalar_t{1},-dd);
-					return scale * gutil::norm2(mesh.diag);
+					return scale * gutil::norminfty(mesh.diag);
 				}
 			}
 

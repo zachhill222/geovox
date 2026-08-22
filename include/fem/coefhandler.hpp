@@ -74,8 +74,14 @@ namespace GV {
 		/// The mesh/dofs must be in a conformal state. The 'scalar function'
 		/// is actually a linear operator on the shape functions (dofs).
 		/// In lagrange dofs, this is the point evaluation of a function
-		/// at the corresponding vertex
+		/// at the corresponding vertex. Alternatively, set them all to 0.
 		///////////////////////////////////////////////////////////////////
+		void init_coefs(uint8_t i) noexcept {
+			GUTIL_ASSERT(dofhandler.is_current());
+			snapshot_dofs();
+			coefs[i].assign(dofs.size(), Scalar_t{0});
+		}
+
 		template<typename DofEval>
 		void init_coefs(uint8_t i, DofEval&& eval) noexcept {
 			GUTIL_ASSERT(dofhandler.is_current());
