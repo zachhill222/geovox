@@ -29,23 +29,23 @@
 /// A few compile-time settings
 /////////////////////////////////////////////////////////////
 inline constexpr int N_QUAD_POINTS_PER_AXIS = 3;
-
+inline constexpr uint8_t PERIODIC_BC = 0b111;
 
 /////////////////////////////////////////////////////////////
 /// A few aliases
 /////////////////////////////////////////////////////////////
-using Scalar_t       = float;
+using Scalar_t       = double;
 using Point_t        = gutil::Point<3,Scalar_t>;
 using Box_t          = gutil::Box<3,Scalar_t>;
 using Sphere_t       = gutil::Sphere<3,Scalar_t>;
 
-using Assembly_t     = GV::SignedDistanceSpheres<Scalar_t,GV_TEST_DOMAIN_PERIOD,true>;
+using Assembly_t     = GV::SignedDistanceSpheres<Scalar_t,PERIODIC_BC,true>;
 using MeshHandler_t  = GV::DiffuseDomainMeshHandler<Assembly_t>;
 using Mesh_t         = typename MeshHandler_t::Mesh_t;
 using Elem_t         = typename MeshHandler_t::Mesh_t::Elem_t;
 using Vert_t         = typename MeshHandler_t::Mesh_t::Vert_t;
 
-using DOF_t          = GV::Keys::DOFS::VoxelQ1<GV_TEST_DOMAIN_PERIOD>;
+using DOF_t          = GV::Keys::DOFS::VoxelQ1<PERIODIC_BC>;
 using DofHandler_t   = GV::DofHandler<Mesh_t,DOF_t>;
 using CoefHandler_t  = GV::CoefHandler<DofHandler_t,Scalar_t,1>;
 
@@ -84,7 +84,7 @@ TestConfig parse_args(int argc, char* argv[]) {
 	TestConfig cfg;
 	std::vector<std::string> args(argv, argv+argc);
 	for (size_t i=0; i<args.size(); ++i) {
-		if      (args[i] == "-SAVE") 	{ cfg.test_name     = args[++i]; }
+		if      (args[i] == "-NAME") 	{ cfg.test_name     = args[++i]; }
 		else if (args[i] == "-ID")   	{ cfg.initial_depth = atoi(args[++i].c_str()); }
 		else if (args[i] == "-NR")   	{ cfg.n_refine      = atoi(args[++i].c_str()); }
 		else if (args[i] == "-GTOL") 	{ cfg.g_tol         = atof(args[++i].c_str()); }
@@ -127,9 +127,11 @@ using ErrorForm_t     = GV::LinearForm<N_QUAD_POINTS_PER_AXIS+1, Scalar_t, DofHa
 std::string compile_opts() {
 	std::string str = "";
 	str += "N_QUAD_POINTS_PER_AXIS= " + std::to_string(N_QUAD_POINTS_PER_AXIS) + "\n";
+	str += "PERIODIC_BC= " + std::to_string(PERIODIC_BC) + "\n";
 	str += "RADIUS= " + std::to_string(RADIUS) + "\n";
 	str += "CENTER= " + gutil::to_string(CENTER) + "\n";
-	std += "DOMAIN= " + gutil::to_string(DOMAIN) + "\n";
+	str += "DOMAIN= " + gutil::to_string(DOMAIN) + "\n";
+	return str;
 }
 
 
@@ -168,18 +170,17 @@ void solve_with_spmat(MeshHandler_t& m_handler, DofHandler_t& d_handler, CoefHan
 	using EigenSolver    = Eigen::ConjugateGradient<EigenSpMat, Eigen::Lower|Eigen::Upper, Preconditioner>;
 
 	GUTIL_TIMER("Solving system by building the sparse matrix");
-	GUTIL_LOG("n_dofs= ", d_handler.n_dofs());
-	GUTIL_LOG("n_elements= ", m_handler.mesh.n_elements());
+	std::cout << m_handler.mesh << "\n" << d_handler << "\n";
 
 	const size_t n = d_handler.n_dofs();
 	std::vector<Triplet> triplets;
-	EigenSpMat A(n, n);
-	EigenVec   b = EigenVec::Zero(n);
+	EigenSpMat 			 A(n, n);
+	EigenVec   			 b = EigenVec::Zero(n);
 	Eigen::Map<EigenVec> x(c_handler.get_coefs(0).data(), c_handler.get_coefs(0).size());
 
 	//update epsilon (a static variable) in the diffuse domain weights
 	const Scalar_t eps = cfg.eps_scale * m_handler.min_element_size();
-	GV::AssemblyDiffuseDomain<Assembly_t>::SetAssembly(mesh_handler.assembly);
+	GV::AssemblyDiffuseDomain<Assembly_t>::SetAssembly(m_handler.assembly);
 	GV::AssemblyDiffuseDomain<Assembly_t>::SetEps(eps);
 
 	InteriorWeight_t interior_wt{};	//phi
@@ -187,9 +188,9 @@ void solve_with_spmat(MeshHandler_t& m_handler, DofHandler_t& d_handler, CoefHan
 
 	{
 		GUTIL_TIMER("Building triplets");
-		GV::BilinearForm<N_QUAD_POINTS_PER_AXIS,Scalar_t> poisson_form(d_handler, GV::H1BilinearKernel_SW{}, interior_wt);
+		auto poisson_form = GV::MakeBilinearForm<N_QUAD_POINTS_PER_AXIS,Scalar_t>(d_handler, GV::H1BilinearKernel_SW{}, interior_wt);
 
-		GV::BilinearForm<N_QUAD_POINTS_PER_AXIS,Scalar_t> penalty_form(d_handler, GV::L2BilinearKernel_SW{}, penalty_wt);
+		auto penalty_form = GV::MakeBilinearForm<N_QUAD_POINTS_PER_AXIS,Scalar_t>(d_handler, GV::L2BilinearKernel_SW{}, penalty_wt);
 
 		//each build_triplets de-duplicates it's own list
 		//let eigen sum the entries from both parts of the form
@@ -198,18 +199,18 @@ void solve_with_spmat(MeshHandler_t& m_handler, DofHandler_t& d_handler, CoefHan
 
 	}
 	{
-		GUTIL_TIMER("Building SpMatrix")
-		A.setFromTriplets(triplets);
+		GUTIL_TIMER("Building SpMatrix");
+		A.setFromTriplets(triplets.begin(), triplets.end());
 		triplets.clear();
 		triplets.shrink_to_fit();
 	}
 	{
-		GUTIL_TIMER("Building RHS")
+		GUTIL_TIMER("Building RHS");
 		GV::ModifiedFunctionKernelWeight<Assembly_t, f_source> source_wt{};
 		GV::ModifiedFunctionKernelWeight<Assembly_t, g_boundary> boundary_wt{};
 
-		GV::LinearForm<N_QUAD_POINTS_PER_AXIS,Scalar_t> source_form(d_handler, L2LinearKernel_W{}, interior_wt*source_wt);
-		GV::LinearForm<N_QUAD_POINTS_PER_AXIS,Scalar_t> boundary_form(d_handler, L2LinearKernel_W{}, penalty_wt*boundary_wt);
+		auto source_form = GV::MakeLinearForm<N_QUAD_POINTS_PER_AXIS,Scalar_t>(d_handler, GV::L2LinearKernel_W{}, interior_wt*source_wt);
+		auto boundary_form = GV::MakeLinearForm<N_QUAD_POINTS_PER_AXIS,Scalar_t>(d_handler, GV::L2LinearKernel_W{}, penalty_wt*boundary_wt);
 		
 		//each call to evaluate_vector accumulates into the provided span
 		source_form.evaluate_vector(GV::as_span(b));
@@ -249,13 +250,13 @@ void log_solution(const MeshHandler_t& m_handler, const DofHandler_t& d_handler,
 /////////////////////////////////////////////////////////////
 void init(MeshHandler_t& m_handler, DofHandler_t& d_handler, CoefHandler_t& c_handler) {
 	//add the sphere to the assembly
-	m_handler.assembly.push_back(Sphere_t{RADIUS,CENTER});
+	m_handler.assembly.push_back(Sphere_t{CENTER,RADIUS});
 
 	//set the mesh to a uniform depth
 	m_handler.mesh.set_depth(cfg.initial_depth);
 
 	//add dofs at the conformal mesh locations
-	d_handler.init();
+	d_handler.init_dofs();
 
 	//assign initial coefficients (all zeros)
 	c_handler.init_coefs(0);
@@ -265,17 +266,18 @@ void init(MeshHandler_t& m_handler, DofHandler_t& d_handler, CoefHandler_t& c_ha
 /////////////////////////////////////////////////////////////
 /// Save the solution
 /////////////////////////////////////////////////////////////
-void save(int number, MeshHandler_t m_handler, const DofHandler_t& d_handler, const CoefHandler_t& c_handler) {
+void save(int number, MeshHandler_t& m_handler, const DofHandler_t& d_handler, const CoefHandler_t& c_handler) {
 	if (cfg.test_name.empty()) {return;}
 
 	std::string filename = cfg.test_name + "_" + std::to_string(number) + ".vtk";
-	GUTIL_TIMER("Saving solution as ", filename)
+	GUTIL_TIMER("Saving solution as ", filename);
 
 	m_handler.mesh.collect_vertices();
 	const Assembly_t& assembly = m_handler.assembly;
 	const Mesh_t& 	  mesh = m_handler.mesh;
 
 	mesh.save_as_binary(filename);
+	Scalar_t eps = GV::AssemblyDiffuseDomain<Assembly_t>::eps;
 
 	auto sd_lookup = GV::make_feature_lookup<Vert_t>(
 		[&](Vert_t vtx) { return assembly.signed_distance(mesh.geo_coord(vtx)); }, "signed_distance");
@@ -296,9 +298,37 @@ void save(int number, MeshHandler_t m_handler, const DofHandler_t& d_handler, co
 /////////////////////////////////////////////////////////////
 int main(int argc, char* argv[]) {
 	GUTIL_TIMER("Convergence test for diffuse poisson on a sphere");
+
+	/// Initialize
 	cfg = parse_args(argc, argv);
+	MeshHandler_t m_handler(DOMAIN, cfg.initial_depth+cfg.n_refine);
+	DofHandler_t  d_handler(m_handler.mesh);
+	CoefHandler_t c_handler(d_handler);
+	init(m_handler, d_handler, c_handler);
 
+	/// Initial Solve
+	solve_with_spmat(m_handler, d_handler, c_handler);
+	save(0, m_handler, d_handler, c_handler);
+	log_solution(m_handler, d_handler, c_handler);
 
+	/// Refine And Solve
+	for (int i=0; i<cfg.n_refine; ++i) {
+		GUTIL_LOG("Refinement ", i+1, "/", cfg.n_refine);
+		geometry_refine(m_handler, d_handler, c_handler);
+		solve_with_spmat(m_handler, d_handler, c_handler);
+		save(i+1, m_handler, d_handler, c_handler);
+		log_solution(m_handler, d_handler, c_handler);
+	}
 
+	/// Print Summary
+	std::cout << "\nSettings Summary\n" << compile_opts() << cfg.to_string() << "\n";
+
+	std::cout << "\nResult Summary:\n";
+	std::cout << "n_dofs:"; for (auto n : n_dofs) {std::cout << "\t" << n;}
+	std::cout << "\n";
+	std::cout << "mesh_size:"; for (auto n : mesh_size) {std::cout << "\t" << n;}
+	std::cout << "\n";
+	std::cout << "l2_err:"; for (auto n : l2_err) {std::cout << "\t" << n;}
+	std::cout << "\n";
 }
 

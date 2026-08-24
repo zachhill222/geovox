@@ -1,7 +1,4 @@
 #get source/target names of all files in the specified directory
-ifndef FILE
-$(error FILE is not set. Usage: make FILE=path/to/source.cpp)
-endif
 TARGET  = $(FILE:.cpp=)
 
 
@@ -79,6 +76,7 @@ all: $(TARGET)
 $(TARGET): $(FILE) FORCE
 	$(COMPILE) $< -o $@
 FORCE:
+
 .PHONY: clean
 clean:
 	rm -f  *.out *.vtk massif.* ./outfiles/*

@@ -1,0 +1,305 @@
+[t=0.0000s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 300]	START Convergence test for diffuse poisson on a sphere
+[t=0.0528s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	START Solving system by building the sparse matrix
+UnstructuredVoxelMesh with maximum depth of 9
+       153391689 masks tracked (146.29 MB / 146.29 MB used/reserved
+               1 active keys (8 B / 8 B used/reserved
+               0 tracked vertices (0 B / 0 B used/reserved
+               1 active elements (keys)
+	depth 0 : 1
+
+DofHandler: VoxelQ1<7>
+       154443343 masks tracked (147.29 MB / 147.29 MB used/reserved
+               1 active keys (8 B / 8 B used/reserved
+               1 active dofs
+
+[t=0.0529s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 190]	START Building triplets
+[t=0.0534s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 190]	END   Building triplets : 0.000577s
+[t=0.0534s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 202]	START Building SpMatrix
+[t=0.0534s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 202]	END   Building SpMatrix : 0.000008s
+[t=0.0534s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 208]	START Building RHS
+[t=0.0535s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 208]	END   Building RHS : 0.000057s
+[t=0.0535s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 220]	START Solving system
+[t=0.0536s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 225]	CG iterations: 0
+[t=0.0536s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 220]	END   Solving system : 0.000053s
+[t=0.0536s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	END   Solving system by building the sparse matrix : 0.000750s
+[t=0.0536s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 273]	START Saving solution as poisson_r03_0.vtk
+[t=0.0539s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 273]	END   Saving solution as poisson_r03_0.vtk : 0.000353s
+[t=0.0540s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 241]	L2 error: 0.000000 n_dofs= 1 min_h= 5.196152
+[t=0.0540s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 316]	Refinement 1/9
+[t=0.0681s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	START Solving system by building the sparse matrix
+UnstructuredVoxelMesh with maximum depth of 9
+       153391689 masks tracked (146.29 MB / 146.29 MB used/reserved
+               8 active keys (64 B / 64 B used/reserved
+               8 tracked vertices (64 B / 64 B used/reserved
+               8 active elements (keys)
+	depth 1 : 8
+
+DofHandler: VoxelQ1<7>
+       154443343 masks tracked (147.29 MB / 147.29 MB used/reserved
+               8 active keys (64 B / 64 B used/reserved
+               8 active dofs
+
+[t=0.0681s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 190]	START Building triplets
+[t=0.0683s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 190]	END   Building triplets : 0.000240s
+[t=0.0683s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 202]	START Building SpMatrix
+[t=0.0683s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 202]	END   Building SpMatrix : 0.000003s
+[t=0.0683s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 208]	START Building RHS
+[t=0.0684s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 208]	END   Building RHS : 0.000059s
+[t=0.0684s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 220]	START Solving system
+[t=0.0685s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 225]	CG iterations: 4
+[t=0.0685s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 220]	END   Solving system : 0.000111s
+[t=0.0685s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	END   Solving system by building the sparse matrix : 0.000441s
+[t=0.0685s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 273]	START Saving solution as poisson_r03_1.vtk
+[t=0.0689s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 273]	END   Saving solution as poisson_r03_1.vtk : 0.000402s
+[t=0.0689s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 241]	L2 error: 0.000000 n_dofs= 8 min_h= 2.598076
+[t=0.0689s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 316]	Refinement 2/9
+[t=0.0815s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	START Solving system by building the sparse matrix
+UnstructuredVoxelMesh with maximum depth of 9
+       153391689 masks tracked (146.29 MB / 146.29 MB used/reserved
+              64 active keys (512 B / 512 B used/reserved
+              27 tracked vertices (216 B / 216 B used/reserved
+              64 active elements (keys)
+	depth 2 : 64
+
+DofHandler: VoxelQ1<7>
+       154443343 masks tracked (147.29 MB / 147.29 MB used/reserved
+              64 active keys (512 B / 512 B used/reserved
+              64 active dofs
+
+[t=0.0815s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 190]	START Building triplets
+[t=0.0823s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 190]	END   Building triplets : 0.000778s
+[t=0.0823s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 202]	START Building SpMatrix
+[t=0.0823s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 202]	END   Building SpMatrix : 0.000010s
+[t=0.0823s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 208]	START Building RHS
+[t=0.0825s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 208]	END   Building RHS : 0.000177s
+[t=0.0825s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 220]	START Solving system
+[t=0.0827s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 225]	CG iterations: 10
+[t=0.0827s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 220]	END   Solving system : 0.000208s
+[t=0.0827s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	END   Solving system by building the sparse matrix : 0.001209s
+[t=0.0827s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 273]	START Saving solution as poisson_r03_2.vtk
+[t=0.0837s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 273]	END   Saving solution as poisson_r03_2.vtk : 0.000987s
+[t=0.0837s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 241]	L2 error: 1.412234 n_dofs= 64 min_h= 1.299038
+[t=0.0837s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 316]	Refinement 3/9
+[t=0.0957s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	START Solving system by building the sparse matrix
+UnstructuredVoxelMesh with maximum depth of 9
+       153391689 masks tracked (146.29 MB / 146.29 MB used/reserved
+             512 active keys (4.00 KB / 4.00 KB used/reserved
+             125 tracked vertices (1000 B / 3.27 KB used/reserved
+             512 active elements (keys)
+	depth 3 : 512
+
+DofHandler: VoxelQ1<7>
+       154443343 masks tracked (147.29 MB / 147.29 MB used/reserved
+             512 active keys (4.00 KB / 4.00 KB used/reserved
+             512 active dofs
+
+[t=0.0957s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 190]	START Building triplets
+[t=0.1015s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 190]	END   Building triplets : 0.005773s
+[t=0.1015s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 202]	START Building SpMatrix
+[t=0.1016s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 202]	END   Building SpMatrix : 0.000157s
+[t=0.1016s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 208]	START Building RHS
+[t=0.1030s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 208]	END   Building RHS : 0.001376s
+[t=0.1030s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 220]	START Solving system
+[t=0.1039s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 225]	CG iterations: 38
+[t=0.1039s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 220]	END   Solving system : 0.000882s
+[t=0.1039s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	END   Solving system by building the sparse matrix : 0.008231s
+[t=0.1039s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 273]	START Saving solution as poisson_r03_3.vtk
+[t=0.1081s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 273]	END   Saving solution as poisson_r03_3.vtk : 0.004194s
+[t=0.1082s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 241]	L2 error: 0.600379 n_dofs= 512 min_h= 0.649519
+[t=0.1082s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 316]	Refinement 4/9
+[t=0.1302s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	START Solving system by building the sparse matrix
+UnstructuredVoxelMesh with maximum depth of 9
+       153391689 masks tracked (146.29 MB / 146.29 MB used/reserved
+            4096 active keys (32.00 KB / 32.00 KB used/reserved
+             729 tracked vertices (5.70 KB / 19.41 KB used/reserved
+            4096 active elements (keys)
+	depth 4 : 4096
+
+DofHandler: VoxelQ1<7>
+       154443343 masks tracked (147.29 MB / 147.29 MB used/reserved
+            4096 active keys (32.00 KB / 32.00 KB used/reserved
+            4096 active dofs
+
+[t=0.1302s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 190]	START Building triplets
+[t=0.1706s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 190]	END   Building triplets : 0.040339s
+[t=0.1706s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 202]	START Building SpMatrix
+[t=0.1722s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 202]	END   Building SpMatrix : 0.001615s
+[t=0.1722s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 208]	START Building RHS
+[t=0.1818s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 208]	END   Building RHS : 0.009572s
+[t=0.1818s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 220]	START Solving system
+[t=0.1869s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 225]	CG iterations: 71
+[t=0.1870s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 220]	END   Solving system : 0.005161s
+[t=0.1870s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	END   Solving system by building the sparse matrix : 0.056754s
+[t=0.1870s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 273]	START Saving solution as poisson_r03_4.vtk
+[t=0.2137s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 273]	END   Saving solution as poisson_r03_4.vtk : 0.026753s
+[t=0.2144s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 241]	L2 error: 0.136264 n_dofs= 4096 min_h= 0.324760
+[t=0.2144s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 316]	Refinement 5/9
+[t=0.2935s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	START Solving system by building the sparse matrix
+UnstructuredVoxelMesh with maximum depth of 9
+       153391689 masks tracked (146.29 MB / 146.29 MB used/reserved
+           32544 active keys (254.25 KB / 254.25 KB used/reserved
+            4913 tracked vertices (38.38 KB / 63.03 KB used/reserved
+           32544 active elements (keys)
+	depth 4 : 32
+	depth 5 : 32512
+
+DofHandler: VoxelQ1<7>
+       154443343 masks tracked (147.29 MB / 147.29 MB used/reserved
+           32280 active keys (252.19 KB / 252.19 KB used/reserved
+           32280 active dofs
+
+[t=0.2935s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 190]	START Building triplets
+[t=0.6130s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 190]	END   Building triplets : 0.319428s
+[t=0.6130s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 202]	START Building SpMatrix
+[t=0.6272s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 202]	END   Building SpMatrix : 0.014220s
+[t=0.6272s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 208]	START Building RHS
+[t=0.6995s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 208]	END   Building RHS : 0.072303s
+[t=0.6995s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 220]	START Solving system
+[t=0.7179s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 225]	CG iterations: 107
+[t=0.7179s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 220]	END   Solving system : 0.018345s
+[t=0.7179s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	END   Solving system by building the sparse matrix : 0.424401s
+[t=0.7179s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 273]	START Saving solution as poisson_r03_5.vtk
+[t=0.9110s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 273]	END   Saving solution as poisson_r03_5.vtk : 0.193129s
+[t=0.9150s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 241]	L2 error: 0.033738 n_dofs= 32280 min_h= 0.162380
+[t=0.9150s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 316]	Refinement 6/9
+[t=1.2660s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	START Solving system by building the sparse matrix
+UnstructuredVoxelMesh with maximum depth of 9
+       153391689 masks tracked (146.29 MB / 146.29 MB used/reserved
+          180664 active keys (1.38 MB / 1.38 MB used/reserved
+           35713 tracked vertices (279.01 KB / 419.61 KB used/reserved
+          180664 active elements (keys)
+	depth 4 : 32
+	depth 5 : 11352
+	depth 6 : 169280
+
+DofHandler: VoxelQ1<7>
+       154443343 masks tracked (147.29 MB / 147.29 MB used/reserved
+          172504 active keys (1.32 MB / 1.32 MB used/reserved
+          172504 active dofs
+
+[t=1.2662s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 190]	START Building triplets
+[t=3.0764s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 190]	END   Building triplets : 1.810204s
+[t=3.0764s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 202]	START Building SpMatrix
+[t=3.1661s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 202]	END   Building SpMatrix : 0.089700s
+[t=3.1661s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 208]	START Building RHS
+[t=3.5496s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 208]	END   Building RHS : 0.383477s
+[t=3.5496s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 220]	START Solving system
+[t=3.7442s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 225]	CG iterations: 137
+[t=3.7442s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 220]	END   Solving system : 0.194597s
+[t=3.7444s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	END   Solving system by building the sparse matrix : 2.478379s
+[t=3.7444s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 273]	START Saving solution as poisson_r03_6.vtk
+[t=4.7376s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 273]	END   Saving solution as poisson_r03_6.vtk : 0.993204s
+[t=4.7558s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 241]	L2 error: 0.017188 n_dofs= 172504 min_h= 0.081190
+[t=4.7558s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 316]	Refinement 7/9
+[t=6.0551s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	START Solving system by building the sparse matrix
+UnstructuredVoxelMesh with maximum depth of 9
+       153391689 masks tracked (146.29 MB / 146.29 MB used/reserved
+          732824 active keys (5.59 MB / 5.59 MB used/reserved
+          192365 tracked vertices (1.47 MB / 2.73 MB used/reserved
+          732824 active elements (keys)
+	depth 4 : 32
+	depth 5 : 11352
+	depth 6 : 90400
+	depth 7 : 631040
+
+DofHandler: VoxelQ1<7>
+       154443343 masks tracked (147.29 MB / 147.29 MB used/reserved
+          696734 active keys (5.32 MB / 5.32 MB used/reserved
+          696734 active dofs
+
+[t=6.0558s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 190]	START Building triplets
+[t=13.4025s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 190]	END   Building triplets : 7.346720s
+[t=13.4025s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 202]	START Building SpMatrix
+[t=13.7794s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 202]	END   Building SpMatrix : 0.376840s
+[t=13.7794s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 208]	START Building RHS
+[t=15.2471s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 208]	END   Building RHS : 1.467734s
+[t=15.2471s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 220]	START Solving system
+[t=16.6230s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 225]	CG iterations: 198
+[t=16.6230s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 220]	END   Solving system : 1.375869s
+[t=16.6237s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	END   Solving system by building the sparse matrix : 10.568561s
+[t=16.6237s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 273]	START Saving solution as poisson_r03_7.vtk
+[t=20.9263s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 273]	END   Saving solution as poisson_r03_7.vtk : 4.302584s
+[t=21.0031s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 241]	L2 error: 0.006101 n_dofs= 696734 min_h= 0.040595
+[t=21.0032s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 316]	Refinement 8/9
+[t=26.3534s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	START Solving system by building the sparse matrix
+UnstructuredVoxelMesh with maximum depth of 9
+       153391689 masks tracked (146.29 MB / 146.29 MB used/reserved
+         2898288 active keys (22.11 MB / 36.18 MB used/reserved
+          772611 tracked vertices (5.89 MB / 10.50 MB used/reserved
+         2898288 active elements (keys)
+	depth 4 : 32
+	depth 5 : 11352
+	depth 6 : 90400
+	depth 7 : 321688
+	depth 8 : 2474816
+
+DofHandler: VoxelQ1<7>
+       154443343 masks tracked (147.29 MB / 147.29 MB used/reserved
+         2757012 active keys (21.03 MB / 38.38 MB used/reserved
+         2757012 active dofs
+
+[t=26.3546s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 190]	START Building triplets
+[t=58.6825s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 190]	END   Building triplets : 32.327875s
+[t=58.6825s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 202]	START Building SpMatrix
+[t=60.2111s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 202]	END   Building SpMatrix : 1.528597s
+[t=60.2111s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 208]	START Building RHS
+[t=65.9215s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 208]	END   Building RHS : 5.710460s
+[t=65.9216s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 220]	START Solving system
+[t=73.5778s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 225]	CG iterations: 286
+[t=73.5778s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 220]	END   Solving system : 7.656261s
+[t=73.5796s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	END   Solving system by building the sparse matrix : 47.226211s
+[t=73.5796s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 273]	START Saving solution as poisson_r03_8.vtk
+[t=89.0749s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 273]	END   Saving solution as poisson_r03_8.vtk : 15.495303s
+[t=89.3974s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 241]	L2 error: 0.007094 n_dofs= 2757012 min_h= 0.020297
+[t=89.3974s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 316]	Refinement 9/9
+[t=110.6404s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	START Solving system by building the sparse matrix
+UnstructuredVoxelMesh with maximum depth of 9
+       153391689 masks tracked (146.29 MB / 146.29 MB used/reserved
+        11491600 active keys (87.67 MB / 133.21 MB used/reserved
+         3043417 tracked vertices (23.22 MB / 39.92 MB used/reserved
+        11491600 active elements (keys)
+	depth 4 : 32
+	depth 5 : 11352
+	depth 6 : 90400
+	depth 7 : 321688
+	depth 8 : 1247200
+	depth 9 : 9820928
+
+DofHandler: VoxelQ1<7>
+       154443343 masks tracked (147.29 MB / 147.29 MB used/reserved
+        10936366 active keys (83.44 MB / 129.29 MB used/reserved
+        10936366 active dofs
+
+[t=110.6523s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 190]	START Building triplets
+[t=252.2807s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 190]	END   Building triplets : 141.628454s
+[t=252.2808s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 202]	START Building SpMatrix
+[t=258.4978s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 202]	END   Building SpMatrix : 6.217025s
+[t=258.4978s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 208]	START Building RHS
+[t=281.4368s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 208]	END   Building RHS : 22.938979s
+[t=281.4368s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 220]	START Solving system
+[t=321.7789s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 225]	CG iterations: 364
+[t=321.7789s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 220]	END   Solving system : 40.342080s
+[t=321.7873s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	END   Solving system by building the sparse matrix : 211.146859s
+[t=321.7873s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 273]	START Saving solution as poisson_r03_9.vtk
+[t=382.9486s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 273]	END   Saving solution as poisson_r03_9.vtk : 61.161294s
+[t=384.0425s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 241]	L2 error: 0.010164 n_dofs= 10936366 min_h= 0.010149
+
+Settings Summary
+N_QUAD_POINTS_PER_AXIS= 3
+PERIODIC_BC= 7
+RADIUS= 1.000000
+CENTER= 0 0 0
+DOMAIN= Box{low= {-1.5 -1.5 -1.5}, high={1.5 1.5 1.5}}
+test_name: poisson_r03
+initial_depth: 0
+eps_scale: 1.000000
+n_refine: 9
+g_tol: 3.000000
+ref_method: 1
+
+
+Result Summary:
+n_dofs:	1	8	64	512	4096	32280	172504	696734	2757012	10936366
+mesh_size:	5.1962	2.5981	1.2990	0.6495	0.3248	0.1624	0.0812	0.0406	0.0203	0.0101
+l2_err:	0.0000	0.0000	1.4122	0.6004	0.1363	0.0337	0.0172	0.0061	0.0071	0.0102
+[t=384.0505s | thread=140390798392384, omp_thread=0] [diffuse_poisson_convergence.cpp : 300]	END   Convergence test for diffuse poisson on a sphere : 384.050453s

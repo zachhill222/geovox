@@ -1,0 +1,177 @@
+[t=0.0000s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 301]	START Convergence test for diffuse poisson on a sphere
+[t=0.3374s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	START Solving system by building the sparse matrix
+[t=0.3374s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 173]	n_dofs= 1
+[t=0.3374s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 174]	n_elements= 1
+[t=0.3374s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 191]	START Building triplets
+[t=0.3405s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 191]	END   Building triplets : 0.003049s
+[t=0.3405s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 203]	START Building SpMatrix
+[t=0.3405s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 203]	END   Building SpMatrix : 0.000009s
+[t=0.3406s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 209]	START Building RHS
+[t=0.3412s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 209]	END   Building RHS : 0.000637s
+[t=0.3412s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 221]	START Solving system
+[t=0.3423s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 226]	CG iterations: 0
+[t=0.3423s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 221]	END   Solving system : 0.001068s
+[t=0.3423s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	END   Solving system by building the sparse matrix : 0.004869s
+[t=0.3423s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 274]	START Saving solution as poisson_0.vtk
+[t=0.3429s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 274]	END   Saving solution as poisson_0.vtk : 0.000656s
+[t=0.3430s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 242]	L2 error: 0.000000 n_dofs= 1 min_h= 5.196152
+[t=0.3430s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 317]	Refinement 1/10
+[t=0.4172s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	START Solving system by building the sparse matrix
+[t=0.4172s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 173]	n_dofs= 8
+[t=0.4172s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 174]	n_elements= 8
+[t=0.4172s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 191]	START Building triplets
+[t=0.4203s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 191]	END   Building triplets : 0.003139s
+[t=0.4203s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 203]	START Building SpMatrix
+[t=0.4203s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 203]	END   Building SpMatrix : 0.000005s
+[t=0.4203s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 209]	START Building RHS
+[t=0.4207s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 209]	END   Building RHS : 0.000370s
+[t=0.4207s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 221]	START Solving system
+[t=0.4214s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 226]	CG iterations: 3
+[t=0.4214s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 221]	END   Solving system : 0.000665s
+[t=0.4214s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	END   Solving system by building the sparse matrix : 0.004214s
+[t=0.4214s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 274]	START Saving solution as poisson_1.vtk
+[t=0.4218s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 274]	END   Saving solution as poisson_1.vtk : 0.000423s
+[t=0.4218s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 242]	L2 error: 0.000000 n_dofs= 8 min_h= 2.598076
+[t=0.4219s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 317]	Refinement 2/10
+[t=0.5068s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	START Solving system by building the sparse matrix
+[t=0.5069s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 173]	n_dofs= 64
+[t=0.5069s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 174]	n_elements= 64
+[t=0.5069s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 191]	START Building triplets
+[t=0.5111s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 191]	END   Building triplets : 0.004229s
+[t=0.5111s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 203]	START Building SpMatrix
+[t=0.5111s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 203]	END   Building SpMatrix : 0.000011s
+[t=0.5111s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 209]	START Building RHS
+[t=0.5121s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 209]	END   Building RHS : 0.001020s
+[t=0.5121s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 221]	START Solving system
+[t=0.5123s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 226]	CG iterations: 10
+[t=0.5124s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 221]	END   Solving system : 0.000217s
+[t=0.5124s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	END   Solving system by building the sparse matrix : 0.005512s
+[t=0.5124s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 274]	START Saving solution as poisson_2.vtk
+[t=0.5134s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 274]	END   Saving solution as poisson_2.vtk : 0.000999s
+[t=0.5135s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 242]	L2 error: 1.412235 n_dofs= 64 min_h= 1.299038
+[t=0.5135s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 317]	Refinement 3/10
+[t=0.6087s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	START Solving system by building the sparse matrix
+[t=0.6088s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 173]	n_dofs= 512
+[t=0.6088s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 174]	n_elements= 512
+[t=0.6088s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 191]	START Building triplets
+[t=0.6157s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 191]	END   Building triplets : 0.006975s
+[t=0.6157s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 203]	START Building SpMatrix
+[t=0.6159s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 203]	END   Building SpMatrix : 0.000110s
+[t=0.6159s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 209]	START Building RHS
+[t=0.6177s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 209]	END   Building RHS : 0.001836s
+[t=0.6177s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 221]	START Solving system
+[t=0.6208s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 226]	CG iterations: 24
+[t=0.6208s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 221]	END   Solving system : 0.003066s
+[t=0.6208s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	END   Solving system by building the sparse matrix : 0.012034s
+[t=0.6208s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 274]	START Saving solution as poisson_3.vtk
+[t=0.6251s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 274]	END   Saving solution as poisson_3.vtk : 0.004284s
+[t=0.6252s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 242]	L2 error: 0.600379 n_dofs= 512 min_h= 0.649519
+[t=0.6252s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 317]	Refinement 4/10
+[t=0.7319s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	START Solving system by building the sparse matrix
+[t=0.7319s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 173]	n_dofs= 4096
+[t=0.7319s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 174]	n_elements= 4096
+[t=0.7319s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 191]	START Building triplets
+[t=0.7693s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 191]	END   Building triplets : 0.037442s
+[t=0.7693s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 203]	START Building SpMatrix
+[t=0.7704s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 203]	END   Building SpMatrix : 0.001100s
+[t=0.7704s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 209]	START Building RHS
+[t=0.7801s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 209]	END   Building RHS : 0.009618s
+[t=0.7801s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 221]	START Solving system
+[t=0.7855s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 226]	CG iterations: 34
+[t=0.7855s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 221]	END   Solving system : 0.005417s
+[t=0.7855s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	END   Solving system by building the sparse matrix : 0.053623s
+[t=0.7855s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 274]	START Saving solution as poisson_4.vtk
+[t=0.8138s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 274]	END   Saving solution as poisson_4.vtk : 0.028292s
+[t=0.8145s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 242]	L2 error: 0.136264 n_dofs= 4096 min_h= 0.324760
+[t=0.8145s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 317]	Refinement 5/10
+[t=0.9868s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	START Solving system by building the sparse matrix
+[t=0.9868s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 173]	n_dofs= 32280
+[t=0.9868s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 174]	n_elements= 32544
+[t=0.9868s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 191]	START Building triplets
+[t=1.2714s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 191]	END   Building triplets : 0.284625s
+[t=1.2715s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 203]	START Building SpMatrix
+[t=1.2818s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 203]	END   Building SpMatrix : 0.010339s
+[t=1.2818s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 209]	START Building RHS
+[t=1.3549s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 209]	END   Building RHS : 0.073143s
+[t=1.3550s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 221]	START Solving system
+[t=1.3645s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 226]	CG iterations: 47
+[t=1.3645s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 221]	END   Solving system : 0.009582s
+[t=1.3645s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	END   Solving system by building the sparse matrix : 0.377786s
+[t=1.3646s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 274]	START Saving solution as poisson_5.vtk
+[t=1.5673s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 274]	END   Saving solution as poisson_5.vtk : 0.202756s
+[t=1.5709s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 242]	L2 error: 0.033738 n_dofs= 32280 min_h= 0.162380
+[t=1.5709s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 317]	Refinement 6/10
+[t=2.0176s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	START Solving system by building the sparse matrix
+[t=2.0176s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 173]	n_dofs= 172504
+[t=2.0176s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 174]	n_elements= 180664
+[t=2.0177s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 191]	START Building triplets
+[t=3.7077s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 191]	END   Building triplets : 1.689973s
+[t=3.7077s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 203]	START Building SpMatrix
+[t=3.7735s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 203]	END   Building SpMatrix : 0.065838s
+[t=3.7735s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 209]	START Building RHS
+[t=4.1334s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 209]	END   Building RHS : 0.359843s
+[t=4.1334s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 221]	START Solving system
+[t=4.2024s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 226]	CG iterations: 82
+[t=4.2025s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 221]	END   Solving system : 0.069060s
+[t=4.2025s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	END   Solving system by building the sparse matrix : 2.184872s
+[t=4.2025s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 274]	START Saving solution as poisson_6.vtk
+[t=5.2209s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 274]	END   Saving solution as poisson_6.vtk : 1.018418s
+[t=5.2394s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 242]	L2 error: 0.017188 n_dofs= 172504 min_h= 0.081190
+[t=5.2394s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 317]	Refinement 7/10
+[t=6.6870s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	START Solving system by building the sparse matrix
+[t=6.6870s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 173]	n_dofs= 696734
+[t=6.6870s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 174]	n_elements= 732824
+[t=6.6874s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 191]	START Building triplets
+[t=13.1940s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 191]	END   Building triplets : 6.506618s
+[t=13.1940s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 203]	START Building SpMatrix
+[t=13.4396s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 203]	END   Building SpMatrix : 0.245554s
+[t=13.4396s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 209]	START Building RHS
+[t=14.8781s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 209]	END   Building RHS : 1.438501s
+[t=14.8782s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 221]	START Solving system
+[t=15.3613s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 226]	CG iterations: 123
+[t=15.3613s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 221]	END   Solving system : 0.483122s
+[t=15.3617s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	END   Solving system by building the sparse matrix : 8.674734s
+[t=15.3617s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 274]	START Saving solution as poisson_7.vtk
+[t=19.3534s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 274]	END   Saving solution as poisson_7.vtk : 3.991669s
+[t=19.4261s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 242]	L2 error: 0.006101 n_dofs= 696734 min_h= 0.040595
+[t=19.4262s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 317]	Refinement 8/10
+[t=25.3511s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	START Solving system by building the sparse matrix
+[t=25.3511s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 173]	n_dofs= 2757012
+[t=25.3511s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 174]	n_elements= 2898288
+[t=25.3525s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 191]	START Building triplets
+[t=53.0650s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 191]	END   Building triplets : 27.712498s
+[t=53.0650s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 203]	START Building SpMatrix
+[t=54.0734s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 203]	END   Building SpMatrix : 1.008324s
+[t=54.0734s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 209]	START Building RHS
+[t=59.8533s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 209]	END   Building RHS : 5.779874s
+[t=59.8533s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 221]	START Solving system
+[t=62.5072s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 226]	CG iterations: 170
+[t=62.5072s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 221]	END   Solving system : 2.653907s
+[t=62.5098s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	END   Solving system by building the sparse matrix : 37.158674s
+[t=62.5098s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 274]	START Saving solution as poisson_8.vtk
+[t=78.3391s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 274]	END   Saving solution as poisson_8.vtk : 15.829319s
+[t=78.6272s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 242]	L2 error: 0.007095 n_dofs= 2757012 min_h= 0.020297
+[t=78.6273s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 317]	Refinement 9/10
+[t=101.4886s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	START Solving system by building the sparse matrix
+[t=101.4886s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 173]	n_dofs= 10936366
+[t=101.4886s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 174]	n_elements= 11491600
+[t=101.4941s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 191]	START Building triplets
+[t=219.9259s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 191]	END   Building triplets : 118.431790s
+[t=219.9259s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 203]	START Building SpMatrix
+[t=224.1689s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 203]	END   Building SpMatrix : 4.242901s
+[t=224.1689s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 209]	START Building RHS
+[t=246.8181s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 209]	END   Building RHS : 22.649183s
+[t=246.8181s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 221]	START Solving system
+[t=260.7797s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 226]	CG iterations: 225
+[t=260.7799s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 221]	END   Solving system : 13.961864s
+[t=260.7842s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	END   Solving system by building the sparse matrix : 159.295617s
+[t=260.7842s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 274]	START Saving solution as poisson_9.vtk
+[t=324.0372s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 274]	END   Saving solution as poisson_9.vtk : 63.252971s
+[t=325.0314s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 242]	L2 error: 0.010164 n_dofs= 10936366 min_h= 0.010149
+[t=325.0314s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 317]	Refinement 10/10
+[t=416.2077s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 172]	START Solving system by building the sparse matrix
+[t=416.2077s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 173]	n_dofs= 43630520
+[t=416.2077s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 174]	n_elements= 45834944
+[t=416.2265s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 191]	START Building triplets
+[t=923.6096s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 191]	END   Building triplets : 507.383129s
+[t=923.6097s | thread=140123038035008, omp_thread=0] [diffuse_poisson_convergence.cpp : 203]	START Building SpMatrix
