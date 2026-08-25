@@ -11,13 +11,29 @@ namespace GV {
 
 
 	///////////////////////////////////////////////////////////////////
+	/// A concept for linear kernels
+	///////////////////////////////////////////////////////////////////
+	template<typename K>
+	concept IsLinearKernel = requires (const K k) {
+		{ K::NEEDS_WEIGHT   } -> std::convertible_to<bool>;
+		{ K::TEST_DOF_VALS  } -> std::convertible_to<bool>;
+		{ K::TEST_DOF_GRAD  } -> std::convertible_to<bool>;
+		{ K::TRIAL_DOF_VALS } -> std::convertible_to<bool>;	//needed for compatibility with dof caching
+		{ K::TRIAL_DOF_GRAD } -> std::convertible_to<bool>;	//needed for compatibility with dof caching
+	};
+
+
+
+	///////////////////////////////////////////////////////////////////
 	/// A few evaluation methods for standard linear kernels
 	///////////////////////////////////////////////////////////////////
 	struct ZeroLinearKernel {
 		//kernel for the linear form L(phi) = 0
 		static constexpr bool NEEDS_WEIGHT   = false;
-		static constexpr bool NEEDS_DOF_VALS = false;
-		static constexpr bool NEEDS_DOF_GRAD = false;
+		static constexpr bool TEST_DOF_VALS  = false;
+		static constexpr bool TEST_DOF_GRAD  = false;
+		static constexpr bool TRIAL_DOF_VALS = false;	//for compatibility with caching dof values
+		static constexpr bool TRIAL_DOF_GRAD = false;	//for compatibility with caching dof values
 
 		template<typename QuadRule_t>
 		[[nodiscard]] constexpr typename QuadRule_t::Scalar_t cached_eval(
@@ -34,8 +50,10 @@ namespace GV {
 	struct L2LinearKernel {
 		//kernel for the linear form L(phi) = int_D(phi*wt)
 		static constexpr bool NEEDS_WEIGHT   = NeedsWeight;
-		static constexpr bool NEEDS_DOF_VALS = true;
-		static constexpr bool NEEDS_DOF_GRAD = false;
+		static constexpr bool TEST_DOF_VALS  = true;
+		static constexpr bool TEST_DOF_GRAD  = false;
+		static constexpr bool TRIAL_DOF_VALS = false;	//for compatibility with caching dof values
+		static constexpr bool TRIAL_DOF_GRAD = false;	//for compatibility with caching dof values
 		
 		template<typename QuadRule_t>
 		[[nodiscard]] constexpr typename QuadRule_t::Scalar_t cached_eval (

@@ -76,10 +76,17 @@ namespace GV {
 		/// In lagrange dofs, this is the point evaluation of a function
 		/// at the corresponding vertex. Alternatively, set them all to 0.
 		///////////////////////////////////////////////////////////////////
-		void init_coefs(uint8_t i) noexcept {
+		void init_coefs() noexcept {
 			GUTIL_ASSERT(dofhandler.is_current());
+
+			auto lock = dofhandler.begin_active_keys_stable();
+			dh_curr_dofs = dofhandler.active_dofs;
 			snapshot_dofs();
-			coefs[i].assign(dofs.size(), Scalar_t{0});
+
+			for (auto& list : coefs) {
+				list.assign(dofs.size(), Scalar_t{0});
+			}
+			dofhandler.end_active_keys_stable();
 		}
 
 		template<typename DofEval>

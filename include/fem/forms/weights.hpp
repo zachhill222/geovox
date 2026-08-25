@@ -117,7 +117,7 @@ namespace GV {
 		static constexpr bool NEEDS_SDF_GRAD    = false;
 
 		static constexpr bool INTERIOR = Interior;
-
+		using DiffuseDomain = AssemblyDiffuseDomain<Assembly_t,StaticID>;
 		using BASE = AssemblyDiffuseDomain<Assembly_t,StaticID>;
 		using BASE::assembly;
 		using BASE::eps;
@@ -156,6 +156,7 @@ namespace GV {
 		static constexpr bool NEEDS_SDF_VALS    = true;
 		static constexpr bool NEEDS_SDF_GRAD    = true;
 
+		using DiffuseDomain = AssemblyDiffuseDomain<Assembly_t,StaticID>;
 		using BASE = AssemblyDiffuseDomain<Assembly_t,StaticID>;
 		using BASE::assembly;
 		using BASE::eps;
@@ -220,6 +221,7 @@ namespace GV {
 		static constexpr bool NEEDS_SDF_VALS    = true;
 		static constexpr bool NEEDS_SDF_GRAD    = false;
 
+		using DiffuseDomain = AssemblyDiffuseDomain<Assembly_t,StaticID>;
 		using BASE = AssemblyDiffuseDomain<Assembly_t,StaticID>;
 		using BASE::assembly;
 		using BASE::eps;
@@ -264,6 +266,8 @@ namespace GV {
 		static constexpr bool NEEDS_SDF_VALS    = W::NEEDS_SDF_VALS;
 		static constexpr bool NEEDS_SDF_GRAD    = W::NEEDS_SDF_GRAD;
 
+		using DiffuseDomain = std::conditional_t< (NEEDS_SDF_VALS||NEEDS_SDF_GRAD), typename W::DiffuseDomain, void>;
+
 		T scale{1};
 		W weight{};
 
@@ -290,6 +294,9 @@ namespace GV {
 		static constexpr bool NEEDS_SDF_VALS    = W1::NEEDS_SDF_VALS    || W2::NEEDS_SDF_VALS;
 		static constexpr bool NEEDS_SDF_GRAD    = W1::NEEDS_SDF_GRAD    || W2::NEEDS_SDF_GRAD;
 
+		using DiffuseDomain = std::conditional_t< (W1::NEEDS_SDF_VALS||W1::NEEDS_SDF_GRAD), typename W1::DiffuseDomain, 
+									std::conditional_t< (W2::NEEDS_SDF_VALS||W2::NEEDS_SDF_GRAD), typename W2::DiffuseDomain, void>>;
+
 		W1 left{};
 		W2 right{};
 
@@ -298,20 +305,18 @@ namespace GV {
  		
 		template<typename QuadRule_t>
 		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights(const ScalarValueCache<QuadRule_t>* scalar_field, const QuadRule_t& qr) const noexcept {
-			using CacheType = std::conditional_t< (W1::NEEDS_SDF_VALS||W1::NEEDS_SDF_GRAD), W1, W2 >;
-
 			if constexpr (NEEDS_SDF_VALS && NEEDS_SDF_GRAD) {
 				SdfValueCache<QuadRule_t> sdf;
 				SdfGradCache<QuadRule_t> grad;
-				CacheType::CacheSdfValsGrad(sdf,grad,qr);
+				DiffuseDomain::CacheSdfValsGrad(sdf,grad,qr);
 				return build_weights_cached_sdf<QuadRule_t>(&sdf, &grad, scalar_field, qr);
 			}
 			else if constexpr (NEEDS_SDF_VALS) {
-				SdfValueCache<QuadRule_t> sdf = CacheType::CacheSdfVals(qr);
+				SdfValueCache<QuadRule_t> sdf = DiffuseDomain::CacheSdfVals(qr);
 				return build_weights_cached_sdf<QuadRule_t>(&sdf, nullptr, scalar_field, qr);
 			}
 			else if constexpr (NEEDS_SDF_GRAD) {
-				SdfGradCache<QuadRule_t> grad = CacheType::CacheSdfGrad(qr);
+				SdfGradCache<QuadRule_t> grad = DiffuseDomain::CacheSdfGrad(qr);
 				return build_weights_cached_sdf<QuadRule_t>(nullptr, &grad, scalar_field, qr);
 			}
 			else {
@@ -333,7 +338,11 @@ namespace GV {
 		static constexpr bool NEEDS_SCALAR_VALS = W1::NEEDS_SCALAR_VALS || W2::NEEDS_SCALAR_VALS;
 		static constexpr bool NEEDS_SDF_VALS    = W1::NEEDS_SDF_VALS    || W2::NEEDS_SDF_VALS;
 		static constexpr bool NEEDS_SDF_GRAD    = W1::NEEDS_SDF_GRAD    || W2::NEEDS_SDF_GRAD;
+		
+		using DiffuseDomain = std::conditional_t< (W1::NEEDS_SDF_VALS||W1::NEEDS_SDF_GRAD), typename W1::DiffuseDomain, 
+									std::conditional_t< (W2::NEEDS_SDF_VALS||W2::NEEDS_SDF_GRAD), typename W2::DiffuseDomain, void>>;
 
+		
 		W1 left{};
 		W2 right{};
 
@@ -342,20 +351,18 @@ namespace GV {
  
 		template<typename QuadRule_t>
 		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights(const ScalarValueCache<QuadRule_t>* scalar_field, const QuadRule_t& qr) const noexcept {
-			using CacheType = std::conditional_t< (W1::NEEDS_SDF_VALS||W1::NEEDS_SDF_GRAD), W1, W2 >;
-
 			if constexpr (NEEDS_SDF_VALS && NEEDS_SDF_GRAD) {
 				SdfValueCache<QuadRule_t> sdf;
 				SdfGradCache<QuadRule_t> grad;
-				CacheType::CacheSdfValsGrad(sdf,grad,qr);
+				DiffuseDomain::CacheSdfValsGrad(sdf,grad,qr);
 				return build_weights_cached_sdf<QuadRule_t>(&sdf, &grad, scalar_field, qr);
 			}
 			else if constexpr (NEEDS_SDF_VALS) {
-				SdfValueCache<QuadRule_t> sdf = CacheType::CacheSdfVals(qr);
+				SdfValueCache<QuadRule_t> sdf = DiffuseDomain::CacheSdfVals(qr);
 				return build_weights_cached_sdf<QuadRule_t>(&sdf, nullptr, scalar_field, qr);
 			}
 			else if constexpr (NEEDS_SDF_GRAD) {
-				SdfGradCache<QuadRule_t> grad = CacheType::CacheSdfGrad(qr);
+				SdfGradCache<QuadRule_t> grad = DiffuseDomain::CacheSdfGrad(qr);
 				return build_weights_cached_sdf<QuadRule_t>(nullptr, &grad, scalar_field, qr);
 			}
 			else {
@@ -370,6 +377,26 @@ namespace GV {
 					right.template build_weights_cached_sdf<QuadRule_t>(sdf, grad, scalar_field, qr);
 		}
 	};
+
+
+	/////////////////////////////////////////////////////////////////////////////////////
+	/// Implement the operators
+	/////////////////////////////////////////////////////////////////////////////////////
+	template<typename T, IsKernelWeight W>
+	[[nodiscard]] constexpr ScaledKernelWeight<T,W> operator*(T scale, W weight) noexcept {
+		return ScaledKernelWeight<T,W>{scale, weight};
+	}
+
+	template<IsKernelWeight W1, IsKernelWeight W2>
+	[[nodiscard]] constexpr ProductKernelWeight<W1,W2> operator*(W1 left, W2 right) noexcept {
+		return ProductKernelWeight<W1,W2>{left, right};
+	}
+
+	template<IsKernelWeight W1, IsKernelWeight W2>
+	[[nodiscard]] constexpr SumKernelWeight<W1,W2> operator+(W1 left, W2 right) noexcept {
+		return SumKernelWeight<W1,W2>{left, right};
+	}
+
 }
 
 

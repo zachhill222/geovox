@@ -34,7 +34,7 @@ inline constexpr uint8_t PERIODIC_BC = 0b111;
 /////////////////////////////////////////////////////////////
 /// A few aliases
 /////////////////////////////////////////////////////////////
-using Scalar_t       = double;
+using Scalar_t       = float;
 using Point_t        = gutil::Point<3,Scalar_t>;
 using Box_t          = gutil::Box<3,Scalar_t>;
 using Sphere_t       = gutil::Sphere<3,Scalar_t>;

@@ -341,7 +341,7 @@ namespace GV {
 	///
 	/// This is intended to be created once per thread and then updated once per element.
 	///////////////////////////////////////////////////////////////////
-	template<typename Kernel_t, typename DofHandler_t, typename QuadRule_t>
+	template<bool AsTest, typename Kernel_t, typename DofHandler_t, typename QuadRule_t>
 	struct ElementDofCache {
 
 
@@ -354,6 +354,9 @@ namespace GV {
 
 		using DofValueCache_t = DofValueCache<QuadRule_t>;
 		using DofGradCache_t  = DofGradCache<QuadRule_t>;
+
+		static constexpr bool NEEDS_DOF_VALS = AsTest ? Kernel_t::TEST_DOF_VALS : Kernel_t::TRIAL_DOF_VALS;
+		static constexpr bool NEEDS_DOF_GRAD = AsTest ? Kernel_t::TEST_DOF_GRAD : Kernel_t::TRIAL_DOF_GRAD;
 
 		std::vector<DOF_t>  dofs;		//active dofs on the current element
 		std::vector<size_t> global_idx;		//global numbers of the dofs
@@ -380,15 +383,32 @@ namespace GV {
 			const size_t n = dofs.size();
 
 			global_idx.resize(n);
-			if constexpr (Kernel_t::NEEDS_DOF_VALS) {vals.clear(); vals.reserve(n);}
-			if constexpr (Kernel_t::NEEDS_DOF_GRAD) {grad.clear(); grad.reserve(n);}
+			if constexpr (NEEDS_DOF_VALS) {vals.clear(); vals.reserve(n);}
+			if constexpr (NEEDS_DOF_GRAD) {grad.clear(); grad.reserve(n);}
 
 			for (size_t j=0; j<n; ++j) {
 				global_idx[j] = handler.global_number(dofs[j]);
 				GUTIL_ASSERT(global_idx[j] < handler.n_dofs());
 				GUTIL_ASSERT(dofs[j].depth() <= qr.q_el.depth()+1);	//for quasi-hierarchical refinement
-				if constexpr (Kernel_t::NEEDS_DOF_VALS) {vals.emplace_back(dofs[j], qr);}
-				if constexpr (Kernel_t::NEEDS_DOF_GRAD) {grad.emplace_back(dofs[j], qr);}
+				if constexpr (NEEDS_DOF_VALS) {vals.emplace_back(dofs[j], qr);}
+				if constexpr (NEEDS_DOF_GRAD) {grad.emplace_back(dofs[j], qr);}
+			}
+		}
+
+		void gather_fh() noexcept {
+			dofs = handler.get_active_dofs_full_hierarchical(qr.q_el);
+			const size_t n = dofs.size();
+
+			global_idx.resize(n);
+			if constexpr (NEEDS_DOF_VALS) {vals.clear(); vals.reserve(n);}
+			if constexpr (NEEDS_DOF_GRAD) {grad.clear(); grad.reserve(n);}
+
+			for (size_t j=0; j<n; ++j) {
+				global_idx[j] = handler.global_number(dofs[j]);
+				GUTIL_ASSERT(global_idx[j] < handler.n_dofs());
+				GUTIL_ASSERT(dofs[j].depth() <= qr.q_el.depth()+1);	//for quasi-hierarchical refinement
+				if constexpr (NEEDS_DOF_VALS) {vals.emplace_back(dofs[j], qr);}
+				if constexpr (NEEDS_DOF_GRAD) {grad.emplace_back(dofs[j], qr);}
 			}
 		}
 
@@ -412,5 +432,9 @@ namespace GV {
 		}
 	};
 
+	template<typename Kernel_t, typename DofHandler_t, typename QuadRule_t>
+	using ElementTestCache = ElementDofCache<true,Kernel_t,DofHandler_t,QuadRule_t>;
 
+	template<typename Kernel_t, typename DofHandler_t, typename QuadRule_t>
+	using ElementTrialCache = ElementDofCache<false,Kernel_t,DofHandler_t,QuadRule_t>;
 }

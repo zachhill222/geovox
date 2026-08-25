@@ -5,9 +5,8 @@
 #include "util/util.hpp"
 #include "mesh/mesh.hpp"
 
-#include "fem/dofhandler.hpp"
-
 #include "fem/mesh_quadrature.hpp"
+#include "fem/forms/util.hpp"
 #include "fem/forms/bilinearforms/bilinear_kernels.hpp"
 #include "fem/forms/bilinearforms/dense_linalg.hpp"
 
@@ -124,9 +123,9 @@ namespace GV {
 		using TrialDof_t  		= typename TrialHandlerType::DOF_t;
 		using TestDof_t  		= typename TestHandlerType::DOF_t;
 
-		using ElementTrialCache_t = ElementDofCache<Kernel_t,TrialHandler_t,QuadRule_t>;
-		using ElementTestCache_t = ElementDofCache<Kernel_t,TestHandler_t,QuadRule_t>;
-		using WeightCache_t      = ScalarValueCache<QuadRule_t>;
+		using ElementTrialCache_t = ElementTrialCache<Kernel_t,TrialHandler_t,QuadRule_t>;
+		using ElementTestCache_t  = std::conditional_t<Kernel_t::IS_SYMMETRIC, ElementTrialCache_t, ElementTestCache<Kernel_t,TestHandler_t,QuadRule_t>>;
+		using WeightCache_t       = ScalarValueCache<QuadRule_t>;
 
 		static constexpr bool IS_SYMMETRIC = Kernel_t::IS_SYMMETRIC;
 		static_assert(!Kernel_t::IS_SYMMETRIC || std::same_as<TrialHandler_t,TestHandler_t>,
@@ -148,12 +147,16 @@ namespace GV {
 				const DofValueCache<QuadRule_t>* test_vals{nullptr};
 				const DofGradCache<QuadRule_t>*  test_grad{nullptr};
 				
-				if constexpr (Kernel_t::NEEDS_DOF_VALS) {
+				if constexpr (Kernel_t::TRIAL_DOF_VALS) {
 					trial_vals = &trial_cache.vals[i];
+				}
+				if constexpr (Kernel_t::TEST_DOF_VALS) {
 					test_vals  = &test_cache.vals[j];
 				}
-				if constexpr (Kernel_t::NEEDS_DOF_GRAD) {
+				if constexpr (Kernel_t::TRIAL_DOF_GRAD) {
 					trial_grad = &trial_cache.grad[i];
+				}
+				if constexpr (Kernel_t::TEST_DOF_GRAD) {
 					test_grad  = &test_cache.grad[j];
 				}
 				return kernel.cached_eval(trial_vals, trial_grad, test_vals, test_grad, wt, qr);
@@ -216,11 +219,11 @@ namespace GV {
 					for (size_t q=range.begin; q<range.end; ++q) {
 						const MeshElem_t el = quad_elems[q];
 						
-						quad_rule.set_element(el,2);
+						quad_rule.set_element(el,mesh.max_depth);
 						if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 						
-						trial_cache.gather_qh();	const size_t u_size = trial_cache.size();
-						test_cache.gather_qh();		const size_t v_size = test_cache.size();
+						trial_cache.gather_fh();	const size_t u_size = trial_cache.size();
+						test_cache.gather_fh();		const size_t v_size = test_cache.size();
 						if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 							wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 						}
@@ -278,10 +281,10 @@ namespace GV {
 					for (size_t q=range.begin; q<range.end; ++q) {
 						const MeshElem_t el = quad_elems[q];
 						
-						quad_rule.set_element(el,2);
+						quad_rule.set_element(el,mesh.max_depth);
 						if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 						
-						sym_cache.gather_qh();		const size_t v_size = sym_cache.size();
+						sym_cache.gather_fh();		const size_t v_size = sym_cache.size();
 						if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 							wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 						}
@@ -336,11 +339,11 @@ namespace GV {
 				for (auto it=range.begin; it!=range.end; ++it) {
 					const MeshElem_t el = *it;
 						
-					quad_rule.set_element(el,2);
+					quad_rule.set_element(el,mesh.max_depth);
 					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 					
-					trial_cache.gather_qh();	const size_t u_size = trial_cache.size();
-					test_cache.gather_qh();		const size_t v_size = test_cache.size();
+					trial_cache.gather_fh();	const size_t u_size = trial_cache.size();
+					test_cache.gather_fh();		const size_t v_size = test_cache.size();
 					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}
@@ -392,10 +395,10 @@ namespace GV {
 				for (auto it=range.begin; it!=range.end; ++it) {
 					const MeshElem_t el = *it;
 						
-					quad_rule.set_element(el,2);
+					quad_rule.set_element(el,mesh.max_depth);
 					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 					
-					sym_cache.gather_qh();		const size_t v_size = sym_cache.size();
+					sym_cache.gather_fh();		const size_t v_size = sym_cache.size();
 					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}
@@ -459,10 +462,10 @@ namespace GV {
 					for (size_t q=range.begin; q<range.end; ++q) {
 						const MeshElem_t el = quad_elems[q];
 						
-						quad_rule.set_element(el,2);
+						quad_rule.set_element(el,mesh.max_depth);
 						if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 						
-						sym_cache.gather_qh();		const size_t v_size = sym_cache.size();
+						sym_cache.gather_fh();		const size_t v_size = sym_cache.size();
 						if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 							wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 						}
@@ -517,10 +520,10 @@ namespace GV {
 				for (auto it=range.begin; it!=range.end; ++it) {
 					const MeshElem_t el = *it;
 						
-					quad_rule.set_element(el,2);
+					quad_rule.set_element(el,mesh.max_depth);
 					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 					
-					sym_cache.gather_qh();		const size_t v_size = sym_cache.size();
+					sym_cache.gather_fh();		const size_t v_size = sym_cache.size();
 					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}
@@ -577,10 +580,10 @@ namespace GV {
 					for (size_t q=range.begin; q<range.end; ++q) {
 						const MeshElem_t el = quad_elems[q];
 						
-						quad_rule.set_element(el,2);
+						quad_rule.set_element(el,mesh.max_depth);
 						if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 						
-						sym_cache.gather_qh();		const size_t v_size = sym_cache.size();
+						sym_cache.gather_fh();		const size_t v_size = sym_cache.size();
 						if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 							wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 						}
@@ -610,10 +613,10 @@ namespace GV {
 				for (auto it=range.begin; it!=range.end; ++it) {
 					const MeshElem_t el = *it;
 
-					quad_rule.set_element(el,2);
+					quad_rule.set_element(el,mesh.max_depth);
 					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 					
-					sym_cache.gather_qh();		const size_t v_size = sym_cache.size();
+					sym_cache.gather_fh();		const size_t v_size = sym_cache.size();
 					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}
@@ -660,11 +663,11 @@ namespace GV {
 				for (auto it=range.begin; it!=range.end; ++it) {
 					const MeshElem_t el = *it;
 						
-					quad_rule.set_element(el,2);
+					quad_rule.set_element(el,mesh.max_depth);
 					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 					
-					trial_cache.gather_qh();	const size_t u_size = trial_cache.size();
-					test_cache.gather_qh();		const size_t v_size = test_cache.size();
+					trial_cache.gather_fh();	const size_t u_size = trial_cache.size();
+					test_cache.gather_fh();		const size_t v_size = test_cache.size();
 					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}
@@ -738,10 +741,10 @@ namespace GV {
 				for (auto it=range.begin; it!=range.end; ++it) {
 					const MeshElem_t el = *it;
 						
-					quad_rule.set_element(el,2);
+					quad_rule.set_element(el,mesh.max_depth);
 					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 					
-					sym_cache.gather_qh();		const size_t v_size = sym_cache.size();
+					sym_cache.gather_fh();		const size_t v_size = sym_cache.size();
 					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}

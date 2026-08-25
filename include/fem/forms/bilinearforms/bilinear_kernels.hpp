@@ -15,10 +15,12 @@ namespace GV {
 	///////////////////////////////////////////////////////////////////
 	template<typename K>
 	concept IsBilinearKernel = requires (const K k) {
-		{ K::NEEDS_WEIGHT     }		-> std::convertible_to<bool>;
-		{ K::IS_SYMMETRIC     } 	-> std::convertible_to<bool>;
-		{ K::NEEDS_DOF_VALS   }		-> std::convertible_to<bool>;
-		{ K::NEEDS_DOF_GRAD   }		-> std::convertible_to<bool>;
+		{ K::NEEDS_WEIGHT   }	-> std::convertible_to<bool>;
+		{ K::IS_SYMMETRIC   } 	-> std::convertible_to<bool>;
+		{ K::TRIAL_DOF_VALS }	-> std::convertible_to<bool>;
+		{ K::TRIAL_DOF_GRAD }	-> std::convertible_to<bool>;
+		{ K::TEST_DOF_VALS  }	-> std::convertible_to<bool>;
+		{ K::TEST_DOF_GRAD  }	-> std::convertible_to<bool>;
 
 		//there should also be a cached_eval method with the signature
 		// Scalar(TrialCachedVals*, TrialCachedGrad*, TestCachedVals*, TestCachedGrad*, const QuadRule&)
@@ -35,10 +37,12 @@ namespace GV {
 	///////////////////////////////////////////////////////////////////
 	struct ZeroBilinearKernel {
 		//kernel for the bilinear form B(phi,psi) = 0
-		static constexpr bool NEEDS_WEIGHT	   = false;
-		static constexpr bool IS_SYMMETRIC     = false;
-		static constexpr bool NEEDS_DOF_VALS   = false;
-		static constexpr bool NEEDS_DOF_GRAD   = false;
+		static constexpr bool NEEDS_WEIGHT	 = false;
+		static constexpr bool IS_SYMMETRIC   = false;
+		static constexpr bool TRIAL_DOF_VALS = false;
+		static constexpr bool TRIAL_DOF_GRAD = false;
+		static constexpr bool TEST_DOF_VALS  = false;
+		static constexpr bool TEST_DOF_GRAD  = false;
 
 		template<typename QuadRule_t>
 		[[nodiscard]] constexpr typename QuadRule_t::Scalar_t cached_eval(
@@ -60,10 +64,12 @@ namespace GV {
 	struct IdentityBilinearKernel {
 		//kernel for the identity matrix
 		//TODO: the bilinear form needs a specialization to use this kernel correctly.
-		static constexpr bool NEEDS_WEIGHT     = false;
-		static constexpr bool IS_SYMMETRIC     = true;
-		static constexpr bool NEEDS_DOF_VALS   = false;
-		static constexpr bool NEEDS_DOF_GRAD   = false;
+		static constexpr bool NEEDS_WEIGHT   = false;
+		static constexpr bool IS_SYMMETRIC   = true;
+		static constexpr bool TRIAL_DOF_VALS = false;
+		static constexpr bool TRIAL_DOF_GRAD = false;
+		static constexpr bool TEST_DOF_VALS  = false;
+		static constexpr bool TEST_DOF_GRAD  = false;
 
 		template<typename QuadRule_t>
 		[[nodiscard]] constexpr typename QuadRule_t::Scalar_t cached_eval(
@@ -85,13 +91,14 @@ namespace GV {
 
 	template<bool IsSymmetric=false, bool NeedsWeight=false>
 	struct L2BilinearKernel {
-		//kernel for the linear form B(u,v) = int_D(u*v)
-		//optionally B(u,v) = int_D(u*v*f) where f is supplied by CRTP in the Derived class
-		//and is a function of x,y,z.
-		static constexpr bool NEEDS_WEIGHT     = NeedsWeight;
-		static constexpr bool IS_SYMMETRIC     = IsSymmetric;
-		static constexpr bool NEEDS_DOF_VALS   = true;
-		static constexpr bool NEEDS_DOF_GRAD   = false;
+		//kernel for the bilinear form B(u,v) = int_D(u*v)
+		//optionally B(u,v) = int_D(u*v*f) where f is supplied by the weight
+		static constexpr bool NEEDS_WEIGHT   = NeedsWeight;
+		static constexpr bool IS_SYMMETRIC   = IsSymmetric;
+		static constexpr bool TRIAL_DOF_VALS = true;
+		static constexpr bool TRIAL_DOF_GRAD = false;
+		static constexpr bool TEST_DOF_VALS  = true;
+		static constexpr bool TEST_DOF_GRAD  = false;
 
 		template<typename QuadRule_t>
 		[[nodiscard]] constexpr typename QuadRule_t::Scalar_t cached_eval(
@@ -130,13 +137,14 @@ namespace GV {
 
 	template<bool IsSymmetric=false, bool NeedsWeight=false>
 	struct H1BilinearKernel {
-		//kernel for the linear form B(u,v) = int_D(grad(u)*grad(v))
-		//optionally B(u,v) = int_D(grad(u)*grad(v)*f) where f is supplied by CRTP in the Derived class
-		//f must be a function of x,y,z.
-		static constexpr bool NEEDS_WEIGHT     = NeedsWeight;
-		static constexpr bool IS_SYMMETRIC     = IsSymmetric;
-		static constexpr bool NEEDS_DOF_VALS   = false;
-		static constexpr bool NEEDS_DOF_GRAD   = true;
+		//kernel for the bilinear form B(u,v) = int_D(grad(u)*grad(v))
+		//optionally B(u,v) = int_D(grad(u)*grad(v)*f) where f is supplied by the weight
+		static constexpr bool NEEDS_WEIGHT   = NeedsWeight;
+		static constexpr bool IS_SYMMETRIC   = IsSymmetric;
+		static constexpr bool TRIAL_DOF_VALS = false;
+		static constexpr bool TRIAL_DOF_GRAD = true;
+		static constexpr bool TEST_DOF_VALS  = false;
+		static constexpr bool TEST_DOF_GRAD  = true;
 
 		
 		template<typename QuadRule_t>
@@ -182,6 +190,105 @@ namespace GV {
 		}
 	};
 
+
+	template<int Axis, bool NeedsWeight=false> requires (0<=Axis && Axis<3)
+	struct GradComponentBilinearKernel {
+		//kernel for the bilinear form B(u,v) = int_D(u * partial_axis(v))
+		//optionally B(u,v) = int_D(u * partial_axis(v) * f) where f is supplied by the weight
+		//Generally used when u is a component of a vector field and v is a scalar field (e.g., velocity-pressure system)
+		static constexpr bool NEEDS_WEIGHT   = NeedsWeight;
+		static constexpr bool IS_SYMMETRIC   = false;
+		static constexpr bool TRIAL_DOF_VALS = true;
+		static constexpr bool TRIAL_DOF_GRAD = false;
+		static constexpr bool TEST_DOF_VALS  = false;
+		static constexpr bool TEST_DOF_GRAD  = true;
+
+		
+		template<typename QuadRule_t>
+		[[nodiscard]] constexpr typename QuadRule_t::Scalar_t cached_eval(
+			const DofValueCache<QuadRule_t>*	u_vals, 
+			const DofGradCache<QuadRule_t>*, 
+			const DofValueCache<QuadRule_t>*,
+			const DofGradCache<QuadRule_t>* 	v_grad, 
+			const ScalarValueCache<QuadRule_t>* wt,
+			const QuadRule_t& qr) const noexcept {
+
+			using Scalar_t = typename QuadRule_t::Scalar_t;
+			constexpr int N = QuadRule_t::TOTAL_QUAD_POINTS;
+
+			GUTIL_ASSERT(u_vals && v_grad);
+			if constexpr (NEEDS_WEIGHT) {GUTIL_ASSERT(wt);}
+
+			//accumulation
+			auto qw = qr.quad_w();
+			const Scalar_t j_inv = qr.jacobian_diag_inv[v_grad->depth][Axis];
+			Scalar_t result{0};
+			if constexpr (NEEDS_WEIGHT) {
+				GUTIL_SIMD(reduction(+:result))
+				for (int i=0; i<N; ++i) {
+					result += (*v_grad)[Axis][i] * (*u_vals)[i] * (*wt)[i] * qw[i];
+				}
+			}
+			else {
+				GUTIL_SIMD(reduction(+:result))
+				for (int i=0; i<N; ++i) {
+					result += (*v_grad)[Axis][i] * (*u_vals)[i] * qw[i];
+				}
+			}
+
+			return result * j_inv * qr.jacobian_det[qr.q_el.depth()];
+		}
+	};
+
+	template<int Axis, bool NeedsWeight=false> requires (0<=Axis && Axis<3)
+	struct DivComponentBilinearKernel {
+		//kernel for the bilinear form B(u,v) = int_D(partial_axis(u) * v)
+		//optionally B(u,v) = int_D((partial_axis(u) * v * f) where f is supplied by the weight
+		//Generally used when u is the Axis-component of a vector field and v is a scalar field (e.g., velocity-pressure system)
+		static constexpr bool NEEDS_WEIGHT   = NeedsWeight;
+		static constexpr bool IS_SYMMETRIC   = false;
+		static constexpr bool TRIAL_DOF_VALS = false;
+		static constexpr bool TRIAL_DOF_GRAD = true;
+		static constexpr bool TEST_DOF_VALS  = true;
+		static constexpr bool TEST_DOF_GRAD  = false;
+
+		
+		template<typename QuadRule_t>
+		[[nodiscard]] constexpr typename QuadRule_t::Scalar_t cached_eval(
+			const DofValueCache<QuadRule_t>*, 
+			const DofGradCache<QuadRule_t>*     u_grad, 
+			const DofValueCache<QuadRule_t>*    v_vals,
+			const DofGradCache<QuadRule_t>*, 
+			const ScalarValueCache<QuadRule_t>* wt,
+			const QuadRule_t& qr) const noexcept {
+
+			using Scalar_t = typename QuadRule_t::Scalar_t;
+			constexpr int N = QuadRule_t::TOTAL_QUAD_POINTS;
+
+			GUTIL_ASSERT(u_grad && v_vals);
+			if constexpr (NEEDS_WEIGHT) {GUTIL_ASSERT(wt);}
+
+			//accumulation
+			auto qw = qr.quad_w();
+			const Scalar_t j_inv = qr.jacobian_diag_inv[u_grad->depth][Axis];
+			Scalar_t result{0};
+			if constexpr (NEEDS_WEIGHT) {
+				GUTIL_SIMD(reduction(+:result))
+				for (int i=0; i<N; ++i) {
+					result += (*u_grad)[Axis][i] * (*v_vals)[i] * (*wt)[i] * qw[i];
+				}
+			}
+			else {
+				GUTIL_SIMD(reduction(+:result))
+				for (int i=0; i<N; ++i) {
+					result += (*u_grad)[Axis][i] * (*v_vals)[i] * qw[i];
+				}
+			}
+
+			return result * j_inv * qr.jacobian_det[qr.q_el.depth()];
+		}
+	};
+
 	
 	///////////////////////////////////////////////////////////////
 	/// Allow addition and scalar multiplication of forms for more efficient
@@ -189,10 +296,12 @@ namespace GV {
 	///////////////////////////////////////////////////////////////
 	template<typename T, IsBilinearKernel K>
 	struct ScaledBilinearKernel {
-		static constexpr bool NEEDS_WEIGHT     = K::NEEDS_WEIGHT;
-		static constexpr bool IS_SYMMETRIC 	   = K::IS_SYMMETRIC;
-		static constexpr bool NEEDS_DOF_VALS   = K::NEEDS_DOF_VALS;
-		static constexpr bool NEEDS_DOF_GRAD   = K::NEEDS_DOF_GRAD;
+		static constexpr bool NEEDS_WEIGHT   = K::NEEDS_WEIGHT;
+		static constexpr bool IS_SYMMETRIC 	 = K::IS_SYMMETRIC;
+		static constexpr bool TRIAL_DOF_VALS = K::TRIAL_DOF_VALS;
+		static constexpr bool TRIAL_DOF_GRAD = K::TRIAL_DOF_GRAD;
+		static constexpr bool TEST_DOF_VALS  = K::TEST_DOF_VALS;
+		static constexpr bool TEST_DOF_GRAD  = K::TEST_DOF_GRAD;
 
 		T scale{1};
 		K kernel{};
@@ -221,10 +330,12 @@ namespace GV {
 	template<IsBilinearKernel K1, IsBilinearKernel K2>
 	struct SumBilinearKernel {
 		//note that the weight must be the same for both kernels
-		static constexpr bool NEEDS_WEIGHT     = K1::NEEDS_WEIGHT     || K2::NEEDS_WEIGHT;
-		static constexpr bool IS_SYMMETRIC 	   = K1::IS_SYMMETRIC     && K2::IS_SYMMETRIC;
-		static constexpr bool NEEDS_DOF_VALS   = K1::NEEDS_DOF_VALS   || K2::NEEDS_DOF_VALS;
-		static constexpr bool NEEDS_DOF_GRAD   = K1::NEEDS_DOF_GRAD   || K2::NEEDS_DOF_GRAD;
+		static constexpr bool NEEDS_WEIGHT   = K1::NEEDS_WEIGHT   || K2::NEEDS_WEIGHT;
+		static constexpr bool IS_SYMMETRIC 	 = K1::IS_SYMMETRIC   && K2::IS_SYMMETRIC;
+		static constexpr bool TRIAL_DOF_VALS = K1::TRIAL_DOF_VALS || K2::TRIAL_DOF_VALS;
+		static constexpr bool TRIAL_DOF_GRAD = K1::TRIAL_DOF_GRAD || K2::TRIAL_DOF_GRAD;
+		static constexpr bool TEST_DOF_VALS  = K1::TEST_DOF_VALS  || K2::TEST_DOF_VALS;
+		static constexpr bool TEST_DOF_GRAD  = K1::TEST_DOF_GRAD  || K2::TEST_DOF_GRAD;
 
 		K1 left{};
 		K2 right{};

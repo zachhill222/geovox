@@ -687,9 +687,6 @@ namespace GV {
 
 				GUTIL_ASSERT(std::find(scratch.begin(),scratch.end(), DOF_t{uint64_t(-1)}) == scratch.end());
 
-				// std::sort(scratch.begin(), scratch.end(),					//clean up this depth
-				// 			[](DOF_t a, DOF_t b) {return b<a;});			//note that DOF_t{0} (the does not exist flag) will be the last element
-				// auto it = std::unique(scratch.begin(), scratch.end());
 				auto it = gutil::sort_and_unique(scratch, threads);			
 				scratch.erase(it, scratch.end());							//erases all but one non-existant dofs (there could be 1 non-existant element)
 				// if (!scratch.back().exists()) {scratch.pop_back();}			//all dofs exist now.
@@ -1092,7 +1089,6 @@ namespace GV {
 
 		[[nodiscard]] bool has_all_active_parents(DOF_t dof) const noexcept {
 			for (DOF_t p : dof.parents()) {
-				// if (p.exists() && !is_active_no_check(p) && mesh_can_support_any(p)) {return false;}
 				if (p.exists() && !is_active_no_check(p)) {return false;}
 			}
 			return true;
@@ -1107,7 +1103,6 @@ namespace GV {
 
 		[[nodiscard]] bool has_all_refined_parents(DOF_t dof) const noexcept {
 			for (DOF_t p : dof.parents()) {
-				// if (p.exists() && !is_refined_no_check(p) && mesh_can_support_any(p)) {return false;}
 				if (p.exists() && !is_refined_no_check(p)) {return false;}
 			}
 			return true;
@@ -1144,7 +1139,7 @@ namespace GV {
 			{
 				GV_BEGIN_MASK_UNSTABLE
 				std::span<const DofElem_t> d_elems = BASE::reinterpret_key_span<DofElem_t,Elem_t>(elems);
-				std::vector<DOF_t> dofs = get_dofs_impl(d_elems, 2, std::move(pred));
+				std::vector<DOF_t> dofs = get_dofs_impl(d_elems, max_depth, std::move(pred));
 				GUTIL_PROFILE("Processing ", dofs.size(), " dofs for refinement");
 				
 				gutil::BinSort<DOF_t> dof_depth_sorter(dofs, max_depth+1);
@@ -1210,7 +1205,7 @@ namespace GV {
 			{
 				GV_BEGIN_MASK_UNSTABLE
 				std::span<const DofElem_t> d_elems = BASE::reinterpret_key_span<DofElem_t,Elem_t>(elems);
-				std::vector<DOF_t> dofs = get_dofs_impl(d_elems, 2, std::move(pred));
+				std::vector<DOF_t> dofs = get_dofs_impl(d_elems, max_depth, std::move(pred));
 				GUTIL_PROFILE("Processing ", dofs.size(), " dofs for unrefinement");
 				
 				for (DOF_t dof : dofs) {

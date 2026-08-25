@@ -33,6 +33,8 @@ namespace GV {
 		T count;			//the size of this thread's range
 		const T tid;		//this thread's openmp number
 		const T n_threads;	//total number of openmp threads
+		
+		//partition the index range into n_threads contiguous blocks
 		OmpIndexRange(T global_count) : 
 			tid{GUTIL_OMP_TERNARY(static_cast<T>(omp_get_thread_num()), 0)},
 			n_threads{GUTIL_OMP_TERNARY(static_cast<T>(omp_get_num_threads()), 1)} {
@@ -52,6 +54,8 @@ namespace GV {
 		size_t count;			//the size of this thread's range 
 		const size_t tid;		//this thread's openmp number
 		const size_t n_threads;	//total number of openmp threads
+		
+		//partition the index range into n_threads contiguous blocks
 		OmpIteratorRange(I global_start, I global_end) : 
 			tid{GUTIL_OMP_TERNARY(static_cast<size_t>(omp_get_thread_num()), 0)},
 			n_threads{GUTIL_OMP_TERNARY(static_cast<size_t>(omp_get_num_threads()), 1)} {

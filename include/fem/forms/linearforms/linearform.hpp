@@ -5,9 +5,10 @@
 #include "util/util.hpp"
 #include "mesh/mesh.hpp"
 
-#include "fem/dofhandler.hpp"
-
 #include "fem/mesh_quadrature.hpp"
+
+#include "fem/forms/weights.hpp"
+#include "fem/forms/util.hpp"
 #include "fem/forms/linearforms/linear_kernels.hpp"
 
 namespace GV {
@@ -43,7 +44,7 @@ namespace GV {
 		using MeshElem_t 	= typename Mesh_t::Elem_t;
 		using TestDof_t  	= typename TestHandlerType::DOF_t;
 
-		using ElementTestCache_t = ElementDofCache<Kernel_t,TestHandler_t,QuadRule_t>;
+		using ElementTestCache_t = ElementTestCache<Kernel_t,TestHandler_t,QuadRule_t>;
 		using WeightCache_t      = ScalarValueCache<QuadRule_t>;
 
 		struct KernelEval {
@@ -56,8 +57,8 @@ namespace GV {
 			[[nodiscard]] Scalar_t operator()(size_t i, const WeightCache_t* wt = nullptr) const noexcept {
 				const DofValueCache<QuadRule_t>* vals{nullptr};
 				const DofGradCache<QuadRule_t>*  grad{nullptr};
-				if constexpr (Kernel_t::NEEDS_DOF_VALS) {vals = &cache.vals[i];}
-				if constexpr (Kernel_t::NEEDS_DOF_GRAD) {grad = &cache.grad[i];}
+				if constexpr (Kernel_t::TEST_DOF_VALS) {vals = &cache.vals[i];}
+				if constexpr (Kernel_t::TEST_DOF_GRAD) {grad = &cache.grad[i];}
 				return kernel.cached_eval(vals, grad, wt, qr);
 			}
 		};
@@ -104,7 +105,7 @@ namespace GV {
 					for (size_t j=start; j<end; ++j) {
 						const MeshElem_t el = quad_elems[j];
 						
-						quad_rule.set_element(el,2);
+						quad_rule.set_element(el,mesh.max_depth);
 						if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 						
 						test_cache.gather_qh();
@@ -139,10 +140,10 @@ namespace GV {
 				for (size_t i=0; i<quad_elems.size(); ++i) {
 					const MeshElem_t el = quad_elems[i];
 					
-					quad_rule.set_element(el,2);
+					quad_rule.set_element(el,mesh.max_depth);
 					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 					
-					test_cache.gather_qh();
+					test_cache.gather_fh();
 					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}
@@ -178,7 +179,7 @@ namespace GV {
 				for (size_t i=0; i<quad_elems.size(); ++i) {
 					const MeshElem_t el = quad_elems[i];
 					
-					quad_rule.set_element(el,2);
+					quad_rule.set_element(el,mesh.max_depth);
 					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 					
 					test_cache.gather_qh();
@@ -224,7 +225,7 @@ namespace GV {
 				for (auto it=range.begin; it!=range.end; ++it) {
 					const MeshElem_t el = *it;
 					
-					quad_rule.set_element(el,2);
+					quad_rule.set_element(el,mesh.max_depth);
 					test_cache.gather_qh();
 
 					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
