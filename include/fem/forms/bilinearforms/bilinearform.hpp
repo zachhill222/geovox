@@ -557,6 +557,58 @@ namespace GV {
 
 
 		/////////////////////////////////////////////////////////////////////
+		/// Evaluate the quadratic form x^t * M * x when M is symmetric
+		/////////////////////////////////////////////////////////////////////
+		[[nodiscard]] T evaluate_quadratic_form(std::span<const T> X) const noexcept requires(Kernel_t::IS_SYMMETRIC) {
+			GUTIL_ASSERT(trial_handler.is_current());
+			GUTIL_ASSERT(test_handler.is_current());
+			GUTIL_ASSERT(X.size() == trial_handler.n_dofs());
+			GUTIL_ASSERT(&trial_handler == &test_handler);
+
+			T result{0};
+			GUTIL_OMP(parallel)
+			{
+				QuadRule_t 				quad_rule(mesh);
+				ElementTestCache_t		sym_cache(test_handler,quad_rule);
+				KernelEval				k_eval(kernel, sym_cache, sym_cache, quad_rule);
+				WeightCache_t			wt;
+				
+				T  						thread_result{0};
+				std::vector<T>			local_x;
+
+				OmpIteratorRange	range(mesh.element_begin(), mesh.element_end());
+				for (auto it=range.begin; it!=range.end; ++it) {
+					const MeshElem_t el = *it;
+						
+					quad_rule.set_element(el,mesh.max_depth);
+					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
+					
+					sym_cache.gather_fh();		const size_t v_size = sym_cache.size();
+					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
+						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
+					}
+
+					local_x.assign(v_size, 0);
+					for (size_t i=0; i<v_size; ++i) {local_x[i]  = X[sym_cache.global_idx[i]]; }
+
+					//construct local matrix (col major)
+					for (size_t j=0; j<v_size; ++j) {
+						Scalar_t val = k_eval(j,j,&wt);
+						thread_result += val*local_x[j]*local_x[j];
+						for (size_t i=j+1; i<v_size; ++i) {
+							Scalar_t val = k_eval(j,i,&wt);
+							thread_result += Scalar_t{2} * val*local_x[i]*local_x[j];
+						}
+					}
+				}
+
+				GUTIL_OMP(atomic) result += thread_result;
+			}
+			return result;
+		}
+
+
+		/////////////////////////////////////////////////////////////////////
 		/// Construct diagonal of the matrix for conditioning
 		/////////////////////////////////////////////////////////////////////
 		void construct_diagonal_colored(std::span<T> D) const noexcept requires(Kernel_t::IS_SYMMETRIC) {

@@ -72,7 +72,7 @@ namespace GV {
 		const GeoPoint_t 							diag;						//diagonal/sidelength of the domain
 		const GeoPoint_t 							inv_diag;					//reciprocal of the sidelength
 		
-		std::vector<Vert_t> 						tracked_vertices{};			//a compressed list of 'active' vertices, primarily used for visualization. reduced keys are stored.
+		mutable std::vector<Vert_t>					tracked_vertices{};			//a compressed list of 'active' vertices, primarily used for visualization. reduced keys are stored.
 		gutil::BinSort<Vert_t>						vertex_sorter{};			//sort the vertices for better lookup and deduplication
 		mutable std::atomic<bool>					is_vertices_collected_{false};	
 		mutable std::atomic<bool>					is_depth_explicitly_correct_{false};
@@ -358,7 +358,7 @@ namespace GV {
 			set_encoded(old_encoding);
 		}
 
-		void collect_vertices() noexcept {
+		void collect_vertices() const noexcept {
 			GV_BEGIN_STABLE  	//The base class+elements must be stable, we are only altering the vertices
 			GUTIL_PROFILE("Collecting active vertices");
 			GUTIL_ASSERT(is_current());

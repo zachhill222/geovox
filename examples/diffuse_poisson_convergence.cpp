@@ -8,7 +8,6 @@
 #include <string>
 
 
-
 /////////////////////////////////////////////////////////////
 /// See "Diffuse Domain Methods with Dirichlet Boundary Conditions"
 /// by Luke Benfield and Andreas Dedner.
@@ -259,7 +258,7 @@ void init(MeshHandler_t& m_handler, DofHandler_t& d_handler, CoefHandler_t& c_ha
 	d_handler.init_dofs();
 
 	//assign initial coefficients (all zeros)
-	c_handler.init_coefs(0);
+	c_handler.init_coefs();
 }
 
 
