@@ -251,7 +251,7 @@ int main(int argc, char* argv[]) {
 				[&](Vert_t vtx) { return assembly.signed_distance(mesh.geo_coord(vtx)); }, "signed_distance");
 
 			auto phi_lookup = GV::make_feature_lookup<Vert_t>(
-				[&](Vert_t vtx) { return assembly.heaviside_tanh(mesh.geo_coord(vtx), eps); }, "phi");
+				[&](Vert_t vtx) { return assembly.heaviside(mesh.geo_coord(vtx), eps); }, "phi");
 
 			std::vector<Scalar_t> u_vals = c_handler.evaluate(0, mesh.vertex_begin(), mesh.vertex_end());
 			auto u_lookup = GV::make_index_lookup<float>(

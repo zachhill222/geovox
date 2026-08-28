@@ -277,7 +277,6 @@ namespace GV {
 						continue;
 					}
 					GUTIL_ASSERT(!dofhandler.is_active_stable(dof));
-					GUTIL_ASSERT(dofhandler.is_refined_stable(dof));
 					distribute_refined(dof, coefs[i][idx], std::span<Scalar_t>(new_coefs), new_size);
 				}//for dofs
 			}//omp parallel

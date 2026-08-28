@@ -359,7 +359,7 @@ namespace GV {
 		static constexpr bool NEEDS_DOF_GRAD = AsTest ? Kernel_t::TEST_DOF_GRAD : Kernel_t::TRIAL_DOF_GRAD;
 
 		std::vector<DOF_t>  dofs;		//active dofs on the current element
-		std::vector<size_t> global_idx;		//global numbers of the dofs
+		std::vector<size_t> global_idx;	//global numbers of the dofs
 		
 		std::vector<DofValueCache_t> vals;
 		std::vector<DofGradCache_t>  grad;

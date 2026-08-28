@@ -197,13 +197,16 @@ namespace GV {
 
 		///Convenient interface
 		static constexpr void Reciprocate(std::span<Scalar> r) noexcept {
+			//when computing the reciprocals of the main diagonal,
+			//use 1 for any zero diagonal components. For iterative methods
+			//applied to a non-invertible matrix (say there are blocks of zero rows/cols)
+			//this keep the solution vector constant over those rows.
 			GUTIL_OMP(parallel)
 			{
 				OmpIndexRange range(r.size());
 				GUTIL_SIMD()
 				for (auto i=range.begin; i<range.end; ++i) {
-					GUTIL_ASSERT(gutil::abs(r[i]) > inv_cutoff);
-					r[i] = Scalar{1}/r[i];
+					r[i] = gutil::abs(r[i]) > inv_cutoff ? Scalar{1}/r[i] : Scalar{1};
 				}
 			}
 		}

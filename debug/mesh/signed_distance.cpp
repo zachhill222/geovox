@@ -71,10 +71,6 @@ int main(int argc, char* argv[]) {
 			[&assembly, &mesh](Vert_t vtx) {return assembly.heaviside(mesh.geo_coord(vtx), 0.1);},
 			"heaviside");
 
-	auto dirac_lookup = GV::make_feature_lookup<Vert_t>(
-			[&assembly, &mesh](Vert_t vtx) {return assembly.dirac(mesh.geo_coord(vtx), 0.1);},
-			"dirac");
-
 	auto depth_lookup = GV::make_feature_lookup<Elem_t>(
 			[](Elem_t el) {return el.depth();},
 			"depth"
@@ -106,7 +102,7 @@ int main(int argc, char* argv[]) {
 		);
 
 	gutil::Logger::log("write details to file");
-	mesh.append_point_data_field_binary("signed_distance.vtk", "sdf", sd_lookup, heaviside_lookup, dirac_lookup);
+	mesh.append_point_data_field_binary("signed_distance.vtk", "sdf", sd_lookup, heaviside_lookup);
 	mesh.append_cell_data_field_binary("signed_distance.vtk", "sdf", depth_lookup, ijk_lookup, nbr_lookup, depth_field_lookup);
 
 	

@@ -73,7 +73,7 @@ namespace GV {
 		const GeoPoint_t 							inv_diag;					//reciprocal of the sidelength
 		
 		mutable std::vector<Vert_t>					tracked_vertices{};			//a compressed list of 'active' vertices, primarily used for visualization. reduced keys are stored.
-		gutil::BinSort<Vert_t>						vertex_sorter{};			//sort the vertices for better lookup and deduplication
+		mutable gutil::BinSort<Vert_t>				vertex_sorter{};			//sort the vertices for better lookup and deduplication
 		mutable std::atomic<bool>					is_vertices_collected_{false};	
 		mutable std::atomic<bool>					is_depth_explicitly_correct_{false};
 

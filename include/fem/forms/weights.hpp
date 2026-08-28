@@ -135,7 +135,7 @@ namespace GV {
 			constexpr int N = QuadRule_t::TOTAL_QUAD_POINTS;
 			
 			ScalarValueCache<QuadRule_t> result;
-			Assembly_t::heaviside_tanh({result.data(),N}, {sdf->data(),N}, eps);
+			Assembly_t::heaviside({result.data(),N}, {sdf->data(),N}, eps);
 
 			if constexpr(!INTERIOR){
 				GUTIL_SIMD()
@@ -240,7 +240,7 @@ namespace GV {
 			GUTIL_ASSERT(scalar_field);   // NEEDS_SCALAR_VALS=true means this must be provided by the caller
 
 			ScalarValueCache<QuadRule_t> phi;
-			Assembly_t::heaviside_tanh({phi.data(),N}, {sdf->data(),N}, eps);
+			Assembly_t::heaviside({phi.data(),N}, {sdf->data(),N}, eps);
 
 			auto gx=qr.geo_x(), gy=qr.geo_y(), gz=qr.geo_z();
 			ScalarValueCache<QuadRule_t> result;

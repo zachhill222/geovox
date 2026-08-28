@@ -8,11 +8,11 @@
 
 namespace GV {
 
-	template<gutil::IsReal T, uint8_t Period=0, bool Interior=false> requires(Period<8)
+	template<gutil::IsReal T, uint8_t Period=0, bool Interior=false, int HeavisideFunc=0> requires(Period<8)
 	struct SignedDistanceSpheres : public GV::PeriodicVolumeOctree<gutil::Sphere<3,T>, Period> {
 		using BASE = GV::PeriodicVolumeOctree<gutil::Sphere<3,T>, Period>;
 
-		using Particle_t 	= typename BASE::value_type;
+		using Particle_t	= typename BASE::value_type;
 		using Scalar_t		= typename BASE::scalar_type;
 		using Point_t 		= typename BASE::point_type;
 		using Box_t 		= typename BASE::box_type;
@@ -20,6 +20,48 @@ namespace GV {
 		using BASE::BASE;
 		using BASE::data_;
 
+
+		/////////////////////////////////////////////////////////////////////////////////
+		/// Static methods for expensive functions.
+		/// TODO: implement lookup tables.
+		/////////////////////////////////////////////////////////////////////////////////
+		[[nodiscard]] static T fast_cos(T x)  noexcept { return std::cos(x);  }
+		[[nodiscard]] static T fast_sin(T x)  noexcept { return std::sin(x);  }
+		[[nodiscard]] static T fast_tanh(T x) noexcept { return std::tanh(x); }
+		
+		[[nodiscard]] static T heaviside_of_sdf(T sd, T, T three_over_eps) noexcept requires(HeavisideFunc==0) {
+			return T{0.5} * (T{1} - fast_tanh(sd*three_over_eps));
+		}
+		[[nodiscard]] static T heaviside_grad_coef_of_sdf(T sd, T, T three_over_eps) noexcept requires(HeavisideFunc==0) {
+			//multiply with grad_sdf to get the gradient of the heaviside
+			const T phi = heaviside_of_sdf(sd, T{0}, three_over_eps);
+			return T{2} * three_over_eps * phi * (phi - T{1});
+		}
+
+		[[nodiscard]] static T heaviside_of_sdf(T sd, T eps, T neg_one_over_eps) noexcept requires(HeavisideFunc==1) {
+			if (sd < -eps) {return T{1};}
+			if (sd >  eps) {return T{0};}
+			const T r = sd*neg_one_over_eps;
+			return  T{0.5}*( T{1} + r + T{0.15915494309} * fast_sin( T{3.14159265359}*r ));
+		}
+		[[nodiscard]] static T heaviside_grad_coef_of_sdf(T sd, T eps, T neg_one_over_eps) noexcept requires(HeavisideFunc==1) {
+			//multiply with grad_sdf to get the gradient of the heaviside
+			if ( gutil::abs(sd) > eps) {return T{0};}
+			return T{0.5}*neg_one_over_eps*( T{1} + fast_cos( T{3.14159265359}*sd*neg_one_over_eps) );
+		}
+
+		[[nodiscard]] static T compute_reciprocal_coef(T eps) noexcept {
+			if constexpr (HeavisideFunc==0) {return T{3}/eps;}
+			else if constexpr (HeavisideFunc==1) {return T{-1}/eps;}
+			else {
+				GUTIL_ABORT("unkown HeavisideFunc option");
+				return T{0};
+			}
+		}
+
+		/////////////////////////////////////////////////////////////////////////////////
+		/// Compute the signed distance and/or its gradient.
+		/////////////////////////////////////////////////////////////////////////////////
 		[[nodiscard]] T signed_distance(const Point_t& point) const noexcept {
 			const size_t idx = this->find_nearest(point);
 			GUTIL_ASSERT(idx< data_.size());
@@ -103,85 +145,54 @@ namespace GV {
 		}
 
 
-		////////////////////////////////////////////////////////
-		/// Using smoothed heaviside sin/cos (compact support)
-		////////////////////////////////////////////////////////
+		/////////////////////////////////////////////////////////////////////////////////
+		/// Define heaviside functions for HeavisideFunc=0 (use tanh, no compact support).
+		/////////////////////////////////////////////////////////////////////////////////
 		[[nodiscard]] T heaviside(const Point_t& point, T eps) const noexcept {
-			//return 0 if sgndist(point) < -eps (inside a particle)
-			//return 1 if sgndist(point) > eps (outside all particles)
 			GUTIL_ASSERT(eps>T{0});
-
-			const T sd = signed_distance(point);
-
-			if (sd < -eps) {return 0;}
-			else if (sd > eps) {return 1;}
-
-			const T ratio = sd/eps;
-			return T{0.5}*( T{1.0} + ratio + T{0.15915494309} * gutil::sin( T{3.14159265359}*ratio));
+			const T c = compute_reciprocal_coef(eps);
+			return heaviside_of_sdf(signed_distance(point), eps, c);
 		}
 
-		[[nodiscard]] T dirac(const Point_t& point, T eps) const noexcept {
-			//return 0 if |sgndist(point)| > eps (heaviside function is constant)
-			GUTIL_ASSERT(eps>T{0});
-
-			const T sd = signed_distance(point);
-			if ( gutil::abs(sd) > eps) {return 0;}
-
-			const T ratio = T{1.0}/eps;
-			return T{0.5}*ratio*( T{1.0} + gutil::cos( T{3.14159265359}*sd*ratio));
-		}
-
-
-
-		////////////////////////////////////////////////////////
-		/// Using smoothed heaviside tanh (no compact support)
-		////////////////////////////////////////////////////////
-		[[nodiscard]] static T fast_tanh(T x) noexcept {
-			//TODO: build interpolation table
-			return std::tanh(x);
-		}
-
-		[[nodiscard]] T heaviside_tanh(const Point_t& point, T eps) const noexcept {
-			GUTIL_ASSERT(eps>T{0});
-			return T{0.5} * (T{1} - fast_tanh(T{3}*signed_distance(point)/eps)); //scale by 3, see https://arxiv.org/pdf/2509.25115v1
-		}
-
-		[[nodiscard]] Point_t heaviside_tanh_grad(const Point_t& point, T eps) const noexcept {
+		[[nodiscard]] Point_t heaviside_grad(const Point_t& point, T eps) const noexcept {
 			GUTIL_ASSERT(eps>T{0});
 			const size_t idx = this->find_nearest(point);
+			
 			GUTIL_ASSERT(idx<data_.size());
 			const Particle_t& nearest = data_[idx];
 
 			const T sdf = nearest.signed_distance(point);
-			const T eps_inv = T{3}/eps;	//scale by 3, see https://arxiv.org/pdf/2509.25115v1
+			const Point_t sdf_grad = nearest.grad_signed_distance(point);
 
-			const T heavi = T{0.5} * (T{1} - fast_tanh(sdf * eps_inv));
-
-			return T{-2} * eps_inv * heavi * (T{1} - heavi) * (nearest.grad_signed_distance(point));
+			const T c = compute_reciprocal_coef(eps);
+			if constexpr (Interior) {
+				return heaviside_grad_coef_of_sdf(sdf, eps, c) * sdf_grad;
+			}
+			else {
+				return -heaviside_grad_coef_of_sdf(-sdf, eps, c) * sdf_grad;
+			}
 		}
 
-		static void heaviside_tanh(std::span<T> result, std::span<const T> sdf, const T eps) noexcept {
+		static void heaviside(std::span<T> result, std::span<const T> sdf, const T eps) noexcept {
 			GUTIL_ASSERT(result.size()==sdf.size());
 			GUTIL_ASSERT(eps>0);
 			const size_t N = sdf.size();
 			
-			const T scale = T{3}/eps;
-			// GUTIL_SIMD() //TODO: make interpolation table lookup simd-compatible
+			const T c = compute_reciprocal_coef(eps);
 			for (size_t i=0; i<N; ++i) {
-				result[i] = T{0.5} * (T{1} - fast_tanh(scale * sdf[i]));
+				result[i] = heaviside_of_sdf(sdf[i], eps, c);
 			}
 		}
 
-		static void heaviside_tanh_grad(std::span<T> result, std::span<const T> sdf, std::span<const T> sdf_grad, const T eps) noexcept {
+		static void heaviside_grad(std::span<T> result, std::span<const T> sdf, std::span<const T> sdf_grad, const T eps) noexcept {
 			GUTIL_ASSERT(result.size()==3*sdf.size());
 			GUTIL_ASSERT(result.size()==sdf_grad.size());
 			GUTIL_ASSERT(eps>0);
 
 			const size_t N = sdf.size();
-			const T scale = T{3}/eps;
+			const T c = compute_reciprocal_coef(eps);
 			for (size_t i=0; i<N; ++i) {
-				const T phi = T{0.5} * (T{1} - fast_tanh(scale * sdf[i]));
-				const T coef = -(T{6}/eps) * phi * (T{1} - phi);
+				const T coef  = heaviside_grad_coef_of_sdf(sdf, eps, c);
 
 				result[i]     = coef * sdf_grad[i];
 				result[i+N]   = coef * sdf_grad[i+N];

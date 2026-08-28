@@ -5,3 +5,4 @@
 #include "mesh/mesh.hpp"
 #include "diffuse_domain/diffuse_domain.hpp"
 #include "fem/fem.hpp"
+#include "pde/pde.hpp"

@@ -38,7 +38,7 @@ using Point_t        = gutil::Point<3,Scalar_t>;
 using Box_t          = gutil::Box<3,Scalar_t>;
 using Sphere_t       = gutil::Sphere<3,Scalar_t>;
 
-using Assembly_t     = GV::SignedDistanceSpheres<Scalar_t,PERIODIC_BC,true>;
+using Assembly_t     = GV::SignedDistanceSpheres<Scalar_t,PERIODIC_BC,true,1>;
 using MeshHandler_t  = GV::DiffuseDomainMeshHandler<Assembly_t>;
 using Mesh_t         = typename MeshHandler_t::Mesh_t;
 using Elem_t         = typename MeshHandler_t::Mesh_t::Elem_t;
@@ -282,7 +282,7 @@ void save(int number, MeshHandler_t& m_handler, const DofHandler_t& d_handler, c
 		[&](Vert_t vtx) { return assembly.signed_distance(mesh.geo_coord(vtx)); }, "signed_distance");
 
 	auto phi_lookup = GV::make_feature_lookup<Vert_t>(
-		[&](Vert_t vtx) { return assembly.heaviside_tanh(mesh.geo_coord(vtx), eps); }, "phi");
+		[&](Vert_t vtx) { return assembly.heaviside(mesh.geo_coord(vtx), eps); }, "phi");
 
 	std::vector<Scalar_t> u_vals = c_handler.evaluate(0, mesh.vertex_begin(), mesh.vertex_end());
 	auto u_lookup = GV::make_index_lookup<Scalar_t>(

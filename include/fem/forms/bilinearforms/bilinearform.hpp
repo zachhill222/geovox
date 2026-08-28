@@ -22,19 +22,19 @@ namespace GV {
 	/// This allows us to use Eigen's setFromSortedTriplets direcly from a vector
 	/// of GV::Triplet.
 	//////////////////////////////////////////////////////////////////
-	template<typename Scalar, typename StorageIndex=size_t, int StorageOrder=0> requires (StorageOrder==0 || StorageOrder==1)
+	template<typename Scalar_t, typename StorageIndex=size_t, int StorageOrder=0> requires (StorageOrder==0 || StorageOrder==1)
 	struct Triplet {
 		//add an api compatible with Eigen
-		StorageIndex row() const {return i;}
-		StorageIndex col() const {return j;}
-		Scalar       value() const {return val;}
+		[[nodiscard]] StorageIndex row() const noexcept {return i;}
+		[[nodiscard]] StorageIndex col() const noexcept {return j;}
+		[[nodiscard]] Scalar_t     value() const noexcept {return val;}
 
 		StorageIndex i, j;
-		Scalar val;
+		Scalar_t val;
 
-		constexpr Triplet(StorageIndex i, StorageIndex j, Scalar v) noexcept : i(i), j(j), val(v) {}
+		constexpr Triplet(StorageIndex i, StorageIndex j, Scalar_t v) noexcept : i(i), j(j), val(v) {}
 		constexpr Triplet() : i(0), j(0), val(0) {}
-		static constexpr Triplet None() noexcept {return Triplet{StorageIndex(-1), StorageIndex(-1), Scalar{}};}
+		static constexpr Triplet None() noexcept {return Triplet{StorageIndex(-1), StorageIndex(-1), Scalar_t{}};}
 
 		bool operator<(const Triplet& other) const noexcept requires (StorageOrder==0) {
 			if (j<other.j) {return true;}
@@ -81,12 +81,42 @@ namespace GV {
 			//take two vectors and merge the right into the left, then compress
 			//for fastest results, compress left and right ahead of time
 			left.insert(left.end(), std::make_move_iterator(right.begin()), std::make_move_iterator(right.end()));
-			Compress(left);
+			Triplet::Compress(left);
 			
 			right.clear();
 			right.shrink_to_fit();
 
 			return left;
+		}
+
+		//////////////////////////////////////////////////////////////////////////////////////////////
+		/// Convert from a vector of triplets to vectors of i, j, and v (i.e., Eigen vs PETSc)
+		//////////////////////////////////////////////////////////////////////////////////////////////
+		static void SplitComponents(std::vector<StorageIndex>& coo_i, std::vector<StorageIndex>& coo_j, std::vector<Scalar_t>& coo_v, 
+			std::vector<Triplet>&& coo_triplets) noexcept {
+			GUTIL_ASSERT(coo_i.size()==coo_j.size() && coo_j.size()==coo_v.size());
+
+			const size_t n = coo_triplets.size();
+			const size_t offset = coo_i.size();
+			
+			coo_i.resize(coo_i.size() + n);
+			coo_j.resize(coo_j.size() + n);
+			coo_v.resize(coo_v.size() + n);
+
+			GUTIL_OMP(parallel)
+			{
+				OmpIndexRange range(n);
+				GUTIL_SIMD()
+				for (size_t idx=range.begin; idx<range.end; ++idx) {
+					coo_i[offset+idx] = coo_triplets[idx].row();
+					coo_j[offset+idx] = coo_triplets[idx].col();
+					coo_v[offset+idx] = coo_triplets[idx].val();
+				}
+			}
+
+			//free old triplets
+			coo_triplets.clear();
+			coo_triplets.shrink_to_fit();
 		}
 	};
 
@@ -227,7 +257,7 @@ namespace GV {
 						if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 							wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 						}
-
+						
 						local_y.assign(v_size, 0);
 						local_x.assign(u_size, 0);
 						local_matrix.assign(u_size*v_size, 0);
@@ -247,7 +277,7 @@ namespace GV {
 
 						//scatter local result
 						for (size_t i=0; i<v_size; ++i) {
-							Y[trial_cache.global_idx[i]] += alpha*local_y[i];
+							Y[test_cache.global_idx[i]] += alpha*local_y[i];
 						}
 					}
 				}
@@ -367,7 +397,7 @@ namespace GV {
 
 					//scatter local result
 					for (size_t i=0; i<v_size; ++i) {
-						GUTIL_OMP(atomic) Y[trial_cache.global_idx[i]] += alpha*local_y[i];
+						GUTIL_OMP(atomic) Y[test_cache.global_idx[i]] += alpha*local_y[i];
 					}
 				}
 			}

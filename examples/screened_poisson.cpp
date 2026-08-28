@@ -153,7 +153,7 @@ void update_solution(DofHandler_t& d_handler, CoefHandler_t& c_handler) {
 	const size_t n = d_handler.n_dofs();
 	GUTIL_LOG(n, " dofs");
 
-	std::vector<Eigen::Triplet<Scalar_t>> triplets;
+	std::vector<GV::Triplet<Scalar_t>> triplets;
 	{
 		GUTIL_TIMER("assembling A (triplets)");
 		b_form.build_triplets(triplets);

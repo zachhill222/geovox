@@ -137,8 +137,8 @@ namespace GV {
 		using BASE::begin_active_keys_unstable;
 		using BASE::end_active_keys_unstable;
 
-		std::span<DOF_t>		active_dofs;
-		const Mesh_t& 			mesh;					//link to the mesh, we can request refinement through const methods
+		std::span<DOF_t>	active_dofs;
+		const Mesh_t& 		mesh;					//link to the mesh, we can request refinement through const methods
 		
 		[[nodiscard]] bool is_current() const noexcept {
 			return BASE::is_current() && are_spans_same_data(active_dofs, BASE::active_keys);
@@ -457,7 +457,12 @@ namespace GV {
 			GUTIL_ASSERT(is_all_dofs_conformal());
 		}
 
-
+		void clear() noexcept {
+			GV_BEGIN_UNSTABLE
+			BASE::clear();
+			GV_END_UNSTABLE
+		}
+		
 		/////////////////////////////////////////////////////////////////////////
 		/// Book keeping methods
 		/////////////////////////////////////////////////////////////////////////
