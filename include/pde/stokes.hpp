@@ -57,9 +57,19 @@ namespace GV {
 		using EigenCompMat	 = Eigen::Matrix<Scalar_t, Eigen::Dynamic, 3>;	//aid solving AX=B once vs. three Ax=b problems
 		using Triplet_t    	 = Triplet<Scalar_t, typename EigenSpMat::StorageIndex,Eigen::RowMajor>;
 
-		using Preconditioner = DiagonalPreconditioner<std::vector<Scalar_t>>;
-		using InnerSolver    = Eigen::GMRES<EigenSpMat, Preconditioner>;
-		// using InnerSolver    = Eigen::ConjugateGradient<EigenSpMat, Eigen::Upper|Eigen::Lower, Preconditioner>;
+		using DiagPrecon     = DiagonalPreconditioner<std::vector<Scalar_t>>;
+		// using BlockSolver    = Eigen::ConjugateGradient<EigenSpMat, Eigen::Upper|Eigen::Lower, DiagPrecon>;
+		// using BlockSolver    = Eigen::GMRES<EigenSpMat, DiagPrecon>;
+		// using BlockSolver    = Eigen::SimplicialLDLT<EigenSpMat>;
+		// using BlockSolver    = Eigen::IncompleteLUT<Scalar_t>;
+		using BlockSolver    = Eigen::IncompleteCholesky<Scalar_t>;
+		using Preconditioner = StokesBlockDiagonalPreconditioner<EigenSpMat, BlockSolver, BlockSolver>;
+		using MonolithicSolver = Eigen::GMRES<EigenSpMat, Preconditioner>;
+		// using MonolithicSolver = Eigen::MINRES<EigenSpMat, Eigen::Upper|Eigen::Lower, Preconditioner>;
+
+		using InnerSolver    = Eigen::GMRES<EigenSpMat, DiagPrecon>;
+		// using InnerSolver    = Eigen::MINRES<EigenSpMat, Eigen::Upper|Eigen::Lower, DiagPrecon>;
+		// using InnerSolver    = Eigen::ConjugateGradient<EigenSpMat, Eigen::Upper|Eigen::Lower, DiagPrecon>;
 		// using InnerSolver    = Eigen::SimplicialLDLT<EigenSpMat>;
 
 		static constexpr int N_QUAD = nQuadPoints;
@@ -182,10 +192,11 @@ namespace GV {
 		}
 
 		void refine_interior(Scalar_t cutoff = Scalar_t{0.25} ) {
+			const Scalar_t eps = read_eps();
 			std::vector<Elem_t> elems = m_handler.mesh.select_elements(
-				[this, cutoff](Elem_t el) {
+				[this, cutoff, eps](Elem_t el) {
 					const auto pt = m_handler.mesh.geo_center(el);
-					return m_handler.assembly.heaviside(pt) > cutoff;
+					return m_handler.assembly.heaviside(pt, eps) > cutoff;
 				});
 			p_handler.refine_quasi_hierarchical(elems);
 			set_velocity_dofs();
@@ -290,6 +301,127 @@ namespace GV {
 			return G;
 		}
 
+		[[nodiscard]] auto make_monolithic_mat_coo() const {
+			const size_t n_v = u_handler.n_dofs();
+			
+			auto A_form   = make_A_form();
+			auto Ap_form  = make_A_penalty_form();
+			
+			auto G_form0  = make_G_form<0>();
+			auto G_form1  = make_G_form<1>();
+			auto G_form2  = make_G_form<2>();
+
+			auto Gt_form0 = make_Gt_form<0>();
+			auto Gt_form1 = make_Gt_form<1>();
+			auto Gt_form2 = make_Gt_form<2>();
+
+			std::vector<Triplet_t> triplets;
+
+			// diagonal A blocks -- same A for each velocity component, offset by c*n_v
+			for (size_t c=0; c<3; ++c) {
+				A_form.build_triplets(triplets, c*n_v, c*n_v);
+				Ap_form.build_triplets(triplets, c*n_v, c*n_v);
+			}
+
+			// off-diagonal G blocks (row=velocity component c, col=pressure, starting at 3*n_v)
+			G_form0.build_triplets(triplets, 0*n_v, 3*n_v);
+			G_form1.build_triplets(triplets, 1*n_v, 3*n_v);
+			G_form2.build_triplets(triplets, 2*n_v, 3*n_v);
+
+			// off-diagonal G^t blocks (row=pressure at 3*n_v, col=velocity component c)
+			Gt_form0.build_triplets(triplets, 3*n_v, 0*n_v);
+			Gt_form1.build_triplets(triplets, 3*n_v, 1*n_v);
+			Gt_form2.build_triplets(triplets, 3*n_v, 2*n_v);
+
+			return triplets;
+		}
+
+		[[nodiscard]] auto make_monolithic_rhs() const {
+			const size_t n_v = u_handler.n_dofs();
+			const size_t n_p = p_handler.n_dofs();
+			const size_t N = 3*n_v + n_p;
+
+			auto F_form0 = make_acc_form<0>();
+			auto F_form1 = make_acc_form<1>();
+			auto F_form2 = make_acc_form<2>();
+
+			std::vector<Scalar_t> rhs(N, Scalar_t{0});   // last n_p entries stay 0 -- the incompressibility constraint's own rhs is homogeneous (h=0)
+
+			if (body_acceleration[0]!=Scalar_t{0}) { F_form0.evaluate_vector(std::span<Scalar_t>(rhs.data()+0*n_v, n_v)); }
+			if (body_acceleration[1]!=Scalar_t{0}) { F_form1.evaluate_vector(std::span<Scalar_t>(rhs.data()+1*n_v, n_v)); }
+			if (body_acceleration[2]!=Scalar_t{0}) { F_form2.evaluate_vector(std::span<Scalar_t>(rhs.data()+2*n_v, n_v)); }
+
+			return rhs;
+		}
+
+
+		/////////////////////////////////////////////////////////
+		/// Utility methods to copy velocity to/from an eigen dense matrix
+		/////////////////////////////////////////////////////////
+		[[nodiscard]] EigenCompMat get_velocity_as_mat() const {
+			const size_t n_v = u_handler.n_dofs();
+			EigenCompMat X(n_v, 3);
+			X.col(0) = Eigen::Map<const EigenVec>(u_coefs.get_coefs(0).data(), n_v); //copy, not a view
+			X.col(1) = Eigen::Map<const EigenVec>(u_coefs.get_coefs(1).data(), n_v); //copy, not a view
+			X.col(2) = Eigen::Map<const EigenVec>(u_coefs.get_coefs(2).data(), n_v); //copy, not a view
+			return X;
+		}
+
+		void copy_back_velocity(const EigenCompMat& X) {
+			GUTIL_ASSERT(u_handler.n_dofs() == (size_t) X.rows());
+			const size_t n_v = u_handler.n_dofs();
+
+			for (int j=0; j<3; ++j) {
+				std::copy(X.col(j).data(), X.col(j).data()+n_v, u_coefs.get_coefs(j).data());
+			}
+		}
+
+
+
+		/////////////////////////////////////////////////////////
+		/// Utility methods to compute vector products with individual blocks
+		/////////////////////////////////////////////////////////
+		[[nodiscard]] EigenCompMat apply_G(std::span<const Scalar_t> p) const {
+			//column i of the result is the velocity component i result.
+			const size_t n_v = u_handler.n_dofs();
+			EigenCompMat result = EigenCompMat::Zero(n_v, 3);
+			auto g0 = make_G_form<0>(); g0.mat_vec_multiply_accumulate(std::span<Scalar_t>(result.col(0).data(), n_v), p);
+			auto g1 = make_G_form<1>(); g1.mat_vec_multiply_accumulate(std::span<Scalar_t>(result.col(1).data(), n_v), p);
+			auto g2 = make_G_form<2>(); g2.mat_vec_multiply_accumulate(std::span<Scalar_t>(result.col(2).data(), n_v), p);
+			return result;
+		}
+
+		[[nodiscard]] EigenVec apply_Gt(std::span<const Scalar_t> u0, std::span<const Scalar_t> u1, std::span<const Scalar_t> u2) const {
+			// G^t*u = Gt0*u0 + Gt1*u1 + Gt2*u2
+			const size_t n_p = p_handler.n_dofs();
+			EigenVec result = EigenVec::Zero(n_p);
+			auto gt0 = make_Gt_form<0>(); gt0.mat_vec_multiply_accumulate(std::span<Scalar_t>(result.data(), n_p), u0);
+			auto gt1 = make_Gt_form<1>(); gt1.mat_vec_multiply_accumulate(std::span<Scalar_t>(result.data(), n_p), u1);
+			auto gt2 = make_Gt_form<2>(); gt2.mat_vec_multiply_accumulate(std::span<Scalar_t>(result.data(), n_p), u2);
+			return result;
+		}
+
+		[[nodiscard]] EigenVec apply_Gt(const EigenCompMat& u) const {
+			const size_t n_v = u_handler.n_dofs();
+			return apply_Gt(
+				std::span<const Scalar_t>(u.col(0).data(), n_v),
+				std::span<const Scalar_t>(u.col(1).data(), n_v),
+				std::span<const Scalar_t>(u.col(2).data(), n_v));
+		}
+
+		[[nodiscard]] EigenCompMat assemble_momentum_rhs(std::span<const Scalar_t> p) const {
+			//for the system K*u = f - G*p
+			EigenCompMat result = -apply_G(p);   // G0*p, G1*p, G2*p per column
+
+			auto f0 = make_acc_form<0>();
+			auto f1 = make_acc_form<1>();
+			auto f2 = make_acc_form<2>();
+			const size_t n_v = u_handler.n_dofs();
+			if (body_acceleration[0]!=Scalar_t{0}) { f0.evaluate_vector(std::span<Scalar_t>(result.col(0).data(), n_v)); }
+			if (body_acceleration[1]!=Scalar_t{0}) { f1.evaluate_vector(std::span<Scalar_t>(result.col(1).data(), n_v)); }
+			if (body_acceleration[2]!=Scalar_t{0}) { f2.evaluate_vector(std::span<Scalar_t>(result.col(2).data(), n_v)); }
+			return result;
+		}
 
 
 		/////////////////////////////////////////////////////////
@@ -309,7 +441,7 @@ namespace GV {
 			auto Gt_form2 = make_Gt_form<2>(); Gt_form2.mat_vec_multiply_accumulate(GV::as_span(v_div), w);
 
 			//compute the L2 norm of the divergence
-			Eigen::ConjugateGradient<EigenSpMat, Eigen::Lower|Eigen::Upper, Preconditioner> solver;
+			Eigen::ConjugateGradient<EigenSpMat, Eigen::Lower|Eigen::Upper, DiagPrecon> solver;
 			solver.compute(Mp);
 			EigenVec v_div_coef = solver.solve(v_div);		//M*v_div_coef = Gt*V = Gt0*u + Gt1*v + Gt2*w
 			Scalar_t div_norm2  = v_div_coef.dot(v_div);	//v_div_coef^t * M * v_div_coef = v_div_coef^t * v_div
@@ -323,17 +455,26 @@ namespace GV {
 			return std::sqrt(div_norm2/v_norm2);
 		}
 
+		[[nodiscard]] Scalar_t Rdiv(const EigenSpMat& Mp, const EigenCompMat& X) const noexcept {
+			GUTIL_ASSERT(u_handler.n_dofs() == (size_t) X.rows());
+			const size_t n_v = u_handler.n_dofs();
+
+			return Rdiv(Mp, std::span<const Scalar_t>(X.col(0).data(), n_v), 
+							std::span<const Scalar_t>(X.col(1).data(), n_v), 
+							std::span<const Scalar_t>(X.col(2).data(), n_v));
+		}
+
 		[[nodiscard]] Scalar_t Rdiv(std::span<const Scalar_t> u, std::span<const Scalar_t> v, std::span<const Scalar_t> w) const noexcept {
 			//compute ||div(velocity)||_L2 / ||velocity||_L2 via integral L2 norms weighted by the diffuse domain heaviside function
 			GUTIL_ASSERT(u.size()==v.size() && v.size()==w.size() && w.size()==u_handler.n_dofs());
-			
-			auto Mp_form = make_M_pressure_form();
-			std::vector<Triplet_t> triplets;
-			Mp_form.build_triplets(triplets);
-			EigenSpMat Mp(p_handler.n_dofs(), p_handler.n_dofs());
-			Mp.setFromTriplets(triplets.begin(), triplets.end());
-			return Rdiv(Mp,u,v,w);
+			return Rdiv(make_pressure_mass_mat(),u,v,w);
 		}
+
+		[[nodiscard]] Scalar_t Rdiv() const noexcept {
+			return Rdiv(make_pressure_mass_mat(), u_coefs.get_coefs(0), u_coefs.get_coefs(1), u_coefs.get_coefs(2));
+		}
+
+
 		
 
 

@@ -638,6 +638,112 @@ namespace GV {
 		}
 
 
+		[[nodiscard]] T evaluate_form(std::span<const T> Y, std::span<const T> X) const noexcept requires(Kernel_t::IS_SYMMETRIC) {
+			GUTIL_ASSERT(trial_handler.is_current());
+			GUTIL_ASSERT(test_handler.is_current());
+			GUTIL_ASSERT(X.size() == trial_handler.n_dofs());
+			GUTIL_ASSERT(Y.size() == test_handler.n_dofs());
+			GUTIL_ASSERT(&trial_handler == &test_handler);
+
+			T result{0};
+			GUTIL_OMP(parallel)
+			{
+				QuadRule_t 				quad_rule(mesh);
+				ElementTestCache_t		sym_cache(test_handler,quad_rule);
+				KernelEval				k_eval(kernel, sym_cache, sym_cache, quad_rule);
+				WeightCache_t			wt;
+				
+				T  						thread_result{0};
+				std::vector<T>			local_x;
+				std::vector<T>			local_y;
+
+				OmpIteratorRange	range(mesh.element_begin(), mesh.element_end());
+				for (auto it=range.begin; it!=range.end; ++it) {
+					const MeshElem_t el = *it;
+						
+					quad_rule.set_element(el,mesh.max_depth);
+					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
+					
+					sym_cache.gather_fh();		const size_t v_size = sym_cache.size();
+					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
+						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
+					}
+
+					local_x.resize(v_size);
+					for (size_t i=0; i<v_size; ++i) {local_x[i]  = X[sym_cache.global_idx[i]]; }
+
+					local_y.resize(v_size);
+					for (size_t i=0; i<v_size; ++i) {local_y[i]  = Y[sym_cache.global_idx[i]]; }
+
+					//construct local matrix (col major)
+					for (size_t j=0; j<v_size; ++j) {
+						Scalar_t val = k_eval(j,j,&wt);
+						thread_result += val*local_y[j]*local_x[j];
+						for (size_t i=j+1; i<v_size; ++i) {
+							Scalar_t val = k_eval(j,i,&wt);
+							thread_result += val * ( local_y[i]*local_x[j] + local_y[j]*local_x[i] );
+						}
+					}
+				}
+
+				GUTIL_OMP(atomic) result += thread_result;
+			}
+			return result;
+		}
+
+		[[nodiscard]] T evaluate_form(std::span<const T> Y, std::span<const T> X) const noexcept requires(!Kernel_t::IS_SYMMETRIC) {
+			GUTIL_ASSERT(trial_handler.is_current());
+			GUTIL_ASSERT(test_handler.is_current());
+			GUTIL_ASSERT(X.size() == trial_handler.n_dofs());
+			GUTIL_ASSERT(Y.size() == test_handler.n_dofs());
+
+			T result{0};
+			GUTIL_OMP(parallel)
+			{
+				QuadRule_t 				quad_rule(mesh);
+				ElementTrialCache_t		trial_cache(trial_handler,quad_rule);
+				ElementTestCache_t		test_cache(test_handler,quad_rule);
+				KernelEval				k_eval(kernel, trial_cache, test_cache, quad_rule);
+				WeightCache_t			wt;
+				
+				T  						thread_result{0};
+				std::vector<T>			local_x;
+				std::vector<T>			local_y;
+
+				OmpIteratorRange		range(mesh.element_begin(), mesh.element_end());
+				for (auto it=range.begin; it!=range.end; ++it) {
+					const MeshElem_t el = *it;
+						
+					quad_rule.set_element(el,mesh.max_depth);
+					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
+					
+					test_cache.gather_fh();		const size_t v_size = test_cache.size();
+					trial_cache.gather_fh();	const size_t u_size = trial_cache.size();
+					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
+						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
+					}
+
+					local_x.resize(u_size);
+					for (size_t i=0; i<u_size; ++i) {local_x[i]  = X[trial_cache.global_idx[i]]; }
+
+					local_y.resize(v_size);
+					for (size_t i=0; i<v_size; ++i) {local_y[i]  = Y[test_cache.global_idx[i]]; }
+
+					//construct local matrix (col major)
+					for (size_t j=0; j<u_size; ++j) {
+						for (size_t i=0; i<v_size; ++i) {
+							Scalar_t val = k_eval(j,i,&wt);
+							thread_result += val * local_y[i]*local_x[j];
+						}
+					}
+				}
+
+				GUTIL_OMP(atomic) result += thread_result;
+			}
+			return result;
+		}
+
+
 		/////////////////////////////////////////////////////////////////////
 		/// Construct diagonal of the matrix for conditioning
 		/////////////////////////////////////////////////////////////////////

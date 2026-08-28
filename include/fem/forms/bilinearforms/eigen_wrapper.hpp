@@ -1,5 +1,9 @@
 #pragma once
 #ifdef EIGEN_MAJOR_VERSION
+#include <Eigen/Core>
+#include <Eigen/SparseCore>
+#include <Eigen/SparseCholesky>
+
 #include "gutil.hpp"
 #include "util/util.hpp"
 
@@ -32,6 +36,10 @@ namespace GV {
 	template<IsEigenBaseOperator Op, int K=1> requires (Op::IS_SYMMETRIC)
 	struct JacobiPreconditioner;	//implements K jacobi method iterations
 
+	template<typename EigenSpMat, typename VelocitySolver=Eigen::SimplicialLDLT<EigenSpMat>, 
+				typename PressureSolver=Eigen::SimplicialLDLT<EigenSpMat>>
+	struct StokesBlockDiagonalPreconditioner;
+
 	template<IsEigenBaseOperator Op1, IsEigenBaseOperator Op2>
 	struct SumOperator;
 }
@@ -49,11 +57,13 @@ namespace internal {
 	template<typename ContainerType> requires(gutil::IsReal<typename ContainerType::value_type>)
 	struct traits<GV::DiagonalOperator<ContainerType>> : public Eigen::internal::traits<Eigen::SparseMatrix<typename ContainerType::value_type>> {};
 
-	template<typename ContainerType> requires(gutil::IsReal<typename ContainerType::value_type>)
-	struct traits<GV::DiagonalPreconditioner<ContainerType>> : public Eigen::internal::traits<Eigen::SparseMatrix<typename ContainerType::value_type>> {};
+	// template<typename ContainerType> requires(gutil::IsReal<typename ContainerType::value_type>)
+	// struct traits<GV::DiagonalPreconditioner<ContainerType>> : public Eigen::internal::traits<Eigen::SparseMatrix<typename ContainerType::value_type>> {};
 
-	template<GV::IsEigenBaseOperator Op, int K> requires (Op::IS_SYMMETRIC)
-	struct traits<GV::JacobiPreconditioner<Op,K>> : public Eigen::internal::traits<Eigen::SparseMatrix<typename Op::Scalar>> {};
+	// template<GV::IsEigenBaseOperator Op, int K> requires (Op::IS_SYMMETRIC)
+	// struct traits<GV::JacobiPreconditioner<Op,K>> : public Eigen::internal::traits<Eigen::SparseMatrix<typename Op::Scalar>> {};
+
+
 
 	template<GV::IsEigenBaseOperator Op1, GV::IsEigenBaseOperator Op2>
 	struct traits<GV::SumOperator<Op1,Op2>> : public Eigen::internal::traits<Eigen::SparseMatrix<typename Op1::Scalar>> {};
@@ -314,6 +324,113 @@ namespace GV {
 			}
 			return x0;
 		}
+	};
+
+
+	/////////////////////////////////////////////////////////////////////
+	/// Block-diagonal preconditioner for a monolithic Stokes saddle-point
+	/// system: P^-1 = blockdiag(VelocitySolver(A_vv)^-1, viscosity*PressureSolver(Mp)^-1)
+	///
+	/// VelocitySolver / PressureSolver are compile-time choices for each
+	/// diagonal block -- e.g. Eigen::SimplicialLDLT (exact factoring, good
+	/// for small problems), Eigen::ConjugateGradient, or Eigen::GMRES.
+	/// Both default to SimplicialLDLT.
+	///
+	/// Eigen's own compute(A)/factorize(A) machinery only ever sees the full
+	/// monolithic A, which doesn't carry the velocity/pressure split point or
+	/// the separately-assembled A_vv/Mp blocks -- so those must be supplied
+	/// explicitly via setup(), called on solver.preconditioner() BEFORE
+	/// solver.compute(A). factorize()/analyzePattern() are deliberately
+	/// no-ops for this reason; solver.compute(A) still calls them internally,
+	/// but the real configuration already happened in setup().
+	/////////////////////////////////////////////////////////////////////
+	template< typename EigenSpMat, typename VelocitySolver, typename PressureSolver>
+	struct StokesBlockDiagonalPreconditioner {
+		using Scalar   = typename EigenSpMat::Scalar;
+		using EigenVec = Eigen::Matrix<Scalar, Eigen::Dynamic, 1>;
+		using DenseMat = Eigen::Matrix<Scalar, Eigen::Dynamic, 3>; //solve velocity blocks simultaneosly
+
+		VelocitySolver velocity_solver;
+		PressureSolver pressure_solver;
+		Scalar viscosity{1};
+		size_t n_v{0}, n_p{0};
+		bool m_is_setup{false};
+
+		//use a thread pool to dispatch solving each block
+		//Eigen is bad at multithreading individual solves
+		mutable gutil::ThreadPool threads{1};
+
+		StokesBlockDiagonalPreconditioner() = default;
+
+		/////////////////////////////////////////////////////////////////
+		/// Must be called before solver.compute(A). max_iterations/tolerance
+		/// are only forwarded to whichever sub-solver actually supports them
+		/// (direct factorizations like SimplicialLDLT simply ignore these).
+		/////////////////////////////////////////////////////////////////
+		void setup(const EigenSpMat& A_vv, const EigenSpMat& Mp, Scalar visc, int max_iterations = 1000, Scalar tolerance = Scalar{1e-10}) {
+			GUTIL_ASSERT(A_vv.rows()==A_vv.cols() && "A_vv must be a square matrix");
+			GUTIL_ASSERT(Mp.rows()==Mp.cols() && "Mp must be a square matrix");
+
+			viscosity = visc;
+			n_v = A_vv.rows();
+			n_p = Mp.rows();
+
+			if constexpr (requires(VelocitySolver s){ s.setMaxIterations(max_iterations); }) {
+				velocity_solver.setMaxIterations(max_iterations);
+			}
+			if constexpr (requires(VelocitySolver s){ s.setTolerance(tolerance); }) {
+				velocity_solver.setTolerance(tolerance);
+			}
+			velocity_solver.compute(A_vv);
+			GUTIL_ASSERT(velocity_solver.info() == Eigen::Success && "velocity block factorization/setup failed");
+
+			if constexpr (requires(PressureSolver s){ s.setMaxIterations(max_iterations); }) {
+				pressure_solver.setMaxIterations(max_iterations);
+			}
+			if constexpr (requires(PressureSolver s){ s.setTolerance(tolerance); }) {
+				pressure_solver.setTolerance(tolerance);
+			}
+			pressure_solver.compute(Mp);
+			GUTIL_ASSERT(pressure_solver.info() == Eigen::Success && "pressure block factorization/setup failed");
+
+			m_is_setup = true;
+		}
+
+		/////////////////////////////////////////////////////////////////
+		/// Eigen's required preconditioner interface. Deliberately no-ops --
+		/// real configuration happens in setup(), called explicitly beforehand.
+		/////////////////////////////////////////////////////////////////
+		template<typename MatType>
+		StokesBlockDiagonalPreconditioner& analyzePattern(const MatType&) noexcept { return *this; }
+		template<typename MatType>
+		StokesBlockDiagonalPreconditioner& factorize(const MatType&) noexcept { return *this; }
+		template<typename MatType>
+		StokesBlockDiagonalPreconditioner& compute(const MatType&) noexcept { return *this; }
+
+		template<typename Rhs>
+		[[nodiscard]] EigenVec solve(const Rhs& b) const {
+			GUTIL_ASSERT(m_is_setup && "StokesBlockDiagonalPreconditioner::setup() must be called before solving");
+			GUTIL_ASSERT(static_cast<size_t>(b.size()) == 3*n_v + n_p);
+
+			EigenVec result(b.size());
+			
+			//dispatch velocity solves
+			Eigen::Map<DenseMat>       XV(result.data(), n_v, 3);
+			Eigen::Map<const DenseMat> BV(b.data(), n_v, 3);
+			threads.submit([&](){XV = velocity_solver.solve(BV);});
+
+			//solve pressure block
+			Eigen::Map<EigenVec> XP(result.data()+3*n_v, n_p);
+			Eigen::Map<const EigenVec> BP(b.data()+3*n_v, n_p);
+			XP = viscosity * pressure_solver.solve(BP);
+
+			threads.wait_idle();
+			GUTIL_ASSERT(velocity_solver.info() == Eigen::Success && "velocity block solve failed");
+			GUTIL_ASSERT(pressure_solver.info() == Eigen::Success && "pressure block solve failed");
+			return result;
+		}
+
+		Eigen::ComputationInfo info() const noexcept { return Eigen::Success; }
 	};
 
 
