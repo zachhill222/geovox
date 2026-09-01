@@ -7,118 +7,11 @@
 
 #include "fem/mesh_quadrature.hpp"
 #include "fem/forms/util.hpp"
+#include "fem/forms/bilinearforms/triplet.hpp"
 #include "fem/forms/bilinearforms/bilinear_kernels.hpp"
 #include "fem/forms/bilinearforms/dense_linalg.hpp"
 
 namespace GV {
-
-	//////////////////////////////////////////////////////////////////
-	/// When building a sparse matrix, it is usually most convenient to 
-	/// build it from triplets. We make a custom triplet type to help
-	/// de-duplicate entries before passing to e.g., Eigen.
-	///
-	/// Set StorageOrder to 0 for ColMajor and 1 for RowMajor.
-	/// The sorting order is outer index then inner index (eg. col then row for ColMajor)
-	/// This allows us to use Eigen's setFromSortedTriplets direcly from a vector
-	/// of GV::Triplet.
-	//////////////////////////////////////////////////////////////////
-	template<typename Scalar_t, typename StorageIndex=size_t, int StorageOrder=0> requires (StorageOrder==0 || StorageOrder==1)
-	struct Triplet {
-		//add an api compatible with Eigen
-		[[nodiscard]] StorageIndex row() const noexcept {return i;}
-		[[nodiscard]] StorageIndex col() const noexcept {return j;}
-		[[nodiscard]] Scalar_t     value() const noexcept {return val;}
-
-		StorageIndex i, j;
-		Scalar_t val;
-
-		constexpr Triplet(StorageIndex i, StorageIndex j, Scalar_t v) noexcept : i(i), j(j), val(v) {}
-		constexpr Triplet() : i(0), j(0), val(0) {}
-		static constexpr Triplet None() noexcept {return Triplet{StorageIndex(-1), StorageIndex(-1), Scalar_t{}};}
-
-		bool operator<(const Triplet& other) const noexcept requires (StorageOrder==0) {
-			if (j<other.j) {return true;}
-			if (j==other.j && i < other.i) {return true;}
-			return false;
-		}
-
-		bool operator<(const Triplet& other) const noexcept requires (StorageOrder==1) {
-			if (i<other.i) {return true;}
-			if (i==other.i && j < other.j) {return true;}
-			return false;
-		}
-
-		bool operator==(const Triplet& other) const noexcept {
-			return i==other.i && j==other.j;
-		}
-
-		static void Compress(std::vector<Triplet>& list) {
-			//We assume that we are already in a multithreaded region
-			if (list.empty()) {return;}
-
-			std::sort(list.begin(), list.end());
-			auto accumulate_into = list.begin();
-
-			for (auto it=list.begin()+1; it!=list.end(); ++it) {
-				if (*it == *accumulate_into) {
-					accumulate_into->val += it->val;
-					*it = None();
-				}
-				else {
-					//keep the block to keep contiguous at the start
-					//of the array
-					++accumulate_into;
-					*accumulate_into = *it;
-				}
-			}
-
-			//remove the unneeded entries.
-			++accumulate_into;
-			list.erase(accumulate_into, list.end());
-		}
-
-		static std::vector<Triplet> Merge(std::vector<Triplet>& left, std::vector<Triplet>& right) {
-			//take two vectors and merge the right into the left, then compress
-			//for fastest results, compress left and right ahead of time
-			left.insert(left.end(), std::make_move_iterator(right.begin()), std::make_move_iterator(right.end()));
-			Triplet::Compress(left);
-			
-			right.clear();
-			right.shrink_to_fit();
-
-			return left;
-		}
-
-		//////////////////////////////////////////////////////////////////////////////////////////////
-		/// Convert from a vector of triplets to vectors of i, j, and v (i.e., Eigen vs PETSc)
-		//////////////////////////////////////////////////////////////////////////////////////////////
-		static void SplitComponents(std::vector<StorageIndex>& coo_i, std::vector<StorageIndex>& coo_j, std::vector<Scalar_t>& coo_v, 
-			std::vector<Triplet>&& coo_triplets) noexcept {
-			GUTIL_ASSERT(coo_i.size()==coo_j.size() && coo_j.size()==coo_v.size());
-
-			const size_t n = coo_triplets.size();
-			const size_t offset = coo_i.size();
-			
-			coo_i.resize(coo_i.size() + n);
-			coo_j.resize(coo_j.size() + n);
-			coo_v.resize(coo_v.size() + n);
-
-			GUTIL_OMP(parallel)
-			{
-				OmpIndexRange range(n);
-				GUTIL_SIMD()
-				for (size_t idx=range.begin; idx<range.end; ++idx) {
-					coo_i[offset+idx] = coo_triplets[idx].row();
-					coo_j[offset+idx] = coo_triplets[idx].col();
-					coo_v[offset+idx] = coo_triplets[idx].val();
-				}
-			}
-
-			//free old triplets
-			coo_triplets.clear();
-			coo_triplets.shrink_to_fit();
-		}
-	};
 
 
 	//////////////////////////////////////////////////////////////////
@@ -252,8 +145,8 @@ namespace GV {
 						quad_rule.set_element(el,mesh.max_depth);
 						if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 						
-						trial_cache.gather_fh();	const size_t u_size = trial_cache.size();
-						test_cache.gather_fh();		const size_t v_size = test_cache.size();
+						trial_cache.gather();	const size_t u_size = trial_cache.size();
+						test_cache.gather();		const size_t v_size = test_cache.size();
 						if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 							wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 						}
@@ -314,7 +207,7 @@ namespace GV {
 						quad_rule.set_element(el,mesh.max_depth);
 						if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 						
-						sym_cache.gather_fh();		const size_t v_size = sym_cache.size();
+						sym_cache.gather();		const size_t v_size = sym_cache.size();
 						if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 							wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 						}
@@ -372,8 +265,8 @@ namespace GV {
 					quad_rule.set_element(el,mesh.max_depth);
 					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 					
-					trial_cache.gather_fh();	const size_t u_size = trial_cache.size();
-					test_cache.gather_fh();		const size_t v_size = test_cache.size();
+					trial_cache.gather();	const size_t u_size = trial_cache.size();
+					test_cache.gather();		const size_t v_size = test_cache.size();
 					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}
@@ -428,7 +321,7 @@ namespace GV {
 					quad_rule.set_element(el,mesh.max_depth);
 					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 					
-					sym_cache.gather_fh();		const size_t v_size = sym_cache.size();
+					sym_cache.gather();		const size_t v_size = sym_cache.size();
 					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}
@@ -495,7 +388,7 @@ namespace GV {
 						quad_rule.set_element(el,mesh.max_depth);
 						if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 						
-						sym_cache.gather_fh();		const size_t v_size = sym_cache.size();
+						sym_cache.gather();		const size_t v_size = sym_cache.size();
 						if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 							wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 						}
@@ -553,7 +446,7 @@ namespace GV {
 					quad_rule.set_element(el,mesh.max_depth);
 					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 					
-					sym_cache.gather_fh();		const size_t v_size = sym_cache.size();
+					sym_cache.gather();		const size_t v_size = sym_cache.size();
 					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}
@@ -613,7 +506,7 @@ namespace GV {
 					quad_rule.set_element(el,mesh.max_depth);
 					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 					
-					sym_cache.gather_fh();		const size_t v_size = sym_cache.size();
+					sym_cache.gather();		const size_t v_size = sym_cache.size();
 					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}
@@ -664,7 +557,7 @@ namespace GV {
 					quad_rule.set_element(el,mesh.max_depth);
 					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 					
-					sym_cache.gather_fh();		const size_t v_size = sym_cache.size();
+					sym_cache.gather();		const size_t v_size = sym_cache.size();
 					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}
@@ -717,8 +610,8 @@ namespace GV {
 					quad_rule.set_element(el,mesh.max_depth);
 					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 					
-					test_cache.gather_fh();		const size_t v_size = test_cache.size();
-					trial_cache.gather_fh();	const size_t u_size = trial_cache.size();
+					test_cache.gather();		const size_t v_size = test_cache.size();
+					trial_cache.gather();	const size_t u_size = trial_cache.size();
 					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}
@@ -771,7 +664,7 @@ namespace GV {
 						quad_rule.set_element(el,mesh.max_depth);
 						if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 						
-						sym_cache.gather_fh();		const size_t v_size = sym_cache.size();
+						sym_cache.gather();		const size_t v_size = sym_cache.size();
 						if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 							wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 						}
@@ -804,7 +697,7 @@ namespace GV {
 					quad_rule.set_element(el,mesh.max_depth);
 					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 					
-					sym_cache.gather_fh();		const size_t v_size = sym_cache.size();
+					sym_cache.gather();		const size_t v_size = sym_cache.size();
 					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}
@@ -854,8 +747,8 @@ namespace GV {
 					quad_rule.set_element(el,mesh.max_depth);
 					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 					
-					trial_cache.gather_fh();	const size_t u_size = trial_cache.size();
-					test_cache.gather_fh();		const size_t v_size = test_cache.size();
+					trial_cache.gather();	const size_t u_size = trial_cache.size();
+					test_cache.gather();		const size_t v_size = test_cache.size();
 					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}
@@ -932,7 +825,7 @@ namespace GV {
 					quad_rule.set_element(el,mesh.max_depth);
 					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 					
-					sym_cache.gather_fh();		const size_t v_size = sym_cache.size();
+					sym_cache.gather();		const size_t v_size = sym_cache.size();
 					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}

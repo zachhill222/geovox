@@ -38,7 +38,7 @@ using Elem_t       = typename Mesh_t::Elem_t;
 using Vert_t       = typename Mesh_t::Vert_t;
 
 using DOF_t        = GV::Keys::DOFS::VoxelQ1<GV_DOF_PERIOD>;
-using DofHandler_t = GV::DofHandler<Mesh_t,DOF_t>;
+using DofHandler_t = GV::CharmsHandlerQH<Mesh_t,DOF_t>;
 
 using CoefHandler_t = GV::CoefHandler<DofHandler_t,Scalar_t,1>;
 

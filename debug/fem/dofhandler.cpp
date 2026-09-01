@@ -23,7 +23,7 @@ using MeshVert_t    = typename Mesh_t::Vert_t;
 using MeshElem_t    = typename Mesh_t::Elem_t;
 
 using DOF_t         = GV::Keys::DOFS::VoxelQ1<GV_TEST_DOF_PERIOD>;
-using Handler_t     = GV::DofHandler<Mesh_t,DOF_t>;
+using Handler_t     = GV::CharmsHandlerQH<Mesh_t,DOF_t>;
 using DofVert_t     = typename Handler_t::DofVert_t;
 using DofElem_t     = typename Handler_t::DofElem_t;
 
@@ -137,7 +137,7 @@ void evaluate_and_save(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_han
 
 	auto el_dof_count_lookup = GV::make_feature_lookup<MeshElem_t>(
 			[&](MeshElem_t el) {
-				return handler.get_active_dofs_full_hierarchical(el).size();
+				return handler.get_active_dofs(el).size();
 			}, "n_active_dofs");
 
 	auto el_dijkm_lookup = GV::make_feature_lookup<MeshElem_t>(
@@ -191,7 +191,7 @@ void test_dof_handler(const TestConfig& cfg) {
 		for (auto it=mesh.element_begin(); it!=mesh.element_end(); ++it) {
 			if (it->normalized_center()[i%3] < 0.25) {elements.push_back(*it);}
 		}
-		handler.refine_quasi_hierarchical(elements);
+		handler.refine(elements);
 		mesh.process_refine<DOF_t::PERIOD>();
 		std::cout << "after refine:\n" << mesh << "\n" << handler << "\n";
 	}
@@ -206,7 +206,7 @@ void test_dof_handler(const TestConfig& cfg) {
 		for (auto it=mesh.element_begin(); it!=mesh.element_end(); ++it) {
 			if (it->normalized_center()[1] < 0.25) {elements.push_back(*it);}
 		}
-		handler.unrefine_quasi_hierarchical(elements);
+		handler.unrefine(elements);
 		remove_unsupported_elements(mesh, handler);
 		std::cout << "after unrefine:\n" << mesh << "\n" << handler << "\n";
 	}

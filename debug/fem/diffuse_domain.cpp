@@ -24,7 +24,7 @@ using Elem_t 		= typename MeshHandler_t::Mesh_t::Elem_t;
 using Vert_t		= typename MeshHandler_t::Mesh_t::Vert_t;
 
 using DOF_t         = GV::Keys::DOFS::VoxelQ1<GV_TEST_DOF_PERIOD>;
-using DofHandler_t  = GV::DofHandler<Mesh_t,DOF_t>;
+using DofHandler_t  = GV::CharmsHandlerQH<Mesh_t,DOF_t>;
 using DofVert_t     = typename DofHandler_t::DofVert_t;
 using DofElem_t     = typename DofHandler_t::DofElem_t;
 
@@ -112,7 +112,7 @@ int main(int argc, char* argv[]) {
 
 			std::vector<Elem_t> ref_elems = mesh_handler.mesh.select_elements(near_surface);
 
-			d_handler.refine_quasi_hierarchical(ref_elems);
+			d_handler.refine(ref_elems);
 			c_handler.prolong_coefs();
 
 			//process the refinement request, you may pass a predicate to only activate
@@ -172,10 +172,6 @@ int main(int argc, char* argv[]) {
 				[&](Vert_t vtx) {return assembly.heaviside(mesh.geo_coord(vtx), eps);},
 				"heaviside");
 
-		auto heaviside_lookup = GV::make_feature_lookup<Vert_t>(
-				[&](Vert_t vtx) {return assembly.heaviside(mesh.geo_coord(vtx), eps);},
-				"heaviside");
-
 		auto heaviside_grad_lookup = GV::make_feature_lookup<Vert_t>(
 				[&](Vert_t vtx) {
 					return assembly.heaviside_grad(mesh.geo_coord(vtx), eps);},
@@ -207,7 +203,7 @@ int main(int argc, char* argv[]) {
 					return idx;
 				}, "element_number");
 
-		mesh.append_point_data_field_binary(filename, "point_data", sd_lookup, heaviside_lookup, heaviside_lookup, heaviside_grad_lookup);
+		mesh.append_point_data_field_binary(filename, "point_data", sd_lookup, heaviside_lookup, heaviside_grad_lookup);
 		mesh.append_cell_data_field_binary(filename, "cell_data", depth_lookup, el_dijkm_lookup, el_color_lookup, el_idx_lookup);
 	}
 

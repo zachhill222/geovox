@@ -26,7 +26,7 @@ int main() {
 
 	// a few interface-refinement passes before solving, matching the
 	// established geometry_refine pattern from the scalar convergence test
-	for (int i=0; i<4; ++i) {
+	for (int i=0; i<3; ++i) {
 		stokes.geometry_refine(1);
 		// stokes.refine_interior();
 		stokes.update_eps();   // min_element_size changes after refinement -- eps needs recomputing each time

@@ -18,7 +18,7 @@ namespace GV {
 	/// A helper class to track the current dofs and update coefficients
 	/// after refinement.
 	//////////////////////////////////////////////////////////////////////
-	template<typename DofHandler_type, typename T=double, uint8_t N=1>
+	template<typename DofHandlerType, typename T=double, uint8_t N=1>
 	struct  CoefHandler {
 		
 
@@ -26,7 +26,7 @@ namespace GV {
 		/// Aliases and constants
 		//////////////////////////////////////////////////////////////////
 		//DOF features may be periodic
-		using DofHandler_t = DofHandler_type;
+		using DofHandler_t = DofHandlerType;
 		using DOF_t        = typename DofHandler_t::DOF_t;
 		using DofVert_t    = typename DofHandler_t::DofVert_t;
 		using DofElem_t    = typename DofHandler_t::DofElem_t;
@@ -41,19 +41,104 @@ namespace GV {
 		using Scalar_t      = T;
 		using Point_t       = gutil::Point<3,T>;
 
+		static constexpr bool IS_CHARMS = DofHandlerType::HFlag | DofHierarchicalVariants::Charms;
+		static constexpr bool IS_QH = DofHandlerType::HFlag | DofHierarchicalVariants::QuasiHierarchical;
+		static constexpr bool IS_TH = DofHandlerType::HFlag | DofHierarchicalVariants::TrueHierarchical;
+
+
 		//////////////////////////////////////////////////////////////////
 		// Hold a snapshot of the last dofs (current coefficients)
 		// and a reference to the latest dofs (what we need to transform to)
 		//////////////////////////////////////////////////////////////////
-		mutable gutil::ThreadPool 		threads{N};
 		const Mesh_t& 					mesh;
 		const DofHandler_t& 			dofhandler;
 		const uint8_t  					max_depth;
 		std::span<const DOF_t> 			dh_curr_dofs;
 		std::vector<DOF_t> 				dofs{};
 		gutil::BinSort<uint64_t>		sorter{};	//capture the sorter for the dofs snapshot
-		std::array<std::vector<T>,N> 	coefs{};
-		bool            				restrict_is_average{false};	//when true, use an average during unrefinement
+		std::vector<Scalar_t> 			coefs{};	//store coefficients contiguously so that we can map to a column major dense matrix
+		
+
+		//////////////////////////////////////////////////////////////////
+		/// Methods to access various data fields
+		//////////////////////////////////////////////////////////////////
+		[[nodiscard]] Scalar_t* data(uint8_t i) noexcept {
+			GUTIL_ASSERT(i<N);
+			GUTIL_ASSERT(coefs.size() == N*dofs.size());
+			return coefs.data() + i*dofs.size();
+		}
+
+		[[nodiscard]] const Scalar_t* data(uint8_t i) const noexcept {
+			GUTIL_ASSERT(i<N);
+			GUTIL_ASSERT(coefs.size() == N*dofs.size());
+			return coefs.data() + i*dofs.size();
+		}
+
+		[[nodiscard]] Scalar_t* data() noexcept {
+			return coefs.data();
+		}
+
+		[[nodiscard]] const Scalar_t* data() const noexcept {
+			return coefs.data();
+		}
+
+		[[nodiscard]] std::span<Scalar_t> get_coefs(uint8_t i) noexcept {
+			GUTIL_ASSERT(i<N);
+			return {data(i), dofs.size()};
+		}
+
+		[[nodiscard]] std::span<const Scalar_t> get_coefs(uint8_t i) const noexcept {
+			GUTIL_ASSERT(i<N);
+			return {data(i), dofs.size()};
+		}
+
+		[[nodiscard]] size_t size() const noexcept {
+			return dofs.size();
+		}
+
+		//////////////////////////////////////////////////////////////////
+		/// Map or copy to an Eigen vector or matrix
+		//////////////////////////////////////////////////////////////////
+		#ifdef EIGEN_MAJOR_VERSION
+			Eigen::Map<Eigen::Matrix<Scalar_t, Eigen::Dynamic, N, Eigen::ColMajor>> eigen_matrix_map() {
+				GUTIL_ASSERT(coefs.size()==N*dofs.size());
+				return {data(), static_cast<Eigen::Index>(dofs.size())};
+			}
+			Eigen::Map<const Eigen::Matrix<Scalar_t, Eigen::Dynamic, N, Eigen::ColMajor>> eigen_matrix_map() const {
+				GUTIL_ASSERT(coefs.size()==N*dofs.size());
+				return {data(), static_cast<Eigen::Index>(dofs.size())};
+			}
+			Eigen::Map<Eigen::Matrix<Scalar_t, Eigen::Dynamic, 1, Eigen::ColMajor>> eigen_vector_map(uint8_t i) {
+				GUTIL_ASSERT(coefs.size()==N*dofs.size());
+				return {data(i), static_cast<Eigen::Index>(dofs.size())};
+			}
+			Eigen::Map<const Eigen::Matrix<Scalar_t, Eigen::Dynamic, 1, Eigen::ColMajor>> eigen_vector_map(uint8_t i) const {
+				GUTIL_ASSERT(coefs.size()==N*dofs.size());
+				return {data(i), static_cast<Eigen::Index>(dofs.size())};
+			}
+			Eigen::Map<Eigen::Matrix<Scalar_t, Eigen::Dynamic, 1, Eigen::ColMajor>> eigen_vector_map() {
+				GUTIL_ASSERT(coefs.size()==N*dofs.size());
+				return {data(), static_cast<Eigen::Index>(dofs.size())};
+			}
+			Eigen::Map<const Eigen::Matrix<Scalar_t, Eigen::Dynamic, 1, Eigen::ColMajor>> eigen_vector_map() const {
+				GUTIL_ASSERT(coefs.size()==N*dofs.size());
+				return {data(), static_cast<Eigen::Index>(dofs.size())};
+			}
+
+			//note that Eigen will convert a Map<Matrix> to a Matrix via copy
+			Eigen::Matrix<Scalar_t, Eigen::Dynamic, N, Eigen::ColMajor> eigen_matrix() const {
+				GUTIL_ASSERT(coefs.size()==N*dofs.size());
+				return eigen_matrix_map();
+			}
+			Eigen::Matrix<Scalar_t, Eigen::Dynamic, 1, Eigen::ColMajor> eigen_vector(uint8_t i) const {
+				GUTIL_ASSERT(coefs.size()==N*dofs.size());
+				return eigen_vector_map(i);
+			}
+			Eigen::Matrix<Scalar_t, Eigen::Dynamic, 1, Eigen::ColMajor> eigen_vector() const {
+				GUTIL_ASSERT(coefs.size()==N*dofs.size());
+				return eigen_vector_map();
+			}
+		#endif
 
 		//////////////////////////////////////////////////////////////////
 		/// Constructor and movement
@@ -66,8 +151,9 @@ namespace GV {
 			dh_curr_dofs{dofhandler.active_dofs} {}
 		CoefHandler(CoefHandler&& other) noexcept = default;
 		CoefHandler(const CoefHandler&) = default;
-		CoefHandler& operator=(CoefHandler&& other) noexcept = default;
-		~CoefHandler() {threads.wait_idle();}
+		CoefHandler& operator=(CoefHandler&& other) = delete;
+		CoefHandler& operator=(const CoefHandler& other) = delete;
+
 
 		///////////////////////////////////////////////////////////////////
 		/// Initialize a coefficient field by a scalar function.
@@ -80,44 +166,31 @@ namespace GV {
 			GUTIL_ASSERT(dofhandler.is_current());
 
 			auto lock = dofhandler.begin_active_keys_stable();
-			dh_curr_dofs = dofhandler.active_dofs;
+			update_dh_dof_link();
 			snapshot_dofs();
-
-			for (auto& list : coefs) {
-				list.assign(dofs.size(), Scalar_t{0});
-			}
+			coefs.assign(N*dofs.size(), Scalar_t{0});
 			dofhandler.end_active_keys_stable();
 		}
 
 		template<typename DofEval>
-		void init_coefs(uint8_t i, DofEval&& eval) noexcept {
+		void assign_coefs(uint8_t i, DofEval&& eval) noexcept {
 			GUTIL_ASSERT(dofhandler.is_current());
+			GUTIL_ASSERT(i<N);
+			GUTIL_ASSERT(dofs.size()>0);
+			GUTIL_ASSERT(coefs.size()==N*dofs.size());
 			{
 				auto lock = dofhandler.begin_active_keys_stable();
-
-				dh_curr_dofs = dofhandler.active_dofs;
-				snapshot_dofs();
-
-				GUTIL_ASSERT(i<N);
-
-				GUTIL_ASSERT(dofs.size()>0);
-				coefs[i].resize(dofs.size());
+				
 				GUTIL_OMP(parallel for)
 				for (uint64_t idx=0; idx<dofs.size(); ++idx) {
 					#ifndef NDEBUG
 						bool flag = mesh.is_conformal(static_cast<MeshFeature_t>(dofhandler.feature(dofs[idx])));
 						GUTIL_ASSERT(flag);
 					#endif
-					coefs[i][idx] = eval(dofs[idx]);
+					data(i)[idx] = eval(dofs[idx]);
 				}
 
 				dofhandler.end_active_keys_stable();
-			}
-			{
-				auto lock = dofhandler.begin_key_mask_unstable();
-				dofhandler.clear_coef_marks();
-				dofhandler.set_has_coef(dofs);
-				dofhandler.end_key_mask_unstable();
 			}
 		}
 
@@ -131,31 +204,14 @@ namespace GV {
 			if (dh_curr_dofs.data() != dofhandler.active_dofs.data()) {return false;}
 
 			if (dofs.empty()) {return false;}
-			if (dofs.size()  != dh_curr_dofs.size()) {return false;}
+			if (dofs.size()  != dh_curr_dofs.size())  {return false;}
 			if (dofs.front() != dh_curr_dofs.front()) {return false;}
 			if (dofs.back()  != dh_curr_dofs.back())  {return false;}
 
-			for (uint8_t i=0; i<N; ++i) {
-				if (coefs[i].size() != dofs.size()) {return false;}
-			}
+			if (coefs.size() != N*dofs.size())        {return false;}
 
 			return true;
 		}
-
-
-		///////////////////////////////////////////////////////////////////
-		/// Get coefficients
-		///////////////////////////////////////////////////////////////////
-		std::span<Scalar_t> get_coefs(uint8_t i) {
-			GUTIL_ASSERT(i<N);
-			return {coefs[i]};
-		}
-
-		std::span<const Scalar_t> get_coefs(uint8_t i) const {
-			GUTIL_ASSERT(i<N);
-			return {coefs[i]};
-		}
-
 
 		///////////////////////////////////////////////////////////////////
 		/// Look up previous global dof numbers and get snapshot of the handler's current dofs
@@ -168,20 +224,32 @@ namespace GV {
 			return sorter.bin_start(bin_number) + std::distance(list.begin(), it);
 		}
 
+		void update_dh_dof_link() noexcept {
+			//only call when the stable dofhandler locks are acquired
+			dh_curr_dofs = dofhandler.active_dofs;
+		}
+
 		void snapshot_dofs() noexcept {
+			//only call when the stable dofhandler locks are acquired and
+			//after update_dh_dof_link() has been called.
 			dofs.clear();
 			dofs.insert(dofs.end(), dh_curr_dofs.begin(), dh_curr_dofs.end());
 			sorter = dofhandler.get_sorter();
 			//the sorter uses the raw key values
-			sorter.rebind_to_copy(dofhandler.template reinterpret_key_span<uint64_t,DOF_t>(dofs));
+			sorter.rebind_to_copy(gutil::reinterpret_as_span<uint64_t,DOF_t>(dofs));
 			GUTIL_ASSERT(sorter.n_bins()== (int) max_depth+1);
 		}
 
-		void update_dh_dof_link() noexcept {
-			auto lock = dofhandler.begin_active_keys_stable();
-			dh_curr_dofs = dofhandler.active_dofs;
-			dofhandler.end_active_keys_stable();
+
+		///////////////////////////////////////////////////////////////////
+		/// Static methods for interpolating a field between bases.
+		///////////////////////////////////////////////////////////////////
+		static void ProlongCoefs(std::span<Scalar_t> pro_coefs, std::span<const DOF_t> pro_dofs,
+			std::span<const Scalar_t> cur_coefs, std::span<const DOF_t> const DofHandler_t& cur_handler) noexcept {
+
 		}
+
+
 
 
 		///////////////////////////////////////////////////////////////////
@@ -209,11 +277,6 @@ namespace GV {
 			{
 				//finalize
 				snapshot_dofs();
-
-				auto lock1 = dofhandler.begin_key_mask_unstable();
-				dofhandler.clear_coef_marks();
-				dofhandler.set_has_coef(dofs);
-				dofhandler.end_key_mask_unstable();
 			}
 		}
 
@@ -240,11 +303,6 @@ namespace GV {
 			{
 				//finalize
 				snapshot_dofs();
-
-				auto lock1 = dofhandler.begin_key_mask_unstable();
-				dofhandler.clear_coef_marks();
-				dofhandler.set_has_coef(dofs);
-				dofhandler.end_key_mask_unstable();
 			}
 		}
 
@@ -273,11 +331,11 @@ namespace GV {
 					size_t n_idx = dofhandler.global_number(dof);
 					if (n_idx < new_size) {
 						GUTIL_OMP(atomic)
-						new_coefs[n_idx] += coefs[i][idx];
+						new_coefs[n_idx] += data(i)[idx];
 						continue;
 					}
 					GUTIL_ASSERT(!dofhandler.is_active_stable(dof));
-					distribute_refined(dof, coefs[i][idx], std::span<Scalar_t>(new_coefs), new_size);
+					distribute_refined(dof, data(i)[idx], std::span<Scalar_t>(new_coefs), new_size);
 				}//for dofs
 			}//omp parallel
 		}//update coefs
@@ -318,7 +376,7 @@ namespace GV {
 					std::span<Scalar_t> thread_new_coefs(new_coefs.begin()+new_idx_start, new_coefs.begin()+new_idx_end);
 
 					//increment the dofs using the old coefs
-					batched_evaluate_at(thread_new_coefs, thread_dof_locs, coefs[i], sorter, max_depth);
+					batched_evaluate_at(thread_new_coefs, thread_dof_locs, data(i), sorter, max_depth);
 
 					//decrement the dofs using the new coefs at lower depths
 					if (dd>0) {
@@ -386,16 +444,10 @@ namespace GV {
 		/// Evaluate at mesh vertices for visualizations
 		/// Pass begin/end iterators to the existing vertices
 		////////////////////////////////////////////////////////////////////////
-		template<std::random_access_iterator I>
+		template<std::random_access_iterator I> requires (std::same_as<std::iter_value_t<I>, MeshVert_t>)
 		std::vector<Scalar_t> evaluate(uint8_t i, I v_begin, I v_end) const noexcept {
 			GUTIL_ASSERT(i<N);
-			GUTIL_ASSERT(coefs[i].size()==dofs.size());
-			GUTIL_ASSERT(dofs.size()>0 && "there are no dofs or coefficients. did you forget to initialize them?");
-			GUTIL_ASSERT(dofs.size()==dh_curr_dofs.size() && "the coef_handler and dof_handler are out of sync");
-			GUTIL_ASSERT(dofs[0]==dh_curr_dofs[0] && "the coef_handler and dof_handler are out of sync");
-			GUTIL_ASSERT(dofs[dofs.size()-1]==dh_curr_dofs[dofs.size()-1] && "the coef_handler and dof_handler are out of sync");
-
-			static_assert(std::same_as<std::iter_value_t<I>, MeshVert_t>);
+			GUTIL_ASSERT(is_current());
 			GUTIL_ASSERT(v_begin!=v_end && "there are no vertices. did you forget to collect them?");
 
 			const size_t n_verts = std::distance(v_begin,v_end);
@@ -405,21 +457,16 @@ namespace GV {
 			std::vector<Scalar_t> vals(n_verts, Scalar_t{0});
 			GUTIL_OMP(parallel)
 			{
-				const uint64_t n_threads 	= GUTIL_OMP_TERNARY(omp_get_num_threads(), 1);
-				const uint64_t tid       	= GUTIL_OMP_TERNARY(omp_get_thread_num(),  0);
-				const uint64_t n_per_thread = n_verts/n_threads;
-				const uint64_t start        = tid*n_per_thread;
-				const uint64_t end          = (tid==n_threads-1) ? n_verts : start+n_per_thread;
-				
-				size_t idx = start; I it_end = v_begin+end;
+				const OmpIteratorRange range(v_begin, v_end);
+
+				size_t idx = std::distance(v_begin, range.begin);
 				auto action = [&](DOF_t dof, uint8_t local_n, Scalar_t x, Scalar_t y, Scalar_t z, uint64_t global_n) {
 					Scalar_t val{0};
 					dof.evaluate_simd(local_n, &val, &x, &y, &z, 1);
-					vals[idx] += coefs[i][global_n] * val;
+					vals[idx] += data(i)[global_n] * val;
 				};
 
-				GUTIL_ASSERT(tid!=n_threads-1 || it_end==v_end);
-				for (I it = v_begin+start; it!=it_end; ++it, ++idx) {
+				for (I it = range.begin; it!=range.end; ++it, ++idx) {
 					GUTIL_ASSERT(it!=v_end);
 					//check neighbor elements with the same periodicity as the dofs
 					//additionally, descend to the bottom of the mesh so the hierarchical
@@ -486,13 +533,9 @@ namespace GV {
 		void print_coefs(int i=0) {
 			std::cout << "\nCoefs for field " << i << ":\n";
 			for (size_t idx=0; idx<dofs.size(); ++idx) {
-				std::cout << idx << " : " << dofs[idx] << " -> " << coefs[i][idx] << "\n";
+				std::cout << idx << " : " << dofs[idx] << " -> " << data(i)[idx] << "\n";
 			}
 		}
-
-
-
-
 	};
 
 

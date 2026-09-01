@@ -378,25 +378,9 @@ namespace GV {
 		/// Primary method for caching values. The quadrature rule must already
 		/// be updated.
 		///////////////////////////////////////////////////////////////
-		void gather_qh() noexcept {
-			dofs = handler.get_active_dofs_quasi_hierarchical(qr.q_el);
-			const size_t n = dofs.size();
-
-			global_idx.resize(n);
-			if constexpr (NEEDS_DOF_VALS) {vals.clear(); vals.reserve(n);}
-			if constexpr (NEEDS_DOF_GRAD) {grad.clear(); grad.reserve(n);}
-
-			for (size_t j=0; j<n; ++j) {
-				global_idx[j] = handler.global_number(dofs[j]);
-				GUTIL_ASSERT(global_idx[j] < handler.n_dofs());
-				GUTIL_ASSERT(dofs[j].depth() <= qr.q_el.depth()+1);	//for quasi-hierarchical refinement
-				if constexpr (NEEDS_DOF_VALS) {vals.emplace_back(dofs[j], qr);}
-				if constexpr (NEEDS_DOF_GRAD) {grad.emplace_back(dofs[j], qr);}
-			}
-		}
-
-		void gather_fh() noexcept {
-			dofs = handler.get_active_dofs_full_hierarchical(qr.q_el);
+		template<typename Predicate = std::nullptr_t>
+		void gather(Predicate&& pred = nullptr) noexcept {
+			dofs = handler.get_active_dofs(qr.q_el, std::forward<Predicate>(pred));
 			const size_t n = dofs.size();
 
 			global_idx.resize(n);

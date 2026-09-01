@@ -42,7 +42,7 @@ using Elem_t         = typename MeshHandler_t::Mesh_t::Elem_t;
 using Vert_t         = typename MeshHandler_t::Mesh_t::Vert_t;
 
 using DOF_t          = GV::Keys::DOFS::VoxelQ1<GV_TEST_DOMAIN_PERIOD>;
-using DofHandler_t   = GV::DofHandler<Mesh_t,DOF_t>;
+using DofHandler_t   = GV::CharmsHandlerQH<Mesh_t,DOF_t>;
 using CoefHandler_t  = GV::CoefHandler<DofHandler_t,Scalar_t,1>;
 
 ///////////////////////////////////////////////////////////////////////////
@@ -152,7 +152,7 @@ int main(int argc, char* argv[]) {
 				return std::abs(sdf) < tol;
 			});
 
-			d_handler.refine_quasi_hierarchical(ref_elems);
+			d_handler.refine(ref_elems);
 			c_handler.prolong_coefs();
 
 			mesh_handler.mesh.process_refine([](Elem_t) { return true; });

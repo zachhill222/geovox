@@ -19,7 +19,7 @@ using Elem_t 		= typename Mesh_t::Elem_t;
 using Vert_t		= typename Mesh_t::Vert_t;
 
 using DOF_t         = GV::Keys::DOFS::VoxelQ1<GV_TEST_DOF_PERIOD>;
-using DofHandler_t  = GV::DofHandler<Mesh_t,DOF_t>;
+using DofHandler_t  = GV::CharmsHandlerQH<Mesh_t,DOF_t>;
 using DofVert_t     = typename DofHandler_t::DofVert_t;
 using DofElem_t     = typename DofHandler_t::DofElem_t;
 
@@ -125,7 +125,7 @@ void refine(TestConfig cfg, Mesh_t& mesh, DofHandler_t& d_handler, CoefHandler_t
 			}
 		}
 
-		d_handler.refine_quasi_hierarchical(elements);
+		d_handler.refine(elements);
 		mesh.process_refine();
 	}
 	c_handler.prolong_coefs();
@@ -141,7 +141,7 @@ void unrefine(TestConfig cfg, Mesh_t& mesh, DofHandler_t& d_handler, CoefHandler
 			}
 		}
 
-		d_handler.unrefine_quasi_hierarchical(elements);
+		d_handler.unrefine(elements);
 
 		for (auto it = mesh.element_begin(); it!=mesh.element_end(); ++it) {
 			if (d_handler.get_active_dofs_conformal(*it).empty()) {

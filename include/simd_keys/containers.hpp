@@ -574,7 +574,6 @@ namespace Keys {
 		}
 
 
-
 		/////////////////////////////////////////////////////////////////////////
 		/// A few methods to help with viewing the active list as a particular type
 		/////////////////////////////////////////////////////////////////////////
@@ -780,11 +779,9 @@ namespace Keys {
 		/////////////////////////////////////////////////////////////////////////
 		/// A few methods to work with the active keys
 		/////////////////////////////////////////////////////////////////////////
-		template<typename KeyType>
+		template<typename KeyType, uint8_t MASK=ACTIVE_BIT>
 		void collect_active_keys() noexcept {
 			GV_BEGIN_UNSTABLE
-
-			// GUTIL_PROFILE("Collecting active keys (", key_mask.size(), " to check)");
 
 			//note that the gutil::ThreadPool with n_threads==0 will have the submitting thread run
 			//the job.
@@ -796,7 +793,7 @@ namespace Keys {
 			auto job = [n_keys_per_thread, &thread_keys](std::span<const uint8_t> masks, size_t tid) {
 				size_t key_index = tid*n_keys_per_thread;	//we need to track the location of the mask we are examing
 				for (size_t i=0; i<masks.size(); ++i, ++key_index) {
-					if (masks[i]&ACTIVE_BIT) {thread_keys[tid].push_back(static_cast<uint64_t>(KeyType::MakeFromIndex(key_index)));}
+					if (masks[i]&MASK) {thread_keys[tid].push_back(static_cast<uint64_t>(KeyType::MakeFromIndex(key_index)));}
 				}
 			};
 

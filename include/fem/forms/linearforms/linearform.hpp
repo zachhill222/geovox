@@ -108,7 +108,7 @@ namespace GV {
 						quad_rule.set_element(el,mesh.max_depth);
 						if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 						
-						test_cache.gather_qh();
+						test_cache.gather();
 						if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 							wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 						}
@@ -143,7 +143,7 @@ namespace GV {
 					quad_rule.set_element(el,mesh.max_depth);
 					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 					
-					test_cache.gather_fh();
+					test_cache.gather();
 					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}
@@ -182,7 +182,7 @@ namespace GV {
 					quad_rule.set_element(el,mesh.max_depth);
 					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 					
-					test_cache.gather_qh();
+					test_cache.gather();
 					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
 					}
@@ -226,7 +226,7 @@ namespace GV {
 					const MeshElem_t el = *it;
 					
 					quad_rule.set_element(el,mesh.max_depth);
-					test_cache.gather_qh();
+					test_cache.gather();
 
 					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 					if constexpr (Weight_t::NEEDS_SCALAR_VALS) {field_cache = test_cache.reconstruct_field(coefs);}

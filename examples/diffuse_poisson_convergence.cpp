@@ -45,7 +45,7 @@ using Elem_t         = typename MeshHandler_t::Mesh_t::Elem_t;
 using Vert_t         = typename MeshHandler_t::Mesh_t::Vert_t;
 
 using DOF_t          = GV::Keys::DOFS::VoxelQ1<PERIODIC_BC>;
-using DofHandler_t   = GV::DofHandler<Mesh_t,DOF_t>;
+using DofHandler_t   = GV::CharmsHandlerQH<Mesh_t,DOF_t>;
 using CoefHandler_t  = GV::CoefHandler<DofHandler_t,Scalar_t,1>;
 
 using InteriorWeight_t = GV::AssemblyPhaseFieldWeight<true,  Assembly_t>;
@@ -146,7 +146,7 @@ void geometry_refine(MeshHandler_t& m_handler, DofHandler_t& d_handler, CoefHand
 	});
 
 	//refine the dofs on the elements
-	d_handler.refine_quasi_hierarchical(elems);
+	d_handler.refine(elems);
 
 	//refine the mesh elements so the new basis functions can be resolved
 	m_handler.mesh.process_refine();

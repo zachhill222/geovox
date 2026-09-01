@@ -43,8 +43,8 @@ namespace GV {
 		using P_DOF_t       = Keys::DOFS::VoxelQ1<0b000>;	//non-periodic
 		using U_DOF_t       = Keys::DOFS::VoxelQ1<0b111>;	//fully-periodic
 
-		using P_Handler_t   = DofHandler<Mesh_t, P_DOF_t>;
-		using U_Handler_t   = DofHandler<Mesh_t, U_DOF_t>;
+		using P_Handler_t   = CharmsHandlerQH<Mesh_t, P_DOF_t>;	//TODO: support true Hierarchical
+		using U_Handler_t   = CharmsHandlerQH<Mesh_t, U_DOF_t>;	//TODO: support true Hierarchical
 
 		using P_Coefs_t     = CoefHandler<P_Handler_t, Scalar_t, 1>;
 		using U_Coefs_t     = CoefHandler<U_Handler_t, Scalar_t, 3>;
@@ -85,6 +85,10 @@ namespace GV {
 			p_coefs(p_handler),
 			u_coefs(u_handler) {
 				InteriorWeight_t::SetAssembly(m_handler.assembly);
+				//set the maximum depth distance between a quadrature element
+				//and a dof support element.
+				p_handler.max_depth_distance = 2;
+				u_handler.max_depth_distance = 3;
 			}
 
 
@@ -184,7 +188,7 @@ namespace GV {
 					return gutil::abs(m_handler.assembly.signed_distance(pt)) < tol_dist;
 				});
 
-			p_handler.refine_quasi_hierarchical(elems);
+			p_handler.refine(elems);
 			set_velocity_dofs();
 
 			p_coefs.prolong_coefs();
@@ -198,7 +202,7 @@ namespace GV {
 					const auto pt = m_handler.mesh.geo_center(el);
 					return m_handler.assembly.heaviside(pt, eps) > cutoff;
 				});
-			p_handler.refine_quasi_hierarchical(elems);
+			p_handler.refine(elems);
 			set_velocity_dofs();
 
 			p_coefs.prolong_coefs();
