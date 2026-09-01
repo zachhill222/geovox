@@ -219,7 +219,7 @@ namespace GV {
 				ScalarValueCache<QuadRule_t>	field_cache;
 				WeightCache_t					wt;
 
-				OmpIteratorRange				range(mesh.element_begin(), mesh.element_end());
+				gutil::OmpIteratorRange			range(mesh.element_begin(), mesh.element_end());
 
 				GUTIL_OMP(for)
 				for (auto it=range.begin; it!=range.end; ++it) {

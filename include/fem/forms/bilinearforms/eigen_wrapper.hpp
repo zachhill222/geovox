@@ -144,7 +144,7 @@ namespace GV {
 			GUTIL_ASSERT(other_diag.size()==diag.size());
 			GUTIL_OMP(parallel)
 			{
-				OmpIndexRange range(diag.size());
+				gutil::OmpIndexRange range(diag.size());
 				GUTIL_SIMD()
 				for (auto i=range.begin; i<range.end; ++i) {
 					other_diag[i] += diag[i];
@@ -174,7 +174,7 @@ namespace GV {
 			OutType result(diag.size());
 			GUTIL_OMP(parallel)
 			{
-				GV::OmpIndexRange range(diag.size());
+				gutil::OmpIndexRange range(diag.size());
 				GUTIL_SIMD()
 				for (auto idx=range.begin; idx<range.end; ++idx) {
 					GUTIL_ASSERT(diag[idx] > inv_cutoff);
@@ -213,7 +213,7 @@ namespace GV {
 			//this keep the solution vector constant over those rows.
 			GUTIL_OMP(parallel)
 			{
-				OmpIndexRange range(r.size());
+				gutil::OmpIndexRange range(r.size());
 				GUTIL_SIMD()
 				for (auto i=range.begin; i<range.end; ++i) {
 					r[i] = gutil::abs(r[i]) > inv_cutoff ? Scalar{1}/r[i] : Scalar{1};
@@ -258,7 +258,7 @@ namespace GV {
 
 			GUTIL_OMP(parallel)
 			{
-				GV::OmpIndexRange range(diag.size());
+				gutil::OmpIndexRange range(diag.size());
 				GUTIL_SIMD()
 				for (size_t i=range.begin; i<range.end; ++i) {
 					result[i] = diag[i]*b[i];
@@ -513,7 +513,7 @@ namespace internal {
 		static void scaleAndAddTo(Dest& dest, const Operator& lhs, const Rhs& rhs, const Scalar& alpha) {
 			GUTIL_OMP(parallel)
 			{
-				GV::OmpIndexRange range(lhs.diag.size());
+				gutil::OmpIndexRange range(lhs.diag.size());
 				GUTIL_SIMD()
 				for (size_t i=range.begin; i<range.end; ++i) {
 					dest[i] += alpha*lhs.diag[i]*rhs[i];

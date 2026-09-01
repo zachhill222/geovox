@@ -137,7 +137,7 @@ namespace GV {
 					std::vector<Scalar_t>			local_y;
 					std::vector<Scalar_t>			local_x;
 
-					OmpIndexRange 					range(quad_elems.size());
+					gutil::OmpIndexRange 			range(quad_elems.size());
 
 					for (size_t q=range.begin; q<range.end; ++q) {
 						const MeshElem_t el = quad_elems[q];
@@ -200,7 +200,7 @@ namespace GV {
 					std::vector<Scalar_t>			local_y;
 					std::vector<Scalar_t>			local_x;
 
-					OmpIndexRange 					range(quad_elems.size());
+					gutil::OmpIndexRange 			range(quad_elems.size());
 					for (size_t q=range.begin; q<range.end; ++q) {
 						const MeshElem_t el = quad_elems[q];
 						
@@ -258,7 +258,7 @@ namespace GV {
 				std::vector<Scalar_t>	local_y;
 				std::vector<Scalar_t>	local_x;
 
-				OmpIteratorRange		range(mesh.element_begin(), mesh.element_end());
+				gutil::OmpIteratorRange	range(mesh.element_begin(), mesh.element_end());
 				for (auto it=range.begin; it!=range.end; ++it) {
 					const MeshElem_t el = *it;
 						
@@ -314,7 +314,7 @@ namespace GV {
 				std::vector<Scalar_t>			local_y;
 				std::vector<Scalar_t>			local_x;
 
-				OmpIteratorRange				range(mesh.element_begin(), mesh.element_end());
+				gutil::OmpIteratorRange			range(mesh.element_begin(), mesh.element_end());
 				for (auto it=range.begin; it!=range.end; ++it) {
 					const MeshElem_t el = *it;
 						
@@ -381,7 +381,7 @@ namespace GV {
 					std::vector<Scalar_t>			local_y;
 					std::vector<Scalar_t>			local_x;
 
-					OmpIndexRange 					range(quad_elems.size());
+					gutil::OmpIndexRange 			range(quad_elems.size());
 					for (size_t q=range.begin; q<range.end; ++q) {
 						const MeshElem_t el = quad_elems[q];
 						
@@ -439,7 +439,7 @@ namespace GV {
 				std::vector<Scalar_t>			local_y;
 				std::vector<Scalar_t>			local_x;
 
-				OmpIteratorRange	range(mesh.element_begin(), mesh.element_end());
+				gutil::OmpIteratorRange 		range(mesh.element_begin(), mesh.element_end());
 				for (auto it=range.begin; it!=range.end; ++it) {
 					const MeshElem_t el = *it;
 						
@@ -499,7 +499,7 @@ namespace GV {
 				T  						thread_result{0};
 				std::vector<T>			local_x;
 
-				OmpIteratorRange	range(mesh.element_begin(), mesh.element_end());
+				gutil::OmpIteratorRange range(mesh.element_begin(), mesh.element_end());
 				for (auto it=range.begin; it!=range.end; ++it) {
 					const MeshElem_t el = *it;
 						
@@ -550,7 +550,7 @@ namespace GV {
 				std::vector<T>			local_x;
 				std::vector<T>			local_y;
 
-				OmpIteratorRange	range(mesh.element_begin(), mesh.element_end());
+				gutil::OmpIteratorRange range(mesh.element_begin(), mesh.element_end());
 				for (auto it=range.begin; it!=range.end; ++it) {
 					const MeshElem_t el = *it;
 						
@@ -603,7 +603,7 @@ namespace GV {
 				std::vector<T>			local_x;
 				std::vector<T>			local_y;
 
-				OmpIteratorRange		range(mesh.element_begin(), mesh.element_end());
+				gutil::OmpIteratorRange	range(mesh.element_begin(), mesh.element_end());
 				for (auto it=range.begin; it!=range.end; ++it) {
 					const MeshElem_t el = *it;
 						
@@ -657,7 +657,7 @@ namespace GV {
 					KernelEval						k_eval(kernel, sym_cache, sym_cache, quad_rule);
 					WeightCache_t					wt;
 					
-					OmpIndexRange 					range(quad_elems.size());
+					gutil::OmpIndexRange 			range(quad_elems.size());
 					for (size_t q=range.begin; q<range.end; ++q) {
 						const MeshElem_t el = quad_elems[q];
 						
@@ -690,7 +690,7 @@ namespace GV {
 				KernelEval						k_eval(kernel, sym_cache, sym_cache, quad_rule);
 				WeightCache_t					wt;
 				
-				OmpIteratorRange				range(mesh.element_begin(), mesh.element_end());
+				gutil::OmpIteratorRange			range(mesh.element_begin(), mesh.element_end());
 				for (auto it=range.begin; it!=range.end; ++it) {
 					const MeshElem_t el = *it;
 
@@ -730,7 +730,7 @@ namespace GV {
 				KernelEval							k_eval(kernel, trial_cache, test_cache, quad_rule);
 				WeightCache_t						wt;
 				
-				OmpIteratorRange					range(mesh.element_begin(), mesh.element_end());
+				gutil::OmpIteratorRange				range(mesh.element_begin(), mesh.element_end());
 
 				GUTIL_OMP(single)
 				{
@@ -808,7 +808,7 @@ namespace GV {
 				KernelEval							k_eval(kernel, sym_cache, sym_cache, quad_rule);
 				WeightCache_t						wt;
 				
-				OmpIteratorRange					range(mesh.element_begin(), mesh.element_end());
+				gutil::OmpIteratorRange				range(mesh.element_begin(), mesh.element_end());
 
 				GUTIL_OMP(single)
 				{

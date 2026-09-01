@@ -35,8 +35,8 @@ namespace GV {
 
 			GUTIL_OMP(parallel)
 			{
-				std::vector<size_t> thread_dof_numbers;
-				OmpIteratorRange    range(dof_begin, dof_end);
+				std::vector<size_t> 		thread_dof_numbers;
+				gutil::OmpIteratorRange 	range(dof_begin, dof_end);
 				for (I it=range.begin; it!=range.end; ++it) {
 					if (pred(*it)) {thread_dof_numbers.push_back(offset + std::distance(dof_begin,it));}
 				}
@@ -71,7 +71,7 @@ namespace GV {
 
 		GUTIL_OMP(parallel)
 		{
-			OmpIndexRange range(rows.size());
+			gutil::OmpIndexRange range(rows.size());
 
 			for (size_t idx=range.begin; idx<range.end; ++idx) {
 				const I1 r       = static_cast<I1>(rows[idx]);
@@ -105,7 +105,7 @@ namespace GV {
 		//pass 1: handle the columns
 		GUTIL_OMP(parallel)
 		{
-			OmpIndexRange range(rows.size());
+			gutil::OmpIndexRange range(rows.size());
 
 			for (size_t idx=range.begin; idx<range.end; ++idx) {
 				const I1 r       = static_cast<I1>(rows[idx]);
@@ -162,7 +162,7 @@ namespace GV {
 		std::vector<T> x_reduced(rows.size());
 		GUTIL_OMP(parallel)
 		{
-			OmpIndexRange range(rows.size());
+			gutil::OmpIndexRange range(rows.size());
 
 			//pass 1: subtract
 			for (size_t idx=range.begin; idx<range.end; ++idx) {

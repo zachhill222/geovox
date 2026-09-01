@@ -7,4 +7,3 @@
 #include "util/macros.hpp"
 #include "util/quadrature_rules.hpp"
 #include "util/sparsity_structure.hpp"
-#include "util/omp_thread_range.hpp"

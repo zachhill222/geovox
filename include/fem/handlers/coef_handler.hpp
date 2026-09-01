@@ -457,7 +457,7 @@ namespace GV {
 			std::vector<Scalar_t> vals(n_verts, Scalar_t{0});
 			GUTIL_OMP(parallel)
 			{
-				const OmpIteratorRange range(v_begin, v_end);
+				const gutil::OmpIteratorRange range(v_begin, v_end);
 
 				size_t idx = std::distance(v_begin, range.begin);
 				auto action = [&](DOF_t dof, uint8_t local_n, Scalar_t x, Scalar_t y, Scalar_t z, uint64_t global_n) {

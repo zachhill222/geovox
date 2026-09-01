@@ -103,7 +103,7 @@ namespace GV {
 			if (list.empty()) {return result;}
 
 			//track the thread ranges for easier copying
-			std::vector<OmpIteratorRange<decltype(list.begin())>> thread_ranges;
+			std::vector<gutil::OmpIteratorRange<decltype(list.begin())>> thread_ranges;
 			std::vector<size_t> thread_size;
 
 			auto in_block = [i_lower, j_lower, i_upper, j_upper](const Triplet& t) {
@@ -114,8 +114,8 @@ namespace GV {
 			GUTIL_OMP(parallel)
 			{
 				//copy per-thread range information
-				OmpIteratorRange range(list.begin(), list.end());
-				GUTIL_OMP(critical)
+				gutil::OmpIteratorRange range(list.begin(), list.end());
+				GUTIL_OMP(single)
 				{
 					thread_ranges.resize(range.n_threads);
 					thread_size.resize(range.n_threads);
@@ -187,7 +187,7 @@ namespace GV {
 
 			GUTIL_OMP(parallel)
 			{
-				OmpIndexRange range(n);
+				gutil::OmpIndexRange range(n);
 				GUTIL_SIMD()
 				for (size_t idx=range.begin; idx<range.end; ++idx) {
 					coo_i[offset+idx] = coo_triplets[idx].row();
