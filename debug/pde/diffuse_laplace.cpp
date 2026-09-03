@@ -129,7 +129,7 @@ int main(int argc, char* argv[]) {
 	d_handler.init_dofs();
 
 	CoefHandler_t c_handler(d_handler);
-	c_handler.init_coefs(0, [](DOF_t) { return Scalar_t{0}; });   // start from zero at the coarsest level
+	c_handler.init_coefs();
 
 	// ---- Solve at each refinement level, using the previous level's ----
 	// ---- (prolonged) solution as the initial guess for the next solve ----

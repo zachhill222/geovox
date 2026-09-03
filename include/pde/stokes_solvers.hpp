@@ -126,7 +126,7 @@ namespace GV {
 			const Scalar_t update_scale = stokes.viscosity * stokes.relax_w;
 			GUTIL_OMP(parallel)
 			{
-				OmpIndexRange range(p_coefs.size());
+				gutil::OmpIndexRange range(p_coefs.size());
 				GUTIL_SIMD()
 				for (size_t idx=range.begin; idx<range.end; ++idx) {
 					p_coefs[idx] += update_scale * q[idx];
@@ -234,7 +234,7 @@ namespace GV {
 			std::span<Scalar_t> p_coefs = stokes.p_coefs.get_coefs(0);
 			GUTIL_OMP(parallel)
 			{
-				OmpIndexRange range(p_coefs.size());
+				gutil::OmpIndexRange range(p_coefs.size());
 				GUTIL_SIMD()
 				for (size_t idx=range.begin; idx<range.end; ++idx) { p_coefs[idx] += alpha * d[idx]; }
 			}

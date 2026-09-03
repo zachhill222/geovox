@@ -141,7 +141,7 @@ namespace Keys {
 		mutable std::vector<uint8_t> 	key_mask{};				//	marked as mutable so that classes with const references can have a reserved bit to use.
 		std::vector<uint64_t>			active_keys{};			//	a compressed list of the active keys
 		mutable gutil::ThreadPool 		threads{};				//	max hardware concurency by default
-		gutil::BinSort<uint64_t>		sorter{};				//	a class to sort and look up keys by their value.
+		gutil::BinSortSpan<uint64_t>	sorter{};				//	a class to sort and look up keys by their value.
 		std::atomic<bool>				is_sorted_{false};		//  a flag to track when the active keys are up to date
 		std::atomic<bool>				is_collected_{false};	//  a flag to track when the active keys are ready to be sorted (managed by the derived class)
 		
@@ -234,7 +234,7 @@ namespace Keys {
 		[[nodiscard]] constexpr size_t n_possible_keys() const noexcept { return key_mask.size();}
 		[[nodiscard]] bool is_sorted() const noexcept 					{ return is_sorted_.load();}
 		[[nodiscard]] bool is_collected() const noexcept				{ return is_collected_.load();}
-		[[nodiscard]] gutil::BinSort<uint64_t> get_sorter() const noexcept {return sorter;}
+		[[nodiscard]] auto get_sorter() const noexcept {return sorter;}
 
 		[[nodiscard]] bool is_current() const noexcept {
 			const bool col = is_collected();
@@ -834,40 +834,23 @@ namespace Keys {
 		}
 
 		template<typename BinFun, typename T, typename Less_t=std::nullptr_t> requires( std::is_invocable_r_v<int, BinFun, T>)
-		[[maybe_unused]] gutil::BinSort<T> static sort_keys(std::span<T> list, int N, BinFun&& fun, 
+		[[maybe_unused]] gutil::BinSortSpan<T> static sort_keys(std::span<T> list, int N, BinFun&& fun, 
 														gutil::ThreadPool* tp=nullptr, Less_t&& less=nullptr) noexcept {
 			constexpr bool USER_LESS = std::is_invocable_r_v<bool, Less_t, const T&, const T&>;
 			static_assert(USER_LESS || std::same_as<Less_t,std::nullptr_t>);
 
 			//link the current active keys to the sorter
-			gutil::BinSort<T> local_sorter{list, N};
-			GUTIL_ASSERT(local_sorter.n_bins() == N);
+			gutil::BinSortSpan<T> local_sorter{list};
+			local_sorter.set_n_bins(N);
+			local_sorter.threads = tp;
+
+			local_sorter.sort(std::forward<BinFun>(fun));
+			if constexpr (USER_LESS) {
+				local_sorter.sort_bins(less);
+			} else {
+				local_sorter.sort_bins();
+			}
 			
-			if (tp) {
-				local_sorter.dispatch_sort(std::forward<BinFun>(fun), tp);
-				tp->wait_idle();
-
-				//sort within bins
-				for (int i=0; i<local_sorter.n_bins(); ++i) {
-					if constexpr (USER_LESS) {
-						tp->submit([less](auto a, auto b){std::sort(a, b, less);}, local_sorter.begin(i), local_sorter.end(i));
-					} else {
-						tp->submit([](auto a, auto b){std::sort(a, b);}, local_sorter.begin(i), local_sorter.end(i));
-					}
-				}
-				tp->wait_idle();
-			}
-			else {
-				local_sorter.sort(std::forward<BinFun>(fun));
-				for (int i=0; i<local_sorter.n_bins(); ++i) {
-					if constexpr (USER_LESS) {
-						std::sort(local_sorter.begin(i), local_sorter.end(i), less);
-					} else {
-						std::sort(local_sorter.begin(i), local_sorter.end(i));
-					}
-				}
-			}
-
 			//return the sorter so that the caller has views into each bin
 			return local_sorter;
 		}

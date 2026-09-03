@@ -368,6 +368,18 @@ namespace GV {
 			GUTIL_ASSERT(dof.is_valid()); BASE::set_bit<INITIAL_DOF_BIT>(dof.linear_index(), val);
 		}
 
+		[[nodiscard]] bool is_snapshot_A_active(DOF_t dof) const noexcept {
+			GUTIL_ASSERT(dof.is_valid()); return BASE::check_bit<SNAP_A_ACTIVE_BIT>(dof.linear_index());
+		}
+		[[nodiscard]] bool is_snapshot_A_refined(DOF_t dof) const noexcept {
+			GUTIL_ASSERT(dof.is_valid()); return BASE::check_bit<SNAP_A_REFINED_BIT>(dof.linear_index());
+		}
+		[[nodiscard]] bool is_snapshot_B_active(DOF_t dof) const noexcept {
+			GUTIL_ASSERT(dof.is_valid()); return BASE::check_bit<SNAP_B_ACTIVE_BIT>(dof.linear_index());
+		}
+		[[nodiscard]] bool is_snapshot_B_refined(DOF_t dof) const noexcept {
+			GUTIL_ASSERT(dof.is_valid()); return BASE::check_bit<SNAP_B_REFINED_BIT>(dof.linear_index());
+		}
 
 		/////////////////////////////////////////////////////////////////////////
 		/// Methods to set and restore snapshots
@@ -377,7 +389,7 @@ namespace GV {
 			if (which==3 || which==1) {mask |= (SNAP_A_ACTIVE_BIT | SNAP_A_REFINED_BIT); }
 			if (which==3 || which==2) {mask |= (SNAP_B_ACTIVE_BIT | SNAP_B_REFINED_BIT); }
 			GV_BEGIN_MASK_UNSTABLE;
-			BASE::unconditional_bitwise_and(~mask);
+			BASE::unconditional_bitwise_and_all_masks(~mask);
 			GV_END_MASK_UNSTABLE;
 		}
 
@@ -446,6 +458,60 @@ namespace GV {
 			collect_dofs();
 		}
 
+		gutil::BinSortVector<DOF_t> collect_snapshot(uint8_t which=0) const noexcept {
+			GUTIL_ASSERT(which<3);
+			//which=0 -> get current
+			//which=1 -> get snapshot 1/A
+			//which=2 -> get snapshot 2/B
+
+			if (which==0) {
+				GV_BEGIN_STABLE
+				//note that active_keys is sorted, but has type uint64_t
+				//we must copy the result as DOF_t and then copy the sort status
+				gutil::BinSortVector<DOF_t> result(active_dofs.begin(), active_dofs.end());
+				result.set_bin_fun([](DOF_t dof){return (int) dof.depth();});
+				result.bins = this->sorter.bins;
+				result.n_bins_ = this->sorter.n_bins_;
+				result.n_bits_ = this->sorter.n_bits_;
+				GV_END_STABLE
+				return result;
+			}
+			
+			//we need to collect and then sort the dofs.
+			uint8_t mask = (which==1) ? SNAP_A_ACTIVE_BIT : SNAP_B_ACTIVE_BIT;
+
+			const size_t n_threads = threads.n_threads()==0 ? 1 : threads.n_threads();
+			const size_t n_keys_per_thread = key_mask.size()/n_threads;
+			std::vector<std::vector<DOF_t>> thread_keys(n_threads);
+			
+			auto job = [mask, n_keys_per_thread, &thread_keys](std::span<const uint8_t> masks, size_t tid) {
+				size_t key_index = tid*n_keys_per_thread;	//we need to track the location of the mask we are examing
+				for (size_t i=0; i<masks.size(); ++i, ++key_index) {
+					if (masks[i]&mask) {thread_keys[tid].push_back(DOF_t::MakeFromIndex(key_index));}
+				}
+			};
+
+			{
+				GV_BEGIN_STABLE
+				dispatch_parallel_key_mask_const(job);
+				threads.wait_idle();
+				GV_END_STABLE
+			}
+			for (size_t tid=1; tid<n_threads; ++tid) {
+				thread_keys[0].insert(thread_keys[0].end(),
+									std::make_move_iterator(thread_keys[tid].begin()),
+									std::make_move_iterator(thread_keys[tid].end()));
+			}
+			
+			gutil::BinSortVector<DOF_t> result(std::move(thread_keys[0]));
+			result.set_n_bins( (int) max_depth);
+
+			result.set_threadpool(threads);
+			result.sort([](DOF_t dof){return (int) dof.depth();});
+			result.sort_bins();
+			result.clear_threadpool();
+			return result;
+		}
 
 
 		///////////////////////////////////////////////////////////////////////////

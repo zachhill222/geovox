@@ -6,6 +6,7 @@
 #include "simd_keys/mesh/mesh_keys.hpp"
 #include "simd_keys/dofs/utility.hpp"
 
+#include <iostream>
 #include <cstdint>
 #include <vector>
 #include <array>
@@ -41,9 +42,9 @@ namespace GV {
 		using Scalar_t      = T;
 		using Point_t       = gutil::Point<3,T>;
 
-		static constexpr bool IS_CHARMS = DofHandlerType::HFlag | DofHierarchicalVariants::Charms;
-		static constexpr bool IS_QH = DofHandlerType::HFlag | DofHierarchicalVariants::QuasiHierarchical;
-		static constexpr bool IS_TH = DofHandlerType::HFlag | DofHierarchicalVariants::TrueHierarchical;
+		static constexpr bool IS_CONFORMAL = DofHandlerType::HFlag & DofHierarchicalVariants::Conformal;
+		static constexpr bool IS_QH = DofHandlerType::HFlag & DofHierarchicalVariants::QuasiHierarchical;
+		static constexpr bool IS_TH = DofHandlerType::HFlag & DofHierarchicalVariants::TrueHierarchical;
 
 
 		//////////////////////////////////////////////////////////////////
@@ -51,11 +52,9 @@ namespace GV {
 		// and a reference to the latest dofs (what we need to transform to)
 		//////////////////////////////////////////////////////////////////
 		const Mesh_t& 					mesh;
-		const DofHandler_t& 			dofhandler;
+		const DofHandler_t& 			d_handler;
 		const uint8_t  					max_depth;
-		std::span<const DOF_t> 			dh_curr_dofs;
-		std::vector<DOF_t> 				dofs{};
-		gutil::BinSort<uint64_t>		sorter{};	//capture the sorter for the dofs snapshot
+		gutil::BinSortVector<DOF_t>     dofs{};
 		std::vector<Scalar_t> 			coefs{};	//store coefficients contiguously so that we can map to a column major dense matrix
 		
 
@@ -144,11 +143,10 @@ namespace GV {
 		/// Constructor and movement
 		//////////////////////////////////////////////////////////////////
 		CoefHandler() = delete;
-		CoefHandler(const DofHandler_t& dofhandler) noexcept : 
-			mesh{dofhandler.mesh},
-			dofhandler{dofhandler},
-			max_depth{dofhandler.mesh.max_depth},
-			dh_curr_dofs{dofhandler.active_dofs} {}
+		CoefHandler(const DofHandler_t& d_handler) noexcept : 
+			mesh{d_handler.mesh},
+			d_handler{d_handler},
+			max_depth{d_handler.mesh.max_depth} {}
 		CoefHandler(CoefHandler&& other) noexcept = default;
 		CoefHandler(const CoefHandler&) = default;
 		CoefHandler& operator=(CoefHandler&& other) = delete;
@@ -163,34 +161,30 @@ namespace GV {
 		/// at the corresponding vertex. Alternatively, set them all to 0.
 		///////////////////////////////////////////////////////////////////
 		void init_coefs() noexcept {
-			GUTIL_ASSERT(dofhandler.is_current());
-
-			auto lock = dofhandler.begin_active_keys_stable();
-			update_dh_dof_link();
+			GUTIL_ASSERT(d_handler.is_current());
 			snapshot_dofs();
 			coefs.assign(N*dofs.size(), Scalar_t{0});
-			dofhandler.end_active_keys_stable();
 		}
 
 		template<typename DofEval>
 		void assign_coefs(uint8_t i, DofEval&& eval) noexcept {
-			GUTIL_ASSERT(dofhandler.is_current());
+			GUTIL_ASSERT(d_handler.is_current());
 			GUTIL_ASSERT(i<N);
 			GUTIL_ASSERT(dofs.size()>0);
 			GUTIL_ASSERT(coefs.size()==N*dofs.size());
 			{
-				auto lock = dofhandler.begin_active_keys_stable();
+				auto lock = d_handler.begin_active_keys_stable();
 				
 				GUTIL_OMP(parallel for)
 				for (uint64_t idx=0; idx<dofs.size(); ++idx) {
 					#ifndef NDEBUG
-						bool flag = mesh.is_conformal(static_cast<MeshFeature_t>(dofhandler.feature(dofs[idx])));
+						bool flag = mesh.is_conformal(static_cast<MeshFeature_t>(d_handler.feature(dofs[idx])));
 						GUTIL_ASSERT(flag);
 					#endif
 					data(i)[idx] = eval(dofs[idx]);
 				}
 
-				dofhandler.end_active_keys_stable();
+				d_handler.end_active_keys_stable();
 			}
 		}
 
@@ -198,17 +192,11 @@ namespace GV {
 		/// Check if the coefs are likely up to date
 		///////////////////////////////////////////////////////////////////
 		[[nodiscard]] bool is_current() const noexcept {
-			if (!dofhandler.is_current()) {return false;}
+			if (!d_handler.is_current()) {return false;}
 
-			if (dh_curr_dofs.size() != dofhandler.active_dofs.size()) {return false;}
-			if (dh_curr_dofs.data() != dofhandler.active_dofs.data()) {return false;}
-
-			if (dofs.empty()) {return false;}
-			if (dofs.size()  != dh_curr_dofs.size())  {return false;}
-			if (dofs.front() != dh_curr_dofs.front()) {return false;}
-			if (dofs.back()  != dh_curr_dofs.back())  {return false;}
-
-			if (coefs.size() != N*dofs.size())        {return false;}
+			//just check size for now
+			if (dofs.size()  != d_handler.n_dofs())  {return false;}
+			if (coefs.size() != N*dofs.size())     {return false;}
 
 			return true;
 		}
@@ -216,230 +204,131 @@ namespace GV {
 		///////////////////////////////////////////////////////////////////
 		/// Look up previous global dof numbers and get snapshot of the handler's current dofs
 		///////////////////////////////////////////////////////////////////
-		[[nodiscard]] size_t global_number(DOF_t dof) const noexcept {
-			const int bin_number = dofhandler.dof_key_bin(dof.key);
-			std::span<const uint64_t> list = sorter.get_bin(bin_number);
-			auto it = std::lower_bound(list.begin(), list.end(), dof.key);
-			if (it==list.end() || *it!=dof.key) {return size_t(-1);}
-			return sorter.bin_start(bin_number) + std::distance(list.begin(), it);
-		}
-
-		void update_dh_dof_link() noexcept {
-			//only call when the stable dofhandler locks are acquired
-			dh_curr_dofs = dofhandler.active_dofs;
-		}
-
 		void snapshot_dofs() noexcept {
-			//only call when the stable dofhandler locks are acquired and
-			//after update_dh_dof_link() has been called.
-			dofs.clear();
-			dofs.insert(dofs.end(), dh_curr_dofs.begin(), dh_curr_dofs.end());
-			sorter = dofhandler.get_sorter();
-			//the sorter uses the raw key values
-			sorter.rebind_to_copy(gutil::reinterpret_as_span<uint64_t,DOF_t>(dofs));
-			GUTIL_ASSERT(sorter.n_bins()== (int) max_depth+1);
+			dofs = d_handler.collect_snapshot(0);
+			GUTIL_ASSERT(dofs.n_bins() == max_depth+1);
 		}
 
+		///////////////////////////////////////////////////////////////////
+		/// Transfer coefficients
+		///////////////////////////////////////////////////////////////////
+		void prolong_coefs(uint8_t fine_number=0, uint8_t coarse_number=0) noexcept {
+			GUTIL_ASSERT(d_handler.is_current());
+			auto lock = d_handler.begin_active_keys_stable();
+
+			gutil::BinSortVector<DOF_t> new_dofs = d_handler.collect_snapshot(0);
+			std::vector<Scalar_t> new_coefs(N*new_dofs.size());
+			ProlongCoefs(new_coefs, new_dofs, coefs, dofs, d_handler, fine_number, coarse_number);
+			coefs = std::move(new_coefs);
+			dofs  = std::move(new_dofs);
+
+			d_handler.end_active_keys_stable();
+		}
+
+		void restrict_coefs(uint8_t fine_number=0, uint8_t coarse_number=0) noexcept {
+			GUTIL_ASSERT(d_handler.is_current());
+			auto lock = d_handler.begin_active_keys_stable();
+
+			gutil::BinSortVector<DOF_t> new_dofs = d_handler.collect_snapshot(0);
+			std::vector<Scalar_t> new_coefs(N*new_dofs.size());
+			RestrictCoefs(coefs, dofs, new_coefs, new_dofs, d_handler, fine_number, coarse_number);
+			coefs = std::move(new_coefs);
+			dofs  = std::move(new_dofs);
+
+			d_handler.end_active_keys_stable();
+		}
 
 		///////////////////////////////////////////////////////////////////
 		/// Static methods for interpolating a field between bases.
 		///////////////////////////////////////////////////////////////////
-		static void ProlongCoefs(std::span<Scalar_t> pro_coefs, std::span<const DOF_t> pro_dofs,
-			std::span<const Scalar_t> cur_coefs, std::span<const DOF_t> const DofHandler_t& cur_handler) noexcept {
+		static void ProlongCoefs(std::span<Scalar_t> fine_coefs, const gutil::BinSortVector<DOF_t>& fine_dofs,
+			std::span<const Scalar_t> coarse_coefs, const gutil::BinSortVector<DOF_t>& coarse_dofs,
+			const DofHandler_t& handler, uint8_t fine_number, uint8_t coarse_number) noexcept {
+			GUTIL_ASSERT(fine_coefs.size()==N*fine_dofs.size());
+			GUTIL_ASSERT(coarse_coefs.size()==N*coarse_dofs.size());
 
-		}
+			const size_t coarse_size = coarse_dofs.size();
+			const size_t fine_size   = fine_dofs.size();
+			std::fill(fine_coefs.begin(), fine_coefs.end(), Scalar_t{0});
 
-
-
-
-		///////////////////////////////////////////////////////////////////
-		/// Transform dofs due to refinement/unrefinement
-		///////////////////////////////////////////////////////////////////
-		void prolong_coefs() noexcept {
-			GUTIL_ASSERT(dofhandler.is_current());
-			update_dh_dof_link();
-			
-			GUTIL_PROFILE("updating coefficients (", dofs.size(), " -> ", dh_curr_dofs.size(), ")");
-			{
-				//compute new coefficients
-				auto lock1 = dofhandler.begin_key_mask_stable();
-				auto lock2 = dofhandler.begin_active_keys_stable();
-				std::array<std::vector<Scalar_t>,N> new_coefs;
-				auto job = [&](uint8_t i) { prolong_coefs(i,new_coefs[i]); };
-				for (uint8_t i=0; i<N; ++i) {
-					threads.submit(job, i);
-				}
-				threads.wait_idle();
-				coefs = std::move(new_coefs);
-				dofhandler.end_active_keys_stable();
-				dofhandler.end_key_mask_stable();
-			}
-			{
-				//finalize
-				snapshot_dofs();
-			}
-		}
-
-		void restrict_coefs() noexcept {
-			GUTIL_ASSERT(dofhandler.is_current());
-			update_dh_dof_link();
-
-			GUTIL_PROFILE("updating coefficients (", dofs.size(), " -> ", dh_curr_dofs.size(), ")");
-			{
-				//compute new coefficients
-				auto lock1 = dofhandler.begin_key_mask_stable();
-				auto lock2 = dofhandler.begin_active_keys_stable();
-				std::array<std::vector<Scalar_t>,N> new_coefs;
+			GUTIL_OMP(parallel for)
+			for (size_t idx=0; idx<coarse_size; ++idx) {
+				DOF_t dof = coarse_dofs[idx];
 				
-				for (uint8_t i=0; i<N; ++i) {
-					threads.submit([&,i](){restrict_coefs(i,new_coefs[i]);});
+				//aggregate the contribution for each component
+				Scalar_t contribution[N];
+				for (uint8_t f=0; f<N; ++f) {
+					contribution[f] = coarse_coefs[f*coarse_size + idx];
 				}
-				threads.wait_idle();
 
-				coefs = std::move(new_coefs);
-				dofhandler.end_active_keys_stable();
-				dofhandler.end_key_mask_stable();
-			}
-			{
-				//finalize
-				snapshot_dofs();
-			}
-		}
-
-		protected:
-		////////////////////////////////////////////////////////////////////////////////
-		/// Compute coefficients for dofs that were introduced by refinement.
-		///
-		/// Start at the coarse node that used to be active and propagate it's coefficient
-		/// to all children multiplied by their weight, recursing as needed.
-		////////////////////////////////////////////////////////////////////////////////
-		void prolong_coefs(uint8_t i, std::vector<Scalar_t>& new_coefs) noexcept {
-			GUTIL_ASSERT(dofhandler.is_active_keys_stable());
-			GUTIL_ASSERT(dofhandler.is_key_mask_stable());
-			GUTIL_ASSERT(i<N);
-
-			const size_t old_size = dofs.size();
-			const size_t new_size = dh_curr_dofs.size();
-			new_coefs.assign(new_size, Scalar_t{0});
-
-			GUTIL_OMP(parallel)
-			{
-				GUTIL_OMP(for)
-				for (size_t idx=0; idx<old_size; ++idx) {
-					DOF_t dof = dofs[idx];
-
-					size_t n_idx = dofhandler.global_number(dof);
-					if (n_idx < new_size) {
-						GUTIL_OMP(atomic)
-						new_coefs[n_idx] += data(i)[idx];
-						continue;
+				//under a true hierachical regime, the global dof numbers may change,
+				//but the coefs must be directly transfered over
+				if constexpr (IS_TH) {
+					size_t n_idx = fine_dofs.index_sorted(dof);
+					if (n_idx<fine_size) {
+						for (uint8_t f=0; f<N; ++f) {
+							GUTIL_OMP(atomic)
+							fine_coefs[f*fine_size + n_idx] += contribution[f];
+						}
 					}
-					GUTIL_ASSERT(!dofhandler.is_active_stable(dof));
-					distribute_refined(dof, data(i)[idx], std::span<Scalar_t>(new_coefs), new_size);
-				}//for dofs
-			}//omp parallel
-		}//update coefs
-
-
-		void restrict_coefs(uint8_t i, std::vector<Scalar_t>& new_coefs) noexcept {
-			GUTIL_ASSERT(dofhandler.is_active_keys_stable());
-			GUTIL_ASSERT(dofhandler.is_key_mask_stable());
-			GUTIL_ASSERT(i<N);
-
-			// const size_t old_size = dofs.size();
-			const size_t new_size = dh_curr_dofs.size();
-			new_coefs.assign(new_size, Scalar_t{0});
-			auto cur_sorter = dofhandler.get_sorter();
-
-			GUTIL_OMP(parallel)
-			{
-				const size_t n_threads = GUTIL_OMP_TERNARY(omp_get_num_threads(), 1);
-				const size_t tid       = GUTIL_OMP_TERNARY(omp_get_thread_num(),  0);
-
-				for (int dd=0; dd<cur_sorter.n_bins(); ++dd) {
-					std::span<const DOF_t> list = gutil::reinterpret_as_span<DOF_t>(cur_sorter.get_bin(dd));
-						// dofhandler.template reinterpret_key_span<DOF_t,uint64_t>(cur_sorter.get_bin(dd));
-				
-					//transfer same depth dofs
-					//split the dofs at this depth into batches to be evaluated
-					const size_t n_dofs 	= list.size();
-					const size_t batch_size = n_dofs/n_threads;
-					const size_t start      = tid*batch_size;
-					const size_t end        = (tid==n_threads-1) ? n_dofs : start+batch_size;
-
-					//collect the dof locations (at this depth) that this thread is responsible for
-					std::span<const DofVert_t> thread_dof_locs = gutil::reinterpret_as_span<DofVert_t>(list.begin()+start, list.begin()+end);
-
-					//collect the new coefficients (at this depth) that this thread is responsible for incrementing
-					const size_t new_idx_start = cur_sorter.bin_start(dd) + start;
-					const size_t new_idx_end   = cur_sorter.bin_start(dd) + end;
-					std::span<Scalar_t> thread_new_coefs(new_coefs.begin()+new_idx_start, new_coefs.begin()+new_idx_end);
-
-					//increment the dofs using the old coefs
-					batched_evaluate_at(thread_new_coefs, thread_dof_locs, data(i), sorter, max_depth);
-
-					//decrement the dofs using the new coefs at lower depths
-					if (dd>0) {
-						batched_evaluate_at<false>(thread_new_coefs, thread_dof_locs, new_coefs, cur_sorter, dd-1);
-					}
-					GUTIL_OMP(barrier)
-				}
-			}
-		}
-
-
-
-		//////////////////////////////////////////////////////////////////////////
-		/// Helper functions to ensure multiple refinements can be processed correctly
-		//////////////////////////////////////////////////////////////////////////
-		//recursively distribute a refined old-dof's contribution down through the hierarchy
-		//until reaching descendants that are genuinely active (not themselves refined further
-		//within the same batch)
-		void distribute_refined(DOF_t dof, Scalar_t contribution, std::span<Scalar_t> new_coefs, size_t new_size) const noexcept {
-			DOF_t c_dofs[DOF_t::N_CHILDREN];
-			dof.children_simd(c_dofs);
-			for (uint8_t c=0; c<DOF_t::N_CHILDREN; ++c) {
-				if (!c_dofs[c].exists()) {continue;}
-				Scalar_t child_contribution = contribution * dof.template child_coef<Scalar_t>(c);
-				
-				if (dofhandler.is_refined_stable(c_dofs[c])) {
-					distribute_refined(c_dofs[c], child_contribution, new_coefs, new_size);
 				}
 				else {
-					size_t n_idx = dofhandler.global_number(c_dofs[c]);
-					if (n_idx<new_size) {
-						GUTIL_ASSERT(dofhandler.is_active_stable(c_dofs[c]));
-						GUTIL_OMP(atomic)
-						new_coefs[n_idx] += child_contribution;
+					DistributeToChildren(dof, contribution, fine_coefs, fine_dofs, handler, fine_number);
+				}
+			}
+		}
+
+		static void RestrictCoefs(std::span<const Scalar_t> fine_coefs, const gutil::BinSortVector<DOF_t>& fine_dofs,
+			std::span<Scalar_t> coarse_coefs, const gutil::BinSortVector<DOF_t>& coarse_dofs,
+			const DofHandler_t& handler, uint8_t fine_number, uint8_t coarse_number) noexcept {
+			GUTIL_ASSERT(fine_coefs.size()==N*fine_dofs.size());
+			GUTIL_ASSERT(coarse_coefs.size()==N*coarse_dofs.size());
+
+			const size_t coarse_size = coarse_dofs.size();
+			const size_t fine_size   = fine_dofs.size();
+			std::fill(coarse_coefs.begin(), coarse_coefs.end(), Scalar_t{0});
+			const uint8_t max_depth = handler.mesh.max_depth;
+
+			for (uint8_t f=0; f<N; ++f) {
+				std::span<const Scalar_t> fine_field   = fine_coefs.subspan(f*fine_size, fine_size);
+				std::span<Scalar_t>       coarse_field = coarse_coefs.subspan(f*coarse_size, coarse_size);
+
+				GUTIL_OMP(parallel)
+				{
+					for (int dd=0; dd<coarse_dofs.n_bins(); ++dd) {
+						std::span<const DOF_t> list = coarse_dofs.get_bin(dd);
+						const gutil::OmpIteratorRange range(list.begin(), list.end());
+
+						//TODO: this must change to be dof agnostic or dispatch by dof type at compile time
+						std::span<const DofVert_t> thread_dof_locs = gutil::reinterpret_as_span<DofVert_t>(range.begin, range.end);
+
+						const size_t new_idx_start = coarse_dofs.bin_start(dd) + std::distance(list.begin(), range.begin);
+						const size_t new_idx_end   = coarse_dofs.bin_start(dd) + std::distance(list.begin(), range.end);
+						std::span<Scalar_t> thread_new_coefs(coarse_field.begin()+new_idx_start, coarse_field.begin()+new_idx_end);
+
+						batched_evaluate_at(thread_new_coefs, thread_dof_locs, fine_field, fine_dofs, max_depth);
+
+						if (dd>0) {
+							batched_evaluate_at<false>(thread_new_coefs, thread_dof_locs, coarse_field, coarse_dofs, dd-1);
+						}
+						GUTIL_OMP(barrier)
 					}
 				}
 			}
 		}
 
-		//recursively distribute an unrefined-away old-dof's contribution up through the
-		//hierarchy until reaching an active ancestor. using restriction means that only
-		//features that 'live' at the parent feature contribute to the parent coefficient
-		//
-		void distribute_unrefined_restrict(DOF_t dof, Scalar_t contribution, std::span<Scalar_t> new_coefs, size_t new_size) const noexcept {
-			DOF_t p_dofs[DOF_t::N_PARENTS];
-			dof.parents_simd(p_dofs);
-			for (uint8_t p=0; p<DOF_t::N_PARENTS; ++p) {
-				if (!p_dofs[p].exists()) {continue;}
-				Scalar_t parent_contribution = contribution * dof.template parent_coef_restrict<Scalar_t>(p_dofs[p]);
-				if (parent_contribution == Scalar_t{0}) {continue;}
 
-				size_t n_idx = dofhandler.global_number(p_dofs[p]);
-				if (n_idx<new_size) {
-					GUTIL_OMP(atomic) new_coefs[n_idx] += parent_contribution;
-				}
-				else if (!dofhandler.is_active_stable(p_dofs[p])) {
-					distribute_unrefined_restrict(p_dofs[p], parent_contribution, new_coefs, new_size);
-				}
+
+		//////////////////////////////////////////////////////////////////////
+		/// Debugging
+		//////////////////////////////////////////////////////////////////////
+		void print_coefs(int i=0) {
+			std::cout << "\nCoefs for field " << i << ":\n";
+			for (size_t idx=0; idx<dofs.size(); ++idx) {
+				std::cout << idx << " : " << dofs[idx] << " -> " << data(i)[idx] << "\n";
 			}
 		}
 
-
-	public:
 		////////////////////////////////////////////////////////////////////////
 		/// Evaluate at mesh vertices for visualizations
 		/// Pass begin/end iterators to the existing vertices
@@ -473,7 +362,7 @@ namespace GV {
 					//dof gather gets all dofs
 					DofVert_t dv = static_cast<DofVert_t>(*it);
 					
-					dofhandler.gather_hierarchical_dofs_at_vertex(action, dv);
+					d_handler.gather_hierarchical_dofs_at_vertex(action, dv);
 				}
 			}
 
@@ -481,33 +370,39 @@ namespace GV {
 		}
 
 		protected:
-		[[nodiscard]] static Scalar_t evaluate_at(DofVert_t loc, std::span<const Scalar_t> coefs, const gutil::BinSort<uint64_t>& dof_depth_sorter, uint8_t target_depth) noexcept {
-			//evaluate the scalar field using dofs up to the target depth
-			GUTIL_ASSERT(dof_depth_sorter.n_bins() >= target_depth);
-			GUTIL_ASSERT(dof_depth_sorter.size() == coefs.size());
-			
-			Scalar_t result{0};
-			for (int dd=0; dd<= (int) target_depth; ++dd) {
-				size_t depth_start = dof_depth_sorter.bin_start(dd);
-				size_t depth_size  = dof_depth_sorter.bin_size(dd);
-				
-				std::span<const DOF_t> dofs_at_depth = gutil::reinterpret_as_span<DOF_t>(
-					dof_depth_sorter.get_bin(dd));
-
-				result += DOF_t::evaluate_field_at_depth(
-						loc,coefs.subspan(depth_start, depth_size), 
-							gutil::reinterpret_as_span<DOF_t>(dof_depth_sorter.get_bin(dd)), (uint64_t) dd);
+		static void DistributeToChildren(DOF_t dof, const Scalar_t* contribution, std::span<Scalar_t> fine_coefs,
+			const gutil::BinSortVector<DOF_t>& fine_dofs, const DofHandler_t& handler, uint8_t fine_number) noexcept requires (IS_QH) {
+			//assume that if we are not in TH, a dof is either refined, active, or irrelevant
+			if (IsRefined(handler, dof, fine_number)) {
+				DOF_t c_dofs[DOF_t::N_CHILDREN];
+				dof.children_simd(c_dofs);
+				for (uint8_t c=0; c<DOF_t::N_CHILDREN; ++c) {
+					if (!c_dofs[c].exists()) {continue;}
+					Scalar_t weight = dof.template child_coef<Scalar_t>(c);
+					Scalar_t child_contribution[N];
+					for (uint8_t f=0; f<N; ++f) { child_contribution[f] = contribution[f] * weight; }
+					DistributeToChildren(c_dofs[c], child_contribution, fine_coefs, fine_dofs, handler, fine_number);
+				}
 			}
-			return result;
+			else if (IsActive(handler, dof, fine_number)) {
+				const size_t fine_size = fine_dofs.size();
+				size_t n_idx = fine_dofs.index_sorted(dof);
+				GUTIL_ASSERT(n_idx < fine_size);
+				for (uint8_t f=0; f<N; ++f) {
+					GUTIL_OMP(atomic)
+					fine_coefs[f*fine_size + n_idx] += contribution[f];
+				}
+			}
 		}
+
 
 		template<bool Increment=true>
 		static void batched_evaluate_at(std::span<Scalar_t> vals, std::span<const DofVert_t> loc, 
-				std::span<const Scalar_t> coefs, const gutil::BinSort<uint64_t>& dof_depth_sorter, uint8_t target_depth) noexcept {
+				std::span<const Scalar_t> coefs, const gutil::BinSortVector<DOF_t>& dof_depth_sorter, uint8_t target_depth) noexcept {
 			//note vals are incremented or decremented, not assigned.
 			//evaluate the scalar field using dofs up to the target depth
 			//the provided locations must all be at the same depth and be sorted in increasing order
-			GUTIL_ASSERT(dof_depth_sorter.n_bins() >= target_depth);
+			GUTIL_ASSERT(dof_depth_sorter.n_bins() > target_depth);
 			GUTIL_ASSERT(dof_depth_sorter.size() == coefs.size());
 			GUTIL_ASSERT(vals.size()==loc.size());
 			if (loc.size()==0) {return;}
@@ -516,8 +411,7 @@ namespace GV {
 				size_t depth_start = dof_depth_sorter.bin_start(dd);
 				size_t depth_size  = dof_depth_sorter.bin_size(dd);
 				
-				std::span<const DOF_t> dofs_at_depth = gutil::reinterpret_as_span<DOF_t>(
-					dof_depth_sorter.get_bin(dd));
+				std::span<const DOF_t> dofs_at_depth = dof_depth_sorter.get_bin(dd);
 
 				DOF_t::template batched_evaluate_field_at_depth<Increment>(
 					vals, loc, coefs.subspan(depth_start, depth_size), 
@@ -527,13 +421,22 @@ namespace GV {
 
 
 		//////////////////////////////////////////////////////////////////////
-		/// Debugging
+		/// Adaptor to get snapshot information from a dof_handler from its snapshot number
 		//////////////////////////////////////////////////////////////////////
-		public:
-		void print_coefs(int i=0) {
-			std::cout << "\nCoefs for field " << i << ":\n";
-			for (size_t idx=0; idx<dofs.size(); ++idx) {
-				std::cout << idx << " : " << dofs[idx] << " -> " << data(i)[idx] << "\n";
+		[[nodiscard]] static bool IsActive(const DofHandler_t& handler, DOF_t dof, uint8_t snapshot_number) noexcept {
+			switch (snapshot_number) {
+				case 0:  return handler.is_active_stable(dof);
+				case 1:  return handler.is_snapshot_A_active(dof);
+				case 2:  return handler.is_snapshot_B_active(dof);
+				default: GUTIL_ABORT("invalid snapshot number"); return false;
+			}
+		}
+		[[nodiscard]] static bool IsRefined(const DofHandler_t& handler, DOF_t dof, uint8_t snapshot_number) noexcept {
+			switch (snapshot_number) {
+				case 0:  return handler.is_refined_stable(dof);
+				case 1:  return handler.is_snapshot_A_refined(dof);
+				case 2:  return handler.is_snapshot_B_refined(dof);
+				default: GUTIL_ABORT("invalid snapshot number"); return false;
 			}
 		}
 	};
