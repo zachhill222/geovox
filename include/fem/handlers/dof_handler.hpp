@@ -785,7 +785,7 @@ namespace GV {
 
 				auto it = gutil::sort_and_unique(scratch, threads);			
 				scratch.erase(it, scratch.end());							//erases all but one non-existant dofs (there could be 1 non-existant element)
-				// if (!scratch.back().exists()) {scratch.pop_back();}			//all dofs exist now.
+				// if (!scratch.back().exists()) {scratch.pop_back();}		//all dofs exist now.
 				std::erase_if(scratch, [](DOF_t dof){ return !dof.exists() || !dof.is_valid();});	//TODO: get rid of this
 
 				//gather valid dofs
@@ -840,8 +840,6 @@ namespace GV {
 			constexpr bool ACTION_NEEDS_NO_INDEX     = std::is_invocable_r_v<void, Action, DOF_t, uint8_t, T, T, T>;
 			constexpr bool ACTION_NEEDS_GLOBAL_INDEX = std::is_invocable_r_v<void, Action, DOF_t, uint8_t, T, T, T, uint64_t>;
 			
-
-
 			static_assert(ACTION_NEEDS_NO_INDEX ^ ACTION_NEEDS_GLOBAL_INDEX, 
 				"the action must have the signature void(DOF_t,uint8_t,T,T,T,uint64_t) or void(DOF_t,uint8_t,T,T,T)");
 
@@ -1009,23 +1007,35 @@ namespace GV {
 		}
 
 
+		/////////////////////////////////////////////////////////////////////////
+		/// A bare essential activate(dof) method that request the mesh to resolve
+		/// the dof support. If the mesh request isn't needed, use set_active(dof,true).
+		/////////////////////////////////////////////////////////////////////////
+		void activate(DOF_t dof) noexcept {
+			GV_ASSERT_KEY_MASK_UNSTABLE_STATE
+			GUTIL_ASSERT(dof.is_valid());
+
+			uint8_t& byte = get_mask_ref(dof);
+			if (byte&ACTIVE_BIT) {return;}
+			byte|=ACTIVE_BIT;
+
+			const uint8_t depth = dof.depth_u8();
+			if (depth==0) {return;}
+
+			for (DofElem_t spt : dof.support()) {			
+				if (!spt.exists()) {continue;}
+				MeshElem_t el = static_cast<MeshElem_t>(spt);
+				if (mesh.read_depth_field(el) < depth) {
+					GUTIL_ASSERT(mesh.is_active(el.parent()));	//the mesh should be respecting a 2-1 refinement rule
+					mesh.request_refine(el.parent());			//this is a request. pushes the element to a mutable list. it is protected by a mutex.
+				}
+			}
+		}
 
 
 		/////////////////////////////////////////////////////////////////////////
-		/// Refinement queries that can be called inside either a stable or unstable
-		/// region.
-		///
-		///	From 'Natural hierarchical refinement for finite element methods'
-		///	in International J. for Numerical Methods in Engineering (2003, DOI 10.1002/nme.601)
-		///
-		/// 	There are 3 rules to guide refinement:
-		///
-		///	1) The refining/unrefining of a dof at depth dd may activate or deactivate that dof
-		///			or any of its children at depth dd+1.
-		///	2) A dof on level dd+1>0 may be refined only when all its parents on level dd have
-		///			been refined. (We track this by the INITIAL_DOF_BIT. here dd=0 is the root element)
-		///	3) A dof on level dd may be unrefined only if a) it was previously refined and
-		///			b) all its children on level dd+1 are not refined.
+		/// Querries to see how the mesh and dof interact. Specifically, if the mesh
+		/// overlaps with dof support elements.
 		/////////////////////////////////////////////////////////////////////////
 		[[nodiscard]] bool mesh_can_support_any(DOF_t dof) const noexcept {
 			GUTIL_ASSERT(dof.is_valid());
@@ -1116,6 +1126,21 @@ namespace GV {
 			}
 			return true;
 		}
+
+
+		//////////////////////////////////////////////////////////////////////////////////////
+		/// select the subset of dofs that satisfy some predicate
+		//////////////////////////////////////////////////////////////////////////////////////
+		template<typename Predicate> requires(std::is_invocable_r_v<bool,Predicate,DOF_t>)
+		std::vector<DOF_t> select_dofs(Predicate&& pred) const noexcept {
+			return BASE::template select_active_keys<DOF_t>(std::forward<Predicate>(pred));
+		}
+
+		template<typename Predicate> requires(std::is_invocable_r_v<bool,Predicate,uint8_t>)
+		std::vector<DOF_t> select_dofs_by_mask(Predicate&& pred) const noexcept {
+			return BASE::template select_keys_by_mask<DOF_t>(std::forward<Predicate>(pred));
+		}
+
 	};
 
 
@@ -1123,7 +1148,14 @@ namespace GV {
 	std::ostream& operator<<(std::ostream& os, const DofHandler<MeshType,DofType>& handler) {
 		os << "DofHandler: " << DofType::name() + "\n";
 		os << handler.summary();
-		os << gutil::format(handler.n_dofs(),16) << " active dofs\n";
+		os << gutil::format(handler.n_dofs(),16) << " active dofs (keys)\n";
+
+		for (int dd=0; dd<= (int) handler.max_depth; ++dd) {
+			size_t count = handler.get_sorter().get_bin(dd).size();
+			if (count>0) {
+				std::cout << "\tdepth " << dd <<" : " << count << "\n";
+			}
+		}
 		return os;
 	}
 }

@@ -19,7 +19,7 @@ using Elem_t 		= typename Mesh_t::Elem_t;
 using Vert_t		= typename Mesh_t::Vert_t;
 
 using DOF_t         = GV::Keys::DOFS::VoxelQ1<GV_TEST_DOF_PERIOD>;
-using DofHandler_t  = GV::CharmsHandlerQH<Mesh_t,DOF_t>;
+using DofHandler_t  = GV::CharmsHandlerTH<Mesh_t,DOF_t>;
 using DofVert_t     = typename DofHandler_t::DofVert_t;
 using DofElem_t     = typename DofHandler_t::DofElem_t;
 
@@ -172,7 +172,7 @@ void save_mesh(const std::string& filename, Mesh_t& mesh, DofHandler_t& d_handle
 			[&](Vert_t vtx) {
 				auto d_vtx = d_handler.get_dof_vertex(vtx);
 				return d_vtx.exists() && d_handler.is_active_stable(DOF_t{d_vtx}) ? 
-							(float)c_handler.coefs[0][d_handler.global_number(DOF_t{d_vtx})] : -1;
+							(float)c_handler.get_coefs(0)[d_handler.global_number(DOF_t{d_vtx})] : -1;
 			}, "scalar_coef");
 	auto pt_dof_key_lookup = GV::make_feature_lookup<Vert_t>(
 			[&](Vert_t vtx) {
@@ -203,7 +203,8 @@ int main(int argc, char* argv[]) {
 	d_handler.init_dofs();
 
 	CoefHandler_t c_handler(d_handler);
-	c_handler.init_coefs(0, [](DOF_t dof) {return 1;});
+	c_handler.init_coefs();
+	c_handler.assign_coefs(0, [](DOF_t dof) {return 1;});
 
 	save_mesh(cfg.test_name + "_initial.vtk", mesh, d_handler, c_handler);
 	std::cout << "\n\n";

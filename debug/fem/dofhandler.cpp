@@ -23,7 +23,7 @@ using MeshVert_t    = typename Mesh_t::Vert_t;
 using MeshElem_t    = typename Mesh_t::Elem_t;
 
 using DOF_t         = GV::Keys::DOFS::VoxelQ1<GV_TEST_DOF_PERIOD>;
-using Handler_t     = GV::CharmsHandlerQH<Mesh_t,DOF_t>;
+using Handler_t     = GV::CharmsHandlerTH<Mesh_t,DOF_t>;
 using DofVert_t     = typename Handler_t::DofVert_t;
 using DofElem_t     = typename Handler_t::DofElem_t;
 
@@ -103,7 +103,7 @@ void evaluate_and_save(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_han
 	auto pt_coef_lookup = GV::make_feature_lookup<MeshVert_t>(
 			[&](MeshVert_t vtx) {
 				auto d_vtx = handler.get_dof_vertex(vtx);
-				return d_vtx.exists() && handler.is_active_stable(DOF_t{d_vtx}) ? (float)coef_handler.coefs[0][handler.global_number(DOF_t{d_vtx})] : -1;
+				return d_vtx.exists() && handler.is_active_stable(DOF_t{d_vtx}) ? (float)coef_handler.get_coefs(0)[handler.global_number(DOF_t{d_vtx})] : -1;
 			}, "scalar_coef");
 
 	auto pt_dof_active_lookup = GV::make_feature_lookup<MeshVert_t>(
@@ -143,7 +143,6 @@ void evaluate_and_save(Mesh_t& mesh, Handler_t& handler, CoefHandler_t& coef_han
 	auto el_dijkm_lookup = GV::make_feature_lookup<MeshElem_t>(
 			[&](MeshElem_t el) {
 				return std::array<int32_t,5>{(int32_t)el.depth(), (int32_t)el.i(), (int32_t)el.j(), (int32_t)el.k(), (int32_t)el.depth_linear_index()};
-
 			}, "d_ijk_morton");
 
 	auto el_color_lookup = GV::make_feature_lookup<MeshElem_t>(
@@ -174,8 +173,8 @@ void test_dof_handler(const TestConfig& cfg) {
 
 	CoefHandler_t coef_handler(handler);
 
-	coef_handler.init_coefs(0,[&](DOF_t dof){ 
-		// return Scalar_t{1};
+	coef_handler.init_coefs();
+	coef_handler.assign_coefs(0,[&](DOF_t dof){
 		auto pt = mesh.geo_coord(MeshVert_t{dof.key});
 		return pt[0]*(Scalar_t{1}-pt[0])*(Scalar_t{1}+pt[0]);
 		});
@@ -187,10 +186,8 @@ void test_dof_handler(const TestConfig& cfg) {
 	for (uint8_t i=0; i<cfg.n_refine; ++i) {
 		GUTIL_ASSERT(handler.is_all_dofs_conformal());
 		GUTIL_TIMER("Refine ", i+1, "/", cfg.n_refine);
-		std::vector<MeshElem_t> elements;
-		for (auto it=mesh.element_begin(); it!=mesh.element_end(); ++it) {
-			if (it->normalized_center()[i%3] < 0.25) {elements.push_back(*it);}
-		}
+		std::vector<MeshElem_t> elements = mesh.select_elements([i](MeshElem_t el){
+			return el.normalized_center()[i%3] < Scalar_t{0.75};});
 		handler.refine(elements);
 		mesh.process_refine<DOF_t::PERIOD>();
 		std::cout << "after refine:\n" << mesh << "\n" << handler << "\n";
@@ -202,15 +199,12 @@ void test_dof_handler(const TestConfig& cfg) {
 	for (uint8_t i=0; i<cfg.n_unrefine; ++i) {
 		GUTIL_ASSERT(handler.is_all_dofs_conformal());
 		GUTIL_TIMER("Unrefine ", i+1, "/", cfg.n_unrefine);
-		std::vector<MeshElem_t> elements;
-		for (auto it=mesh.element_begin(); it!=mesh.element_end(); ++it) {
-			if (it->normalized_center()[1] < 0.25) {elements.push_back(*it);}
-		}
+		std::vector<MeshElem_t> elements = mesh.select_elements([i=i+1](MeshElem_t el){
+			return el.normalized_center()[i%3] < Scalar_t{0.25};});
 		handler.unrefine(elements);
 		remove_unsupported_elements(mesh, handler);
 		std::cout << "after unrefine:\n" << mesh << "\n" << handler << "\n";
 	}
-	coef_handler.restrict_is_average = true; //decide if the restriction should smooth or not
 	coef_handler.restrict_coefs();
 	evaluate_and_save(mesh, handler, coef_handler, cfg.test_name + "_unrefine");
 }

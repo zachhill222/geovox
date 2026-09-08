@@ -12,7 +12,6 @@
 #include <span>
 #include <type_traits>
 #include <algorithm>
-#include <thread>
 
 
 namespace GV {
@@ -22,13 +21,13 @@ namespace GV {
 	/// DOF handler class to work with CHARMS quasi-hierarchical refinement.
 	/////////////////////////////////////////////////////////////////////////////
 	template<VoxelMeshType MeshType, typename DofType>
-	struct CharmsHandlerQH : public DofHandler<MeshType,DofType> {
+	struct CharmsHandlerTH : public DofHandler<MeshType,DofType> {
 		using BASE = DofHandler<MeshType,DofType>;
 
 		/////////////////////////////////////////////////////////////////////////
 		/// Aliases and constants
 		/////////////////////////////////////////////////////////////////////////
-		static constexpr uint64_t HFlag = DofHierarchicalVariants::QuasiHierarchical | DofHierarchicalVariants::Conformal;
+		static constexpr uint64_t HFlag = DofHierarchicalVariants::TrueHierarchical | DofHierarchicalVariants::Conformal;
 
 		using BASE::VERTEX_DOF ;
 		using BASE::ELEMENT_DOF;
@@ -49,22 +48,12 @@ namespace GV {
 		static_assert(!std::same_as<MeshFeature_t,void>);
 
 		using BASE::IS_DEPTH_SEPARABLE;
-		
-		//The maximum depth of a given mesh is specified at runtime. However, to avoid accidentally
-		//requesting say depth 12 (2^(3*12) elements at depth 12, (2^33 -1)/7 ~ 10^10.3 total elements)
-		//we set a maximum depth at compile time.
-		using BASE::max_depth;
 		using BASE::max_possible_dofs;
-
-		//For quasi-hierarchical refinement, there is generally a difference of at most 2 between an active element
-		//and a dof. However, if multiple handlers are interested in the same mesh (e.g., Q1-iso-Q2 elements in a Stokes system),
-		//we may specify this bound. It is up to the user to ensure that the bound is satisfied.
-		using BASE::max_depth_distance;
+		using BASE::max_depth;
 
 		using BASE::ACTIVE_BIT; 	 //0b00000001;	
 		using BASE::REFINED_BIT; 	 //0b00000010;
-		using BASE::INITIAL_DOF_BIT; //0b00000100;	//these dofs don't check their parents and cannot be unrefinedz
-
+		using BASE::INITIAL_DOF_BIT; //0b00000100;	//these dofs don't check their parents and cannot be unrefined
 
 		/////////////////////////////////////////////////////////////////////////
 		/// Storage. Store a vector<uint8_t> for O(1) active queries.
@@ -136,25 +125,32 @@ namespace GV {
 		///			b) all its children on level dd+1 are not refined.
 		///
 		/// Note that in this implementation 'parent' means any feasible dof in any level of the mesh,
-		/// but in the paper it means in the current hierarchy.
+		/// but in the paper it means in the current hierarchy. For TH, this means that we check if
+		/// all active parents are refined.
 		/////////////////////////////////////////////////////////////////////////
 		[[nodiscard]] bool can_refine(DOF_t dof) const noexcept {
 			GUTIL_ASSERT(dof.is_valid());
 			if (dof.depth() >= max_depth) {return false;}		//we can't refine past max depth
 			uint8_t byte = BASE::get_mask_no_check(dof.linear_index());
 			
-			
-			if ((byte&ACTIVE_BIT)==0) {return false;}			//in QH only active dofs can be refined
+			if ((byte&ACTIVE_BIT)==0) {return false;}			//only active dofs can be refined
 			if (byte&REFINED_BIT) 	  {return false;}			//we can't refine a dof twice
 			if (byte&INITIAL_DOF_BIT) {return true;}			//an unrefined initial dof not at max depth can be refined
 			
-			return BASE::has_all_refined_parents(dof);
+			for (DOF_t p : dof.parents()) {
+				if (!p.exists()) {continue;}
+				const uint8_t p_byte = BASE::get_mask_no_check(p.linear_index());
+				if ((p_byte&ACTIVE_BIT) && !(p_byte&REFINED_BIT)) {return false;}
+			}
+
+			return true;
 		}
 
 		[[nodiscard]] bool can_unrefine(DOF_t dof) const noexcept {
 			GUTIL_ASSERT(dof.is_valid());
 			if (!BASE::is_refined_no_check(dof)) {return false;}
 			if (BASE::has_any_refined_child(dof)) {return false;}
+			GUTIL_ASSERT(BASE::is_active_no_check(dof));
 			return true;
 		}
 
@@ -163,13 +159,10 @@ namespace GV {
 			GUTIL_ASSERT(dof.is_valid());
 
 			uint8_t& byte = get_mask_ref(dof);
-			if (byte&ACTIVE_BIT) {
-				GUTIL_ASSERT(!BASE::is_refined_no_check(dof));
-				return;
-			}
+			if (byte&ACTIVE_BIT) {return;}
+			GUTIL_ASSERT((byte&REFINED_BIT)==0);					//a dof being activated shouldn't already be refined
 
 			byte|=ACTIVE_BIT;
-			byte&=~REFINED_BIT;										//in QH, a dof can't be active and refined
 			
 			const uint8_t depth = dof.depth_u8();					//when refining, it is essential to have the mesh be able to resolve the support
 			if (depth==0) {return;}
@@ -203,13 +196,11 @@ namespace GV {
 			DOF_t children[DOF_t::N_CHILDREN];
 			dof.children_simd(children);
 			for (uint64_t idx = 0; idx<DOF_t::N_CHILDREN; ++idx) {
-				if (children[idx].exists()) {
-					activate(children[idx]);
-				}
+				if (idx==DOF_t::EVEN_CHILD_INDEX || !children[idx].exists()) {continue;}
+				activate(children[idx]);
 			}
 
 			uint8_t& byte = get_mask_ref(dof);
-			byte&=~ACTIVE_BIT;
 			byte|=REFINED_BIT;
 		}
 
@@ -218,7 +209,7 @@ namespace GV {
 			GUTIL_ASSERT(dof.is_valid());
 			GUTIL_ASSERT(can_unrefine(dof));
 
-			activate(dof);											//send mesh refinement request
+			BASE::set_refined(dof,false);
 			for (DOF_t c : dof.children()) {
 				if (c.exists() && !BASE::has_any_refined_parent(c)) {
 					BASE::set_active(c,false);
@@ -244,7 +235,7 @@ namespace GV {
 		[[maybe_unused]] size_t refine(std::span<const Elem_t> elems) noexcept {
 			GUTIL_ASSERT(mesh.is_current() && mesh.is_depth_field_correct());
 			GUTIL_ASSERT(is_current());
-			GUTIL_PROFILE("Refining (QH) dofs on ", elems.size(), " elements");
+			GUTIL_PROFILE("Refining (TH) dofs on ", elems.size(), " elements");
 			size_t n_start = active_dofs.size();
 
 			auto pred = [this](DOF_t dof) { return can_refine(dof); };
@@ -254,7 +245,7 @@ namespace GV {
 			{
 				GV_BEGIN_MASK_UNSTABLE
 				std::span<const DofElem_t> d_elems = gutil::reinterpret_as_span<DofElem_t,Elem_t>(elems);
-				std::vector<DOF_t> dofs = BASE::get_dofs_impl(d_elems, max_depth_distance, std::move(pred));
+				std::vector<DOF_t> dofs = BASE::get_dofs_impl(d_elems, max_depth, std::move(pred));
 				GUTIL_PROFILE("Processing ", dofs.size(), " dofs for refinement");
 				
 				gutil::BinSortSpan<DOF_t> dof_depth_sorter(dofs, max_depth+1);
@@ -312,7 +303,7 @@ namespace GV {
 		[[maybe_unused]] size_t unrefine(std::span<const Elem_t> elems) noexcept {
 			GUTIL_ASSERT(mesh.is_current() && mesh.is_depth_field_correct());
 			GUTIL_ASSERT(is_current());
-			GUTIL_PROFILE("Unrefining (QH) dofs on ", elems.size(), " elements");
+			GUTIL_PROFILE("Unrefining (TH) dofs on ", elems.size(), " elements");
 			size_t n_start = active_dofs.size();
 
 			auto pred = [this](DOF_t dof) {
@@ -323,7 +314,7 @@ namespace GV {
 			{
 				GV_BEGIN_MASK_UNSTABLE
 				std::span<const DofElem_t> d_elems = gutil::reinterpret_as_span<DofElem_t,Elem_t>(elems);
-				std::vector<DOF_t> dofs = BASE::get_dofs_impl(d_elems, max_depth_distance, std::move(pred));
+				std::vector<DOF_t> dofs = BASE::get_dofs_impl(d_elems, max_depth, std::move(pred));
 				GUTIL_PROFILE("Processing ", dofs.size(), " dofs for unrefinement");
 				
 				for (DOF_t dof : dofs) {
@@ -344,8 +335,8 @@ namespace GV {
 
 
 	template<VoxelMeshType MeshType, typename DofType>
-	std::ostream& operator<<(std::ostream& os, const CharmsHandlerQH<MeshType,DofType>& handler) {
-		os << "CharmsHandlerQH: " << DofType::name() + "\n";
+	std::ostream& operator<<(std::ostream& os, const CharmsHandlerTH<MeshType,DofType>& handler) {
+		os << "CharmsHandlerTH: " << DofType::name() << "\n";
 		os << handler.summary();
 		os << gutil::format(handler.n_dofs(),16) << " active dofs (keys)\n";
 

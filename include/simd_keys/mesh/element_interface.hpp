@@ -86,7 +86,7 @@ namespace Keys{
 			return Mesh3D::IsMorton(k) ? Mesh3D::DecodeElement_SIMD(k) : k;
 		}
 
-		/// Color54 by pairity - no ring 1 colisions in a 2-1 mesh
+		/// Color54 by parity - no ring 1 collisions in a 2-1 mesh
 		[[nodiscard]] constexpr uint64_t color() const noexcept {
 			return is_encoded() ? Mesh3D::CartesianColor54_SIMD(Mesh3D::DecodeElement_SIMD(key)) :
 								  Mesh3D::CartesianColor54_SIMD(key);
@@ -113,7 +113,7 @@ namespace Keys{
 
 		GUTIL_DECLARE_SIMD()
 		[[nodiscard]] constexpr uint64_t linear_index_simd() const noexcept { return Mesh3D::GlobalElementIndex_SIMD(key); }
-		[[nodiscard]] constexpr uint64_t linear_index() const noexcept { return Mesh3D::GlobalElementIndex(key); }
+		[[nodiscard]] constexpr uint64_t linear_index() const noexcept { return Mesh3D::GlobalElementIndex(Mesh3D::DecodeElement(key)); }
 		[[nodiscard]] constexpr uint64_t depth_linear_index() const noexcept { return Mesh3D::MortonIndex(key); }
 
 		GUTIL_DECLARE_SIMD()
@@ -208,22 +208,20 @@ namespace Keys{
 		}
 
 		GUTIL_DECLARE_SIMD()
-		[[maybe_unused]] constexpr VoxelElement children_simd() const noexcept {
+		[[nodiscard]] constexpr VoxelElement children_simd() const noexcept {
+			//TODO: return a uint64_t
 			return VoxelElement{Mesh3D::ElementChildStart_SIMD(key)};
+		}
+
+		GUTIL_DECLARE_SIMD()
+		[[nodiscard]] constexpr uint64_t parent_simd() const noexcept {
+			return is_encoded() ? Mesh3D::ElementParent_SIMD(key) : Mesh3D::ElementParentCartesian_SIMD(key);
 		}
 
 		[[nodiscard]] constexpr VoxelElement parent() const noexcept {
 			GUTIL_ASSERT(is_valid());
-			const uint64_t m_parent = Mesh3D::ElementParent_SIMD(Mesh3D::EncodeElement(key));
-			return is_encoded() ? VoxelElement{m_parent} : Mesh3D::Exists(m_parent) 
-								? VoxelElement{Mesh3D::DecodeElement(m_parent)} : None();
+			return VoxelElement{parent_simd()};
 		}
-
-		GUTIL_DECLARE_SIMD()
-		[[maybe_unused]] constexpr uint64_t parent_simd() const noexcept {
-			return is_encoded() ? Mesh3D::ElementParent_SIMD(key) : Mesh3D::ElementParentCartesian_SIMD(key);
-		}
-
 
 		/////////////////////////////////////////////////////////////
 		/// Adjacency

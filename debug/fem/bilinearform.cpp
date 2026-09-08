@@ -25,8 +25,8 @@ using DofElem_t     = typename DofHandler_t::DofElem_t;
 
 using CoefHandler_t = GV::CoefHandler<DofHandler_t,Scalar_t,1>;
 
-// using Kernel_t      = GV::L2BilinearKernel<true,false>;
-using Kernel_t      = GV::H1BilinearKernel<true,false>;
+using Kernel_t      = GV::L2BilinearKernel<true,false>;
+// using Kernel_t      = GV::H1BilinearKernel<true,false>;
 using BilinearForm_t    = GV::BilinearForm<4, Scalar_t, DofHandler_t, DofHandler_t, Kernel_t>;
 
 inline constexpr Box_t domain{ {-1,-1,-1},
@@ -92,7 +92,6 @@ void refine(TestConfig cfg, Mesh_t& mesh, DofHandler_t& d_handler, CoefHandler_t
 		mesh.process_refine();
 		c_handler.prolong_coefs();
 	}
-	// c_handler.restrict_coefs();
 
 }
 
@@ -135,7 +134,7 @@ void save_mesh(const std::string& filename, Mesh_t& mesh, DofHandler_t& d_handle
 			[&](Vert_t vtx) {
 				auto d_vtx = d_handler.get_dof_vertex(vtx);
 				return d_vtx.exists() && d_handler.is_active_stable(DOF_t{d_vtx}) ? 
-							(float)c_handler.coefs[0][d_handler.global_number(DOF_t{d_vtx})] : -1;
+							(float)c_handler.get_coefs(0)[d_handler.global_number(DOF_t{d_vtx})] : -1;
 			}, "scalar_coef");
 	auto pt_dof_key_lookup = GV::make_feature_lookup<Vert_t>(
 			[&](Vert_t vtx) {
@@ -166,8 +165,9 @@ int main(int argc, char* argv[]) {
 	d_handler.init_dofs();
 
 	CoefHandler_t c_handler(d_handler);
-	c_handler.init_coefs(0, [&](DOF_t dof) {return mesh.geo_coord(Vert_t{dof.key})[0];});
-	// c_handler.init_coefs(0, [&](DOF_t dof) {return 1;});
+	c_handler.init_coefs();
+	// c_handler.assign_coefs(0, [&](DOF_t dof) {return mesh.geo_coord(Vert_t{dof.key})[0];});
+	c_handler.assign_coefs(0, [&](DOF_t dof) {return 1;});
 
 	save_mesh(cfg.test_name + "_initial.vtk", mesh, d_handler, c_handler);
 	std::cout << "\n\n";

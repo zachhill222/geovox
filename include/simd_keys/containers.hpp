@@ -519,6 +519,97 @@ namespace Keys {
 		}
 
 
+		/////////////////////////////////////////////////////////////////////////
+		/// Select a subset of the active keys and cast them to a desired type
+		/////////////////////////////////////////////////////////////////////////
+		template<typename Key_t=uint64_t, typename Predicate> requires(std::is_invocable_r_v<bool,Predicate,Key_t>)
+		std::vector<Key_t> select_active_keys(Predicate&& pred) const noexcept {
+			GUTIL_ASSERT(is_current());
+
+			//collect keys in parallel per-thread
+			std::vector<std::vector<Key_t>> thread_keys(threads.n_threads());
+			dispatch_parallel_active_keys_const<Key_t>([pred, &thread_keys](std::span<const Key_t> list, int tid) {
+				for (auto it=list.begin(); it!=list.end(); ++it) {
+					Key_t key{*it};
+					if (pred(key)) {thread_keys[tid].push_back(std::move(key));}
+				}
+			});
+			threads.wait_idle();
+
+			//join the per-thread results
+			//accumulate into the thread bin with the greatest number of keys
+			size_t count=0;
+			size_t max_count=0;
+			size_t max_idx=0;
+			for (size_t i=0; i<thread_keys.size(); ++i) {
+				const size_t t_count = thread_keys[i].size();
+				if (t_count > max_count) {
+					max_count = t_count;
+					max_idx = i;
+				}
+				count+=t_count;
+			}
+
+			auto& result = thread_keys[max_idx];
+			result.reserve(count);
+			for (size_t i=0; i<thread_keys.size(); ++i) {
+				if (i!=max_idx) {
+					auto& list = thread_keys[i];
+					result.insert(result.end(), std::make_move_iterator(list.begin()), std::make_move_iterator(list.end()));
+					list.clear();
+				}
+			}
+
+			return result;
+		}
+		
+		template<typename Key_t=uint64_t, typename Predicate> requires(std::is_invocable_r_v<bool,Predicate,uint8_t>)
+		std::vector<Key_t> select_keys_by_mask(Predicate&& pred) const noexcept {
+			//collect keys in parallel per-thread constructed from mask index
+			std::vector<std::vector<Key_t>> thread_keys(threads.n_threads());
+			dispatch_parallel_key_mask_const([pred, &thread_keys](std::span<const uint8_t> list, int tid, size_t idx_start) {
+				for (auto it=list.begin(); it!=list.end(); ++it, ++idx_start) {
+					if (pred(*it)) {
+						if constexpr (std::same_as<Key_t,uint64_t>) {
+							thread_keys[tid].push_back(idx_start);
+						}
+						else {
+							thread_keys[tid].push_back(Key_t::MakeFromIndex(idx_start));
+						}
+					}
+				}
+			});
+			threads.wait_idle();
+
+			//join the per-thread results
+			//accumulate into the thread bin with the greatest number of keys
+			size_t count=0;
+			size_t max_count=0;
+			size_t max_idx=0;
+			for (size_t i=0; i<thread_keys.size(); ++i) {
+				const size_t t_count = thread_keys[i].size();
+				if (t_count > max_count) {
+					max_count = t_count;
+					max_idx = i;
+				}
+				count+=t_count;
+			}
+
+			auto& result = thread_keys[max_idx];
+			result.reserve(count);
+			for (size_t i=0; i<thread_keys.size(); ++i) {
+				if (i!=max_idx) {
+					auto& list = thread_keys[i];
+					result.insert(result.end(), std::make_move_iterator(list.begin()), std::make_move_iterator(list.end()));
+					list.clear();
+				}
+			}
+
+			return result;
+		}
+		
+
+
 
 		/////////////////////////////////////////////////////////////////////////
 		/// A few methods to do bulk bitwise operations on the entire key set.

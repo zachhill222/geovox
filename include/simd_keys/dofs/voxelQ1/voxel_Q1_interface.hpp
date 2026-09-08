@@ -41,6 +41,7 @@ namespace DOFS {
 		static constexpr uint64_t N_SUPPORT_ELEM = LagrangeQ1::N_SUPPORT_ELEM;
 		static constexpr uint64_t N_CHILDREN     = LagrangeQ1::N_CHILDREN;
 		static constexpr uint64_t N_PARENTS      = LagrangeQ1::N_PARENTS;
+		static constexpr uint64_t EVEN_CHILD_INDEX = LagrangeQ1::EVEN_CHILD_INDEX;
 
 		[[nodiscard]] static std::string name() noexcept {return "VoxelQ1<" + std::to_string(Period) + ">";}
 
@@ -198,12 +199,12 @@ namespace DOFS {
 		/////////////////////////////////////////////////////////////
 		template<typename T=double>
 		constexpr void evaluate_simd(uint8_t local, T* val, const T* X, const T* Y, const T* Z, uint32_t N) const noexcept {
-			LagrangeQ1::GetDofValueByLocalNumber(key, local, val, X, Y, Z, N);
+			LagrangeQ1::GetDofValueByLocalNumber<T,Period>(key, local, val, X, Y, Z, N);
 		}
 
 		template<typename PointContainer>
 		[[nodiscard]] constexpr typename PointContainer::value_type evaluate(DofElem_t spt, const PointContainer& pt) const noexcept {
-			return LagrangeQ1::GetDofValue<Period>(spt.key, key, pt);
+			return LagrangeQ1::GetDofValue<Period>(Mesh3D::DecodeElement(spt.key), key, pt);
 		}
 
 		template<typename PointContainer>
@@ -215,7 +216,7 @@ namespace DOFS {
 
 		template<typename T>
 		constexpr void gradient_simd(uint8_t local, T* gx, T* gy, T* gz, const T* X, const T* Y, const T* Z, uint32_t N) noexcept {
-			LagrangeQ1::GetDofGradientByLocalNumber(key, local, gx, gy, gz, X, Y, Z, N);
+			LagrangeQ1::GetDofGradientByLocalNumber<T,Period>(key, local, gx, gy, gz, X, Y, Z, N);
 		}
 
 		template<typename PointContainer>

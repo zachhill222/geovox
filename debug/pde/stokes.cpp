@@ -6,9 +6,9 @@
 #include "geovox.hpp"
 
 
-using Scalar_t   = double;
+using Scalar_t   = float;
 using Assembly_t = GV::SignedDistanceSpheres<Scalar_t, 0b111, false, 1>; //last parameter 0 for non-compact support tanh heaviside
-using Stokes_t   = GV::DiffuseStokes<Assembly_t, 3>;
+using Stokes_t   = GV::DiffuseStokes<Assembly_t, 3, false>;	//final arg: true is QH, false is TH
 
 int main() {
 	Stokes_t::Box_t domain{{-2,-2,-2}, {2,2,2}};
@@ -20,7 +20,7 @@ int main() {
 	stokes.eps_scale = 2;
 
 	stokes.inner_iter.max_iter = 1000;
-	stokes.outer_iter.max_iter = 1000;
+	stokes.outer_iter.max_iter = 50;
 	stokes.initialize(2);
 	stokes.update_eps();
 
@@ -30,6 +30,7 @@ int main() {
 		stokes.geometry_refine(1);
 		// stokes.refine_interior();
 		stokes.update_eps();   // min_element_size changes after refinement -- eps needs recomputing each time
+		
 		GV::ddm_stokes_monolithic(stokes);
 		// GV::ddm_stokes_standard_uzawa(stokes);
 		// GV::ddm_stokes_cd_uzawa(stokes);

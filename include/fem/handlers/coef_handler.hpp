@@ -263,7 +263,10 @@ namespace GV {
 
 				//under a true hierachical regime, the global dof numbers may change,
 				//but the coefs must be directly transfered over
-				if constexpr (IS_TH) {
+				if constexpr (IS_QH) {
+					DistributeToChildren(dof, contribution, fine_coefs, fine_dofs, handler, fine_number);
+				}
+				else {
 					size_t n_idx = fine_dofs.index_sorted(dof);
 					if (n_idx<fine_size) {
 						for (uint8_t f=0; f<N; ++f) {
@@ -271,9 +274,6 @@ namespace GV {
 							fine_coefs[f*fine_size + n_idx] += contribution[f];
 						}
 					}
-				}
-				else {
-					DistributeToChildren(dof, contribution, fine_coefs, fine_dofs, handler, fine_number);
 				}
 			}
 		}

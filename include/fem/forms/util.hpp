@@ -52,7 +52,7 @@ namespace GV {
 		explicit ScalarValueCache(const Scalar_t* other_val) {
 			GUTIL_ASSERT(other_val);
 			GUTIL_SIMD()
-			for (int i=0; i<N; ++i) {val[i]==other_val[i];}
+			for (int i=0; i<N; ++i) {val[i]=other_val[i];}
 		}
 
 		///////////////////////////////////////////////////////////////
@@ -390,7 +390,6 @@ namespace GV {
 			for (size_t j=0; j<n; ++j) {
 				global_idx[j] = handler.global_number(dofs[j]);
 				GUTIL_ASSERT(global_idx[j] < handler.n_dofs());
-				GUTIL_ASSERT(dofs[j].depth() <= qr.q_el.depth()+1);	//for quasi-hierarchical refinement
 				if constexpr (NEEDS_DOF_VALS) {vals.emplace_back(dofs[j], qr);}
 				if constexpr (NEEDS_DOF_GRAD) {grad.emplace_back(dofs[j], qr);}
 			}

@@ -1,8 +1,10 @@
-#include "gutil.hpp"
-#include "geovox.hpp"
 
 #include <Eigen/Sparse>
 #include <Eigen/IterativeLinearSolvers>
+
+#include "gutil.hpp"
+#include "geovox.hpp"
+
 #include <cmath>
 #include <iostream>
 #include <string>
@@ -45,7 +47,7 @@ using Elem_t         = typename MeshHandler_t::Mesh_t::Elem_t;
 using Vert_t         = typename MeshHandler_t::Mesh_t::Vert_t;
 
 using DOF_t          = GV::Keys::DOFS::VoxelQ1<PERIODIC_BC>;
-using DofHandler_t   = GV::CharmsHandlerQH<Mesh_t,DOF_t>;
+using DofHandler_t   = GV::CharmsHandlerTH<Mesh_t,DOF_t>;
 using CoefHandler_t  = GV::CoefHandler<DofHandler_t,Scalar_t,1>;
 
 using InteriorWeight_t = GV::AssemblyPhaseFieldWeight<true,  Assembly_t>;

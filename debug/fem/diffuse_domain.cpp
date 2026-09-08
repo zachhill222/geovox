@@ -5,7 +5,7 @@
 #include <string>
 
 #ifndef GV_TEST_DOF_PERIOD
-	#define GV_TEST_DOF_PERIOD 7
+	#define GV_TEST_DOF_PERIOD 0
 #endif
 
 
@@ -16,7 +16,7 @@ using Scalar_t      = double;
 using Point_t       = gutil::Point<3,Scalar_t>;
 using Box_t         = gutil::Box<3,Scalar_t>;
 using Sphere_t      = gutil::Sphere<3,Scalar_t>;
-using Assembly_t    = GV::SignedDistanceSpheres<Scalar_t,GV_TEST_DOF_PERIOD>;
+using Assembly_t    = GV::SignedDistanceSpheres<Scalar_t,GV_TEST_DOF_PERIOD,true>;
 using MeshHandler_t = GV::DiffuseDomainMeshHandler<Assembly_t>;
 
 using Mesh_t 		= typename MeshHandler_t::Mesh_t;
@@ -24,7 +24,7 @@ using Elem_t 		= typename MeshHandler_t::Mesh_t::Elem_t;
 using Vert_t		= typename MeshHandler_t::Mesh_t::Vert_t;
 
 using DOF_t         = GV::Keys::DOFS::VoxelQ1<GV_TEST_DOF_PERIOD>;
-using DofHandler_t  = GV::CharmsHandlerQH<Mesh_t,DOF_t>;
+using DofHandler_t  = GV::CharmsHandlerTH<Mesh_t,DOF_t>;
 using DofVert_t     = typename DofHandler_t::DofVert_t;
 using DofElem_t     = typename DofHandler_t::DofElem_t;
 
@@ -81,7 +81,8 @@ int main(int argc, char* argv[]) {
 	d_handler.init_dofs();
 
 	CoefHandler_t c_handler(d_handler);
-	c_handler.init_coefs(0,[](auto dof){return Scalar_t{1};});
+	c_handler.init_coefs();
+	c_handler.assign_coefs(0,[](auto dof){return Scalar_t{1};});
 
 	//link the diffuse domain weights to the assembly
 	InteriorWeight_t::SetAssembly(mesh_handler.assembly);
@@ -99,18 +100,21 @@ int main(int argc, char* argv[]) {
 			//note that refine requests can be made via const reference
 			const Mesh_t& mesh = mesh_handler.mesh;
 
-			// auto collides = [eps,&mesh_handler, &mesh](Elem_t el) {
-			// 	Box_t cell{mesh.geo_coord(el.vertex(0)), mesh.geo_coord(el.vertex(7))};
-			// 	return mesh_handler.assembly.collides(cell);
-			// };
+			[[maybe_unused]] auto collides_volume = [eps,&mesh_handler, &mesh](Elem_t el) {
+				Box_t cell{mesh.geo_coord(el.vertex(0)), mesh.geo_coord(el.vertex(7))};
+				return mesh_handler.assembly.collides(cell);
+			};
 
-			auto near_surface = [eps,&mesh_handler, &mesh](Elem_t el) {
+			[[maybe_unused]] auto near_surface = [eps,&mesh_handler, &mesh](Elem_t el) {
 				auto diag = mesh.geo_coord(el.vertex(7))-mesh.geo_coord(el.vertex(0));
 				auto sd = mesh_handler.assembly.signed_distance(mesh_handler.mesh.geo_center(el));
-				return std::abs(sd) < 1.5*gutil::norm2(diag);
+				return std::abs(sd) < 0.501*gutil::norm2(diag);
 			};
 
 			std::vector<Elem_t> ref_elems = mesh_handler.mesh.select_elements(near_surface);
+			if (ref_elems.empty()) {
+				GUTIL_LOG("no elements to refine were found");
+			}
 
 			d_handler.refine(ref_elems);
 			c_handler.prolong_coefs();
@@ -118,10 +122,12 @@ int main(int argc, char* argv[]) {
 			//process the refinement request, you may pass a predicate to only activate
 			//elements that satisfy it.
 			mesh_handler.mesh.process_refine( [](Elem_t el) {
-					return true;
-				});
+				return true;
+			});
 
 			GUTIL_LOG("Test volumes: eps= ", eps);
+			std::cout << mesh_handler.mesh << std::endl;
+			std::cout << d_handler << std::endl;
 
 			//Test the exterior volume
 			{
@@ -157,8 +163,6 @@ int main(int argc, char* argv[]) {
 		const Mesh_t&	  mesh 	   = mesh_handler.mesh;
 
 		GUTIL_TIMER("Save mesh as ", filename);
-		std::cout << mesh_handler.mesh << std::endl;
-		
 		mesh_handler.mesh.save_as_binary(filename);
 
 		Scalar_t eps = 3.0 * mesh_handler.min_element_size();
@@ -177,15 +181,39 @@ int main(int argc, char* argv[]) {
 					return assembly.heaviside_grad(mesh.geo_coord(vtx), eps);},
 				"heaviside_grad");
 
-		auto depth_lookup = GV::make_feature_lookup<Elem_t>(
-				[](Elem_t el) {return el.depth();},
-				"depth"
-			);
+		auto dof_key_lookup = GV::make_feature_lookup<Vert_t>(
+			[&](Vert_t vtx) {
+				auto d_vtx = d_handler.get_dof_vertex(vtx);
+				return d_vtx.exists() && d_handler.is_active_stable(DOF_t{d_vtx}) ?
+							std::array<int32_t,4>{(int32_t)d_vtx.depth(), (int32_t)d_vtx.i(), (int32_t)d_vtx.j(), (int32_t)d_vtx.k()} :
+							std::array<int32_t,4>{-1,-1,-1,-1};
+			}, "dof_key");
 
-		auto ijk_lookup = GV::make_feature_lookup<Elem_t>(
-				[](Elem_t el) { return std::array<uint64_t,3>{el.i(), el.j(), el.k()}; },
-				"ijk"
-			);
+		auto dof_mask_lookup = GV::make_feature_lookup<Vert_t>(\
+			[&](Vert_t vtx) {
+				std::array<int,8> result; result.fill(-1);
+
+				auto d_vtx = d_handler.get_dof_vertex(vtx);
+				if (!d_vtx.exists()) {return result;}
+				
+				DOF_t dof{d_vtx};
+				uint8_t mask = d_handler.get_mask_stable(dof);
+				for (int bit=0; bit<8; ++bit){
+					result[7-bit] = (mask&(1<<bit))>>bit;
+				}
+				return result;
+			}, "dof_mask");
+
+		auto dof_refinable_lookup = GV::make_feature_lookup<Vert_t>(
+			[&](Vert_t vtx) {
+				auto d_vtx = d_handler.get_dof_vertex(vtx);
+				int val = -1;
+				if (d_vtx.exists() && d_handler.is_active_stable(DOF_t{d_vtx}) ) {
+					val = 10*(int)d_handler.can_refine(DOF_t{d_vtx}) + (int)d_handler.can_unrefine(DOF_t{d_vtx});
+				}
+				return val;
+			}, "dof_ref_unref");
+
 
 		auto el_dijkm_lookup = GV::make_feature_lookup<Elem_t>(
 				[&](Elem_t el) {
@@ -203,8 +231,14 @@ int main(int argc, char* argv[]) {
 					return idx;
 				}, "element_number");
 
-		mesh.append_point_data_field_binary(filename, "point_data", sd_lookup, heaviside_lookup, heaviside_grad_lookup);
-		mesh.append_cell_data_field_binary(filename, "cell_data", depth_lookup, el_dijkm_lookup, el_color_lookup, el_idx_lookup);
+		auto dof_count_lookup = GV::make_feature_lookup<Elem_t>(
+				[&](Elem_t el) {
+					return d_handler.get_active_dofs(el).size();
+				}, "dof_count");
+
+
+		mesh.append_point_data_field_binary(filename, "point_data", sd_lookup, heaviside_lookup, heaviside_grad_lookup, dof_key_lookup, dof_refinable_lookup, dof_mask_lookup);
+		mesh.append_cell_data_field_binary(filename, "cell_data", el_dijkm_lookup, el_color_lookup, el_idx_lookup, dof_count_lookup);
 	}
 
 	

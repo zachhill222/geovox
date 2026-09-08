@@ -54,6 +54,7 @@ namespace LagrangeQ1 {
 	inline constexpr uint64_t N_CHILDREN = 27;
 	inline constexpr uint64_t N_PARENTS  = 8;
 
+	inline constexpr uint64_t EVEN_CHILD_INDEX = 13;
 
 	///////////////////////////////////////////////////////////
 	/// Utility methods
@@ -90,40 +91,92 @@ namespace LagrangeQ1 {
 	///////////////////////////////////////////////////////////
 	/// Evaluation: standard single dof methods, convenience methods, performance evaluate all 8 dofs methods
 	///////////////////////////////////////////////////////////
-	template<typename T=double>
-	inline constexpr void GetDofValueByLocalNumber(uint64_t dof, uint8_t local, T* val, const T* X, const T* Y, const T* Z, uint32_t N) noexcept {
-		GUTIL_ASSERT(val && X && Y && Z && N>0);
+	template<typename T, uint8_t Period> requires(Period<8)
+	inline constexpr void GetDofValueByLocalNumber(uint64_t dof, uint8_t local, T* val, const T* X, const T* Y, const T* Z, size_t N) noexcept {
+		GUTIL_ASSERT((val && X && Y && Z) || N==0);
 		GUTIL_ASSERT(local<8);
 		ASSERT_VALID_VOXELQ1_DOF(dof);
+
+		#ifndef NDEBUG
+		for (size_t i=0; i<N; ++i) {
+			GUTIL_ASSERT(std::abs(X[i])<=T{1});
+			GUTIL_ASSERT(std::abs(Y[i])<=T{1});
+			GUTIL_ASSERT(std::abs(Z[i])<=T{1});
+		}
+		#endif
 
 		const T sx = (local&1) ? T{1} : T{-1};
 		const T sy = (local&2) ? T{1} : T{-1};
 		const T sz = (local&4) ? T{1} : T{-1};
 
-		GUTIL_SIMD()
-		for (uint32_t i=0; i<N; ++i) {
-			GUTIL_ASSERT(T{-1} <= X[i] && T{-1} <= Y[i] && T{-1} <= Z[i]);
-			GUTIL_ASSERT(T{1}  >= X[i] && T{1}  >= Y[i] && T{1}  >= Z[i]);
+		//at depth=0 and periodic, the function is constant along those axes
+		if constexpr (Period!=0) {
+			if (Mesh3D::Depth(dof)==0) {
+				GUTIL_SIMD()
+				for (size_t i=0; i<N; ++i) {
+					val[i] = T{1};
+					if constexpr ((Period&0b001)==0) {val[i] *= T{0.5}*(T{1}+sx*X[i]);}
+					if constexpr ((Period&0b010)==0) {val[i] *= T{0.5}*(T{1}+sy*Y[i]);}
+					if constexpr ((Period&0b100)==0) {val[i] *= T{0.5}*(T{1}+sz*Z[i]);}
+				}
+				return;
+			}
+		}
 
+		GUTIL_SIMD()
+		for (size_t i=0; i<N; ++i) {
 			val[i] = T{0.125} * (T{1}+sx*X[i]) * (T{1}+sy*Y[i]) * (T{1}+sz*Z[i]);
 		}
 	}
 
-	template<typename T=double>
-	inline constexpr void GetDofGradientByLocalNumber(uint64_t dof, uint8_t local, T* val_x, T* val_y, T* val_z, const T* X, const T* Y, const T* Z, uint32_t N) noexcept {
-		GUTIL_ASSERT(val_x && val_y && val_z && X && Y && Z && N>0);
+	template<typename T, uint8_t Period> requires(Period<8)
+	inline constexpr void GetDofGradientByLocalNumber(uint64_t dof, uint8_t local, T* val_x, T* val_y, T* val_z, const T* X, const T* Y, const T* Z, size_t N) noexcept {
+		GUTIL_ASSERT((val_x && val_y && val_z && X && Y && Z) || N==0);
 		GUTIL_ASSERT(local<8);
 		ASSERT_VALID_VOXELQ1_DOF(dof);
+
+		#ifndef NDEBUG
+		for (size_t i=0; i<N; ++i) {
+			GUTIL_ASSERT(std::abs(X[i])<=T{1});
+			GUTIL_ASSERT(std::abs(Y[i])<=T{1});
+			GUTIL_ASSERT(std::abs(Z[i])<=T{1});
+		}
+		#endif
 
 		const T sx = (local&1) ? T{1} : T{-1};
 		const T sy = (local&2) ? T{1} : T{-1};
 		const T sz = (local&4) ? T{1} : T{-1};
 
-		GUTIL_SIMD()
-		for (uint32_t i=0; i<N; ++i) {
-			GUTIL_ASSERT(T{-1} <= X[i] && T{-1} <= Y[i] && T{-1} <= Z[i]);
-			GUTIL_ASSERT(T{1}  >= X[i] && T{1}  >= Y[i] && T{1}  >= Z[i]);
+		//at depth=0 and periodic, the function is constant along those axes
+		if constexpr (Period!=0) {
+			if (Mesh3D::Depth(dof)==0) {
+				GUTIL_SIMD()
+				for (size_t i=0; i<N; ++i) {
+					//evaluate components of the product
+					T rx{1}, ry{1}, rz{1}, px{0}, py{0}, pz{0};
+					if constexpr ((Period&0b001)==0) {
+						rx = T{0.5} * (T{1}+sx*X[i]);
+						px = T{0.5} * sx;
+					}
+					if constexpr ((Period&0b010)==0) {
+						ry = T{0.5} * (T{1}+sy*Y[i]);
+						py = T{0.5} * sy;
+					}
+					if constexpr ((Period&0b100)==0) {
+						rz = T{0.5} * (T{1}+sz*Z[i]);
+						pz = T{0.5} * sz;
+					}
 
+					val_x[i]   = px * ry * rz;
+					val_y[i]   = rx * py * rz;
+					val_z[i]   = rx * ry * pz;
+				}
+				return;
+			}
+		}
+
+		GUTIL_SIMD()
+		for (size_t i=0; i<N; ++i) {
 			//regular/non-derivative portions of the evaluation
 			const T rx = T{1}+sx*X[i];
 			const T ry = T{1}+sy*Y[i];
@@ -137,17 +190,19 @@ namespace LagrangeQ1 {
 
 	template<uint8_t Period, typename PointContainer> requires(Period<8)
 	[[nodiscard]] inline constexpr typename PointContainer::value_type GetDofValue(uint64_t spt, uint64_t dof, const PointContainer& pt) noexcept {
-		typename PointContainer::value_type val;
-		auto x=pt[0], y=pt[1], z=pt[2];
-		GetDofValueByLocalNumber(dof, LocalDofNumber_SIMD<Period>(spt,dof), &val, &x, &y, &z, 1);
+		using Scalar = typename PointContainer::value_type;
+		Scalar val;
+		Scalar x=pt[0], y=pt[1], z=pt[2];
+		GetDofValueByLocalNumber<Scalar,Period>(dof, LocalDofNumber_SIMD<Period>(spt,dof), &val, &x, &y, &z, 1);
 		return val;
 	}
 
 	template<uint8_t Period, typename PointContainer> requires(Period<8)
 	[[nodiscard]] inline constexpr PointContainer GetDofGradient(uint64_t spt, uint64_t dof, const PointContainer& pt) noexcept {
-		auto x=pt[0], y=pt[1], z=pt[2];
-		typename PointContainer::value_type gx,gy,gz;
-		GetDofGradientByLocalNumber(dof, LocalDofNumber_SIMD<Period>(spt,dof), &gx, &gy, &gz, &x, &y, &z, 1);
+		using Scalar = typename PointContainer::value_type;
+		Scalar gx,gy,gz;
+		Scalar x=pt[0], y=pt[1], z=pt[2];
+		GetDofGradientByLocalNumber<Scalar,Period>(dof, LocalDofNumber_SIMD<Period>(spt,dof), &gx, &gy, &gz, &x, &y, &z, 1);
 		return PointContainer{gx,gy,gz};
 	}
 
@@ -214,7 +269,7 @@ namespace LagrangeQ1 {
 		children[10] = Mesh3D::MakeVertex<Period>(dd, ii , jm1, kk  );
 		children[11] = Mesh3D::MakeVertex<Period>(dd, ip1, jm1, kk  );
 		children[12] = Mesh3D::MakeVertex<Period>(dd, im1, jj,  kk  );
-		children[13] = Mesh3D::MakeVertex<Period>(dd, ii , jj,  kk  );
+		children[13] = Mesh3D::MakeVertex<Period>(dd, ii , jj,  kk  );	//same geometric feature as the parent
 		children[14] = Mesh3D::MakeVertex<Period>(dd, ip1, jj,  kk  );
 		children[15] = Mesh3D::MakeVertex<Period>(dd, im1, jp1, kk  );
 		children[16] = Mesh3D::MakeVertex<Period>(dd, ii , jp1, kk  );

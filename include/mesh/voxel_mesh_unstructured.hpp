@@ -73,7 +73,7 @@ namespace GV {
 		const GeoPoint_t 							inv_diag;					//reciprocal of the sidelength
 		
 		mutable std::vector<Vert_t>					tracked_vertices{};			//a compressed list of 'active' vertices, primarily used for visualization. reduced keys are stored.
-		mutable gutil::BinSort<Vert_t>				vertex_sorter{};			//sort the vertices for better lookup and deduplication
+		mutable gutil::BinSortSpan<Vert_t>			vertex_sorter{};			//sort the vertices for better lookup and deduplication
 		mutable std::atomic<bool>					is_vertices_collected_{false};	
 		mutable std::atomic<bool>					is_depth_explicitly_correct_{false};
 
@@ -410,15 +410,11 @@ namespace GV {
 
 			GUTIL_ASSERT(std::unique(tracked_vertices.begin(), tracked_vertices.end())==tracked_vertices.end());
 
-			vertex_sorter = gutil::BinSort<Vert_t>(tracked_vertices, max_depth+1);
+			vertex_sorter = gutil::BinSortSpan<Vert_t>(tracked_vertices, max_depth+1);
 			GUTIL_ASSERT(vertex_sorter.n_bins() == max_depth+1);
-			vertex_sorter.dispatch_sort(&vertex_bin, &threads);
-			threads.wait_idle();
-
-			for (int n=0; n<vertex_sorter.n_bins(); ++n) {
-				threads.submit([](auto a, auto b){std::sort(a,b);}, vertex_sorter.begin(n), vertex_sorter.end(n));
-			}
-			threads.wait_idle();
+			vertex_sorter.set_threadpool(threads);
+			vertex_sorter.sort(&vertex_bin);
+			vertex_sorter.sort_bins();
 			is_vertices_collected_.store(true);
 			GV_END_STABLE
 		}
@@ -519,25 +515,12 @@ namespace GV {
 		//select the subset of the active elements that satisfy some predicate
 		template<typename Predicate> requires(std::is_invocable_r_v<bool,Predicate,Elem_t>)
 		std::vector<Elem_t> select_elements(Predicate&& pred) const noexcept {
-			//collect elements in parallel per-thread
-			std::vector<std::vector<Elem_t>> thread_elems(threads.n_threads());
-			BASE::template dispatch_parallel_active_keys_const<Elem_t>([pred, &thread_elems](std::span<const Elem_t> list, int tid) {
-				for (auto it=list.begin(); it!=list.end(); ++it)
-				if (pred(*it)) {thread_elems[tid].push_back(*it);}
-			});
-			threads.wait_idle();
+			return BASE::template select_active_keys<Elem_t>(std::forward<Predicate>(pred));
+		}
 
-			//join the per-thread results
-			size_t count=0;
-			for (auto& list : thread_elems) {count+=list.size();}
-
-			std::vector<Elem_t> result; result.reserve(count);
-			for (auto& list : thread_elems) {
-				result.insert(result.end(), std::make_move_iterator(list.begin()), std::make_move_iterator(list.end()));
-				list.clear();
-			}
-
-			return result;
+		template<typename Predicate> requires(std::is_invocable_r_v<bool,Predicate,uint8_t>)
+		std::vector<Elem_t> select_elements_by_mask(Predicate&& pred) const noexcept {
+			return BASE::template select_keys_by_mask<Elem_t>(std::forward<Predicate>(pred));
 		}
 
 
@@ -1337,10 +1320,6 @@ namespace GV {
 
 		return os;
 	}
-
-
-
-
 }//GV
 	
 
