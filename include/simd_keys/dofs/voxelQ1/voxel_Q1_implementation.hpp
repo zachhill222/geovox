@@ -308,17 +308,6 @@ namespace LagrangeQ1 {
 				jj == Mesh3D::IndexJ_SIMD(child) &&
 				kk == Mesh3D::IndexK_SIMD(child)
 			);
-
-		// uint64_t par = Mesh3D::CartesianIndexPairity_SIMD(child);
-		// if constexpr (Period!=0) {
-		// 	if (Mesh3D::Depth(child)==1) {
-		// 		if constexpr (Period&0b001) {par&=0b110;}
-		// 		if constexpr (Period&0b010) {par&=0b101;}
-		// 		if constexpr (Period&0b100) {par&=0b011;}
-		// 	}
-
-		// }
-		// return static_cast<T>(par==0);
 	}
 
 	GUTIL_DECLARE_SIMD()
