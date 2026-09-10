@@ -41,20 +41,20 @@ namespace GV {
 		//////////////////////////////////////////////////////////////////
 		/// Aliases and sanity checks
 		//////////////////////////////////////////////////////////////////
-		using Base           = KLinearForm<N,T,KernelType,KernelWeightType,TrialHandlerType,TestHandlerType>;
-		using Kernel_t       = typename Base::Kernel_t;
-		using Weight_t       = typename Base::Weight_t;
-		using QuadRule_t     = typename Base::QuadRule_t;
-		using Scalar_t       = typename Base::Scalar_t;
-		using Mesh_t         = typename Base::Mesh_t;
-		using MeshElem_t     = typename Base::MeshElem_t;
+		using BASE           = KLinearForm<N,T,KernelType,KernelWeightType,TrialHandlerType,TestHandlerType>;
+		using Kernel_t       = typename BASE::Kernel_t;
+		using Weight_t       = typename BASE::Weight_t;
+		using QuadRule_t     = typename BASE::QuadRule_t;
+		using Scalar_t       = typename BASE::Scalar_t;
+		using Mesh_t         = typename BASE::Mesh_t;
+		using MeshElem_t     = typename BASE::MeshElem_t;
 		using TrialHandler_t = TrialHandlerType;
 		using TestHandler_t  = TestHandlerType;
 		using TrialDof_t     = typename TrialHandlerType::DOF_t;
 		using TestDof_t      = typename TestHandlerType::DOF_t;
 
-		using TrialCache_t = typename Base::template ElemCache_t<0>;
-		using TestCache_t  = typename Base::template ElemCache_t<1>;
+		using TrialCache_t = typename BASE::template ElemCache_t<0>;
+		using TestCache_t  = typename BASE::template ElemCache_t<1>;
 
 		static constexpr bool IS_SYMMETRIC = Kernel_t::IS_SYMMETRIC;
 		static_assert(!Kernel_t::IS_SYMMETRIC || std::same_as<TrialHandler_t,TestHandler_t>,
@@ -66,10 +66,10 @@ namespace GV {
 		/// deriving the mesh from the test handler (matching the original's own choice).
 		//////////////////////////////////////////////////////////////////
 		BilinearForm(const TrialHandler_t& u_handler, const TestHandler_t& v_handler, KernelType kernel = KernelType{}, KernelWeightType weight = KernelWeightType{}) :
-			Base(v_handler.mesh, std::move(kernel), std::move(weight), u_handler, v_handler) {}
+			BASE(v_handler.mesh, std::move(kernel), std::move(weight), u_handler, v_handler) {}
 
 		BilinearForm(const TrialHandler_t& sym_handler, KernelType kernel=KernelType{}, KernelWeightType weight = KernelWeightType{}) requires(Kernel_t::IS_SYMMETRIC) :
-			Base(sym_handler.mesh, std::move(kernel), std::move(weight), sym_handler, sym_handler) {}
+			BASE(sym_handler.mesh, std::move(kernel), std::move(weight), sym_handler, sym_handler) {}
 
 
 		//////////////////////////////////////////////////////////////////
@@ -100,7 +100,7 @@ namespace GV {
 		void for_each_element(Action&& action, Init&& init=nullptr, Finalize&& finalize=nullptr) const noexcept {
 			GUTIL_ASSERT(this->template get_handler<0>().is_current());
 			GUTIL_ASSERT(this->template get_handler<1>().is_current());
-			Base::template for_each_element<Colored>(std::forward<Init>(init), std::forward<Action>(action), std::forward<Finalize>(finalize));
+			BASE::template for_each_element<Colored>(std::forward<Init>(init), std::forward<Action>(action), std::forward<Finalize>(finalize));
 		}
 
 
