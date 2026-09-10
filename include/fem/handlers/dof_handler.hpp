@@ -678,7 +678,9 @@ namespace GV {
 			requires(std::same_as<Elem_t,DofElem_t> || std::same_as<Elem_t,MeshElem_t> ) 
 					&& (std::same_as<Predicate,std::nullptr_t> || std::is_invocable_r_v<bool, Predicate, DOF_t>)
 		[[nodiscard]] std::vector<DOF_t> get_active_dofs(Elem_t el_, Predicate&& pred = nullptr) const noexcept {
-			GV_BEGIN_ACTIVE_STABLE
+			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+			GV_ASSERT_KEY_MASK_STABLE_STATE
+
 			//assume that dofs only exist at the features of active elements or the feature of a parent of an active element
 			//additionally, if a feature at depth d is active, then its parent feature at depth d-1 cannot be active
 			//this is the same as getting "basis_s U basis_a" in a hierarchical method
@@ -699,9 +701,49 @@ namespace GV {
 				}
 				el = el.parent();
 			}
-
-			GV_END_ACTIVE_STABLE
 			return result;
+		}
+
+
+		// When looking up dofs on many elements (e.g., multithreaded quadrature of a bilinear form over a mesh)
+		// we can construct a lookup function per-thread that can be used for finding active dofs over an element.
+		// Note that the max_depth_distance guarantee only applies to the current active dofs (which=0) and not snapshots
+		// A or B (which=1,2).
+		template<typename Elem_t, uint8_t which> requires(which<3 && (std::same_as<Elem_t,DofElem_t> || std::same_as<Elem_t,MeshElem_t>))
+		[[nodiscard]] auto make_snapshot_dof_getter(std::vector<DOF_t>& result_vec) const noexcept {
+			GUTIL_ASSERT(which<3);
+
+			const uint8_t distance = (which==0) ? max_depth_distance : max_depth;
+
+			return [this, distance, &result_vec](Elem_t el_) noexcept {
+				GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
+				GV_ASSERT_KEY_MASK_STABLE_STATE
+
+				DofElem_t el = static_cast<DofElem_t>(el_);
+				result_vec.clear();
+
+				for (uint8_t i=0; i<=distance && el.exists(); ++i) {
+					for (DofFeature_t feat : this->features(el)) {
+						const DOF_t dof{feat};
+						if (dof.exists()) {
+							if constexpr (which==0) {if (is_active_no_check(dof)) {result_vec.push_back(dof);}}
+							else if constexpr (which==1) {if (is_snapshot_A_active(dof)) {result_vec.push_back(dof);}}
+							else if constexpr (which==2) {if (is_snapshot_A_active(dof)) {result_vec.push_back(dof);}}
+						}
+					}
+					el = el.parent();
+				}
+			};
+		}
+
+		template<typename Elem_t>
+		[[nodiscard]] std::function<void(Elem_t)> make_snapshot_dof_getter(uint8_t which, std::vector<DOF_t>& result_vec) const noexcept {
+			//a runtime helper function to generate the correct dof getter.
+			switch (which) {
+				case 0:  return make_snapshot_dof_getter<Elem_t, 0>(result_vec);
+				case 1:  return make_snapshot_dof_getter<Elem_t, 1>(result_vec);
+				default: return make_snapshot_dof_getter<Elem_t, 2>(result_vec);
+			}
 		}
 
 

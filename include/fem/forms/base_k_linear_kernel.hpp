@@ -36,7 +36,7 @@ namespace GV {
 	/// Use CRTP so that kernels can be added and scaled. Note that only unweighted
 	/// kernels can be added. Examples of the Zero and Identity kernels are provided below.
 	//////////////////////////////////////////////////////////////////
-	template<size_t K_, bool IsWeighted=false, size_t NSymmetric_=0, typename Derived> requires (NSymmetric_ <= K_)
+	template<size_t K_, bool IsWeighted, size_t NSymmetric_, typename Derived> requires (NSymmetric_ <= K_)
 	struct KLinearKernel {
 		//////////////////////////////////////////////////////////////////
 		/// Track essential constants.

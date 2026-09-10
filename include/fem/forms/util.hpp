@@ -372,9 +372,12 @@ namespace GV {
 
 		//DofStorage_t should be a gutil::BinSortSpan<DOF_t> or gutil::BinSortVector<DOF_t>
 		//and it should correspond to the relevant state of the dofhandler.
+		//
+		// IMPORTANT: To use this method, the dofs must be set prior to calling Update.
+		// this is inteded to be used for snapshots of the dofhandler where determining
+		// how to look up which dofs are active on an element is more tricky.
 		template<size_t SlotIndex, typename DofStorage_t> requires (std::same_as<DOF_t, typename DofStorage_t::value_type>)
-		static void Update(ElementDofCacheNew* existing, std::vector<DOF_t> ds, const DofStorage_t& storage, const QuadRule_t& qr) noexcept {
-			existing->dofs = std::move(ds);
+		static void Update(ElementDofCacheNew* existing, const DofStorage_t& storage, const QuadRule_t& qr) noexcept {
 			const size_t n = existing->dofs.size();
 			existing->global_idx.resize(n);
 			static constexpr bool NEEDS_VALS = Kernel_t::NEEDS_VALS[SlotIndex];
