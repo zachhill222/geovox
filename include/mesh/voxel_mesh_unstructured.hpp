@@ -323,7 +323,7 @@ namespace GV {
 		void collect_elements() noexcept {
 			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
 			GV_ASSERT_KEY_MASK_STABLE_STATE
-			GUTIL_PROFILE("collecting active elements");
+			GUTIL_PROFILE_FUNCTION();
 			BASE::collect_active_keys<Elem_t>();
 			active_elements = BASE::reinterpret_key_span<Elem_t,uint64_t>(BASE::active_keys);
 			sort_elements_by_depth();
@@ -336,7 +336,7 @@ namespace GV {
 			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
 			GV_ASSERT_KEY_MASK_STABLE_STATE
 
-			GUTIL_PROFILE("sorting elements by depth");
+			GUTIL_PROFILE_FUNCTION();
 			BASE::sort_active_keys((int) max_depth+1, &UnstructuredVoxelMesh::element_key_depth_bin);
 			is_elements_color_sorted_.store(false);
 			is_elements_depth_sorted_.store(true);
@@ -350,7 +350,7 @@ namespace GV {
 			set_encoded(false);
 			GUTIL_ASSERT(!is_encoded());
 
-			GUTIL_PROFILE("sorting elements by color");
+			GUTIL_PROFILE_FUNCTION();
 			BASE::sort_active_keys(54, &UnstructuredVoxelMesh::element_key_color54_bin);
 			is_elements_color_sorted_.store(true);
 			is_elements_depth_sorted_.store(false);
@@ -360,7 +360,7 @@ namespace GV {
 
 		void collect_vertices() const noexcept {
 			GV_BEGIN_STABLE  	//The base class+elements must be stable, we are only altering the vertices
-			GUTIL_PROFILE("Collecting active vertices");
+			GUTIL_PROFILE_FUNCTION();
 			GUTIL_ASSERT(is_current());
 			is_vertices_collected_.store(false);
 
@@ -482,7 +482,7 @@ namespace GV {
 
 
 			GV_BEGIN_ACTIVE_UNSTABLE
-			GUTIL_PROFILE("Setting encoding to ", val ? "morton" : "cartesian");
+			GUTIL_PROFILE_FUNCTION();
 
 			if (val) { //cartesian->morton
 				dispatch_parallel_active_keys(
@@ -1002,7 +1002,7 @@ namespace GV {
 		is_elements_color_sorted_.store(false);
 		is_elements_depth_sorted_.store(false);
 
-		GUTIL_PROFILE("process_unrefine : ", n_elements(), " current elements");
+		GUTIL_PROFILE_FUNCTION();
 		{
 			GV_BEGIN_UNSTABLE
 			is_vertices_collected_.store(false);
@@ -1111,7 +1111,7 @@ namespace GV {
 		is_elements_color_sorted_.store(false);
 		is_elements_depth_sorted_.store(false);
 
-		GUTIL_PROFILE("process_refine : ", n_elements(), " current elements");
+		GUTIL_PROFILE_FUNCTION();
 		{
 			GV_BEGIN_UNSTABLE
 			is_vertices_collected_.store(false);

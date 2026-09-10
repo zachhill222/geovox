@@ -118,11 +118,25 @@ namespace GV {
 		/// A few methods for handling the looping over elements in parallel
 		/// either as colored or non-colored. Note that action should have the signature
 		/// void(KernelEval, TrialCache_t, TestCache_t, WeightCache_t*) for both symmetric
-		/// and non-symmetric problems (for consistency). For symmetric kernels,
-		/// the correct symmetric loop is chosen at compile time.
+		/// and non-symmetric problems (for consistency). Optionally, the range may be passed
+		/// to the action as well. 
+		/// For symmetric kernels, the correct symmetric loop is chosen at compile time.
+		///
+		/// Extra arguments may be forwarded to the action as well, but will need a custom for_each_element function.
+		///
+		/// Note that OmpIteratorRange contains:
+		///		begin     - iterator to the beginning of the current thread data
+		///		end       - iterator to the end of the current thread data
+		///     count     - the number of current data in the current thread (same as std::distance(begin,end))
+		///		tid       - the number of the current thread in the OpenMP thread group/pool
+		/// 	n_threads - the total number of threads in the current OpenMP thread group/pool
+		///
+		/// Note that raw pointers satisfy the std::random_access_iterator concept.
 		//////////////////////////////////////////////////////////////////
-		template<typename Action, std::random_access_iterator I> requires(std::same_as<std::iter_value_t<I>,MeshElem_t>)
-		void apply_action_over_range(I begin_it, I end_it, Action&& action) const noexcept requires (!Kernel_t::IS_SYMMETRIC){
+		template<typename Action, std::random_access_iterator I, typename... Args> requires(std::same_as<std::iter_value_t<I>,MeshElem_t>)
+		void apply_action_over_range(const gutil::OmpIteratorRange<I>& range, Action&& action, Args&&... args) const noexcept requires (!Kernel_t::IS_SYMMETRIC){
+			GUTIL_PROFILE_FUNCTION();
+			
 			QuadRule_t				quad_rule(mesh);
 			ElementTrialCache_t 	trial_cache(trial_handler, quad_rule);
 			ElementTestCache_t		test_cache(test_handler, quad_rule);
@@ -130,9 +144,8 @@ namespace GV {
 			WeightCache_t  			wt;
 			const auto 				quad_project_depth = std::max(test_handler.max_depth_distance, trial_handler.max_depth_distance);
 
-			for (auto it=begin_it; it!=end_it; ++it) {
-				const MeshElem_t el = *it;
-				quad_rule.set_element(el, quad_project_depth);
+			for (auto it=range.begin; it!=range.end; ++it) {
+				quad_rule.set_element(*it, quad_project_depth);
 				if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 				trial_cache.gather();
 				test_cache.gather();
@@ -142,19 +155,32 @@ namespace GV {
 				}
 
 				//after everything is cached on this element, do the action
-				action(k_eval, trial_cache, test_cache, &wt);
+				constexpr bool ACTION_NEEDS_RANGE = std::is_invocable_r_v<void, Action&, KernelEval&,
+						ElementTrialCache_t&, ElementTestCache_t&, WeightCache_t*, gutil::OmpIteratorRange<I>&>;
+				if constexpr (ACTION_NEEDS_RANGE) {
+					action(k_eval, trial_cache, test_cache, &wt, range, std::forward<Args>(args)...);
+				}
+				else {
+					action(k_eval, trial_cache, test_cache, &wt, std::forward<Args>(args)...);
+				}
 			}
 		}
 
-		template<typename Action, std::random_access_iterator I> requires(std::same_as<std::iter_value_t<I>,MeshElem_t>)
-		void apply_action_over_range(I begin_it, I end_it, Action&& action) const noexcept requires (Kernel_t::IS_SYMMETRIC){
+		template<typename Action, std::random_access_iterator I, typename... Args> requires(std::same_as<std::iter_value_t<I>,MeshElem_t>)
+		void apply_action_over_range(const gutil::OmpIteratorRange<I>& range, Action&& action, Args&&... args) const noexcept requires (Kernel_t::IS_SYMMETRIC){
+			GUTIL_PROFILE_FUNCTION();
+
 			QuadRule_t 				quad_rule(mesh);
 			ElementTestCache_t		sym_cache(test_handler,quad_rule);
 			KernelEval				k_eval(kernel, sym_cache, sym_cache, quad_rule);
 			WeightCache_t			wt;
 			const auto 				quad_project_depth = std::max(test_handler.max_depth_distance, trial_handler.max_depth_distance);
 
-			for (auto it=begin_it; it!=end_it; ++it) {
+			constexpr bool ACTION_NEEDS_RANGE = std::is_invocable_r_v<void, Action&, KernelEval&,
+				ElementTrialCache_t&, ElementTestCache_t&, WeightCache_t*, gutil::OmpIteratorRange<I>&,
+				Args&&...>;
+
+			for (auto it=range.begin; it!=range.end; ++it) {
 				const MeshElem_t el = *it;
 				quad_rule.set_element(el, quad_project_depth);
 				if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
@@ -165,16 +191,47 @@ namespace GV {
 				}
 
 				//after everything is cached on this element, do the action
-				action(k_eval, sym_cache, sym_cache, &wt);
+				if constexpr (ACTION_NEEDS_RANGE) {
+					action(k_eval, sym_cache, sym_cache, &wt, range, std::forward<Args>(args)...);
+				}
+				else {
+					action(k_eval, sym_cache, sym_cache, &wt, std::forward<Args>(args)...);
+				}
 			}
 		}
 
 
-		template<bool Colored, typename Action>
-		void for_each_element(Action&& action) const noexcept {
+		template<bool Colored=false, typename Action, typename Init=std::nullptr_t, typename Finalize=std::nullptr_t>
+		void for_each_element(Action&& action, Init&& init=nullptr, Finalize&& finalize=nullptr) const noexcept {
 			GUTIL_ASSERT(trial_handler.is_current());
 			GUTIL_ASSERT(test_handler.is_current());
 			if constexpr (Colored) {GUTIL_ASSERT(mesh.is_color_sorted());}
+			if constexpr (Kernel_t::IS_SYMMETRIC) {GUTIL_ASSERT(&test_handler == &trial_handler);}
+
+			//use init and finalize to manage extra thread resources.
+			//for example, init may return a vector that gets passed to action for each thread to accumulate into
+			//then finalize is responsible for merging the results of each thread.
+			//note that init and finalize are called in the parallel block before/after the action is applied and the
+			//same OmpIteratorRange (see above) that is passed to action is passed to these methods.
+			//To handle per-thread resources using this we could do somthing like:
+			//
+			// main() {
+			// std::vector<Data_t> thread_data;
+			// auto init = [&thread_data](const auto& range) {
+			//	GUTIL_OMP(single)
+			//  {
+			//     thread_data.resize(range.n_threads);
+			//  }
+			//  GUTIL_OMP(barrier)
+			// };
+			//
+			// auto finalize = [&thread_data](const auto& range) {
+			//	  GUTIL_OMP(critical/barrier/ect..)
+			//    {
+			//      do_somthing(thread_data[range.tid]);
+			//    }
+			// };
+			// ....}
 
 			//dispatch the loop using either colored or non-colored element loop
 			if constexpr (Colored) {
@@ -182,10 +239,12 @@ namespace GV {
 					std::span<const MeshElem_t> quad_elems = mesh.get_color(clr);
 					GUTIL_OMP(parallel)
 					{
-						gutil::OmpIteratorRange range(quad_elems.begin(), quad_elems.end());
 						//note that action requires less/no synchronization here
 						//dof-agnostic mesh coloring will likely not work for True Hierarchical dof_hadlers
-						apply_action_over_range(range.begin, range.end, action);
+						const gutil::OmpIteratorRange range{quad_elems.begin(), quad_elems.end()};
+						if constexpr (!std::same_as<Init,std::nullptr_t>) {init(range);}
+						apply_action_over_range(range, action);
+						if constexpr (!std::same_as<Finalize,std::nullptr_t>) {finalize(range);}
 					}
 				}
 			}
@@ -193,8 +252,10 @@ namespace GV {
 				GUTIL_OMP(parallel)
 				{
 					//note that action requires more synchronization here
-					gutil::OmpIteratorRange range(mesh.element_begin(), mesh.element_end());
-					apply_action_over_range(range.begin, range.end, action);
+					const gutil::OmpIteratorRange range{mesh.element_begin(), mesh.element_end()};
+					if constexpr (!std::same_as<Init,std::nullptr_t>) {init(range);}
+					apply_action_over_range(range, action);
+					if constexpr (!std::same_as<Finalize,std::nullptr_t>) {finalize(range);}
 				}
 			}
 		}
@@ -266,13 +327,30 @@ namespace GV {
 		template<int LDU_Flag=0b111> requires (Kernel_t::IS_SYMMETRIC || LDU_Flag==0b111)
 		void mat_vec_multiply_accumulate_colored(std::span<T> Y, std::span<const T> X, const T alpha = T{1}) const noexcept {
 			GUTIL_ASSERT(X.size()==trial_handler.n_dofs() && Y.size()==test_handler.n_dofs());
-			for_each_element<true>([&](auto& k_eval, auto& trial_cache, auto& test_cache, auto wt_ptr){	//true=colored
-				std::vector<Scalar_t> local_x, local_y, local_mat;
+			using ThreadData = std::vector<std::vector<T>>;
+			ThreadData t_local_x, t_local_y, t_local_mat;
+
+			for_each_element<true>(
+			//action
+			[&](auto& k_eval, auto& trial_cache, auto& test_cache, auto wt_ptr, const auto& range){
+				auto& local_x=t_local_x[range.tid];
+				auto& local_y=t_local_y[range.tid];
+				auto& local_mat=t_local_mat[range.tid];
 				GatherLocalVector(X, trial_cache, local_x);
 				ConstructLocalMatrix<LDU_Flag>(k_eval,  trial_cache.size(), test_cache.size(), wt_ptr, local_mat);
 				local_y.assign(test_cache.size(), Scalar_t{0});
 				GV::gecm_mv(local_y.data(), local_y.size(), local_x.data(), local_x.size(), local_mat.data());
 				ScatterLocalVector<false>(Y, test_cache, local_y, alpha);	//don't need an atomic scatter
+			},
+			//init
+			[&t_local_x, &t_local_y, &t_local_mat](const auto& range) {
+				GUTIL_OMP(single)
+				{
+					t_local_x.resize(range.n_threads);
+					t_local_y.resize(range.n_threads);
+					t_local_mat.resize(range.n_threads);
+				}
+				GUTIL_OMP(barrier)
 			});
 		}
 
@@ -280,13 +358,30 @@ namespace GV {
 		template<int LDU_Flag=0b111> requires (Kernel_t::IS_SYMMETRIC || LDU_Flag==0b111)
 		void mat_vec_multiply_accumulate(std::span<T> Y, std::span<const T> X, const T alpha = T{1}) const noexcept {
 			GUTIL_ASSERT(X.size()==trial_handler.n_dofs() && Y.size()==test_handler.n_dofs());
-			for_each_element<false>([&](auto& k_eval, auto& trial_cache, auto& test_cache, auto wt_ptr){ //false=not colored
-				std::vector<Scalar_t> local_x, local_y, local_mat;
+			using ThreadData = std::vector<std::vector<T>>;
+			ThreadData t_local_x, t_local_y, t_local_mat;
+
+			for_each_element<false>(
+			//action
+			[&](auto& k_eval, auto& trial_cache, auto& test_cache, auto wt_ptr, const auto& range){ //false=not colored
+				auto& local_x=t_local_x[range.tid];
+				auto& local_y=t_local_y[range.tid];
+				auto& local_mat=t_local_mat[range.tid];
 				GatherLocalVector(X, trial_cache, local_x);
 				ConstructLocalMatrix<LDU_Flag>(k_eval,  trial_cache.size(), test_cache.size(), wt_ptr, local_mat);
 				local_y.assign(test_cache.size(), Scalar_t{0});
 				GV::gecm_mv(local_y.data(), local_y.size(), local_x.data(), local_x.size(), local_mat.data());
 				ScatterLocalVector<true>(Y, test_cache, local_y, alpha);	//need an atomic scatter
+			},
+			//init
+			[&t_local_x, &t_local_y, &t_local_mat](const auto& range) {
+				GUTIL_OMP(single)
+				{
+					t_local_x.resize(range.n_threads);
+					t_local_y.resize(range.n_threads);
+					t_local_mat.resize(range.n_threads);
+				}
+				GUTIL_OMP(barrier)
 			});
 		}
 
@@ -308,355 +403,219 @@ namespace GV {
 		/// Evaluate the quadratic form x^t * M * x when M is symmetric
 		/////////////////////////////////////////////////////////////////////
 		[[nodiscard]] T evaluate_quadratic_form(std::span<const T> X) const noexcept requires(Kernel_t::IS_SYMMETRIC) {
-			return evaluate_form(X,X);
+			GUTIL_ASSERT(X.size()==trial_handler.n_dofs());
+			using ThreadData = std::vector<std::vector<T>>;
+			ThreadData t_local_x, t_local_mat;
+			std::vector<T> t_val;
+
+			for_each_element(
+			//action
+			[&](auto& k_eval, auto& trial_cache, auto& test_cache, auto wt_ptr, const auto& range){
+				auto& local_x=t_local_x[range.tid];
+				auto& local_mat=t_local_mat[range.tid];
+				GatherLocalVector(X, trial_cache, local_x);
+				ConstructLocalMatrix(k_eval, trial_cache.size(), test_cache.size(), wt_ptr, local_mat);
+				//handle the local xMx evaluation
+				t_val[range.tid] += GV::gecm_vmv(local_x.data(), local_x.size(), local_x.data(), local_x.size(), local_mat.data());},
+			//init
+			[&](const auto& range){
+				GUTIL_OMP(single)
+				{
+					t_local_x.resize(range.n_threads);
+					t_local_mat.resize(range.n_threads);
+					t_val.assign(range.n_threads, T{0});
+				}
+				GUTIL_OMP(barrier)
+			});
+			
+			T val{0};
+			for (T v : t_val) {val += v;}
+			return val;
 		}
 
 
 		[[nodiscard]] T evaluate_form(std::span<const T> Y, std::span<const T> X) const noexcept {
-			GUTIL_ASSERT(trial_handler.is_current());
-			GUTIL_ASSERT(test_handler.is_current());
-			GUTIL_ASSERT(X.size() == trial_handler.n_dofs());
-			GUTIL_ASSERT(Y.size() == test_handler.n_dofs());
-			GUTIL_ASSERT(&trial_handler == &test_handler);
+			GUTIL_ASSERT(X.size()==trial_handler.n_dofs() && Y.size()==test_handler.n_dofs());
+			using ThreadData = std::vector<std::vector<T>>;
+			ThreadData t_local_x, t_local_y, t_local_mat;
+			std::vector<T> t_val;
 
-			T result{0};
-			GUTIL_OMP(parallel)
-			{
-				QuadRule_t 				quad_rule(mesh);
-				ElementTestCache_t		sym_cache(test_handler,quad_rule);
-				KernelEval				k_eval(kernel, sym_cache, sym_cache, quad_rule);
-				WeightCache_t			wt;
-				
-				T  						thread_result{0};
-				std::vector<T>			local_x;
-				std::vector<T>			local_y;
-
-				gutil::OmpIteratorRange range(mesh.element_begin(), mesh.element_end());
-				for (auto it=range.begin; it!=range.end; ++it) {
-					const MeshElem_t el = *it;
-						
-					quad_rule.set_element(el,mesh.max_depth);
-					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
-					
-					sym_cache.gather();		const size_t v_size = sym_cache.size();
-					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
-						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
-					}
-
-					local_x.resize(v_size);
-					for (size_t i=0; i<v_size; ++i) {local_x[i]  = X[sym_cache.global_idx[i]]; }
-
-					local_y.resize(v_size);
-					for (size_t i=0; i<v_size; ++i) {local_y[i]  = Y[sym_cache.global_idx[i]]; }
-
-					//construct local matrix (col major)
-					for (size_t j=0; j<v_size; ++j) {
-						Scalar_t val = k_eval(j,j,&wt);
-						thread_result += val*local_y[j]*local_x[j];
-						for (size_t i=j+1; i<v_size; ++i) {
-							Scalar_t val = k_eval(j,i,&wt);
-							thread_result += val * ( local_y[i]*local_x[j] + local_y[j]*local_x[i] );
-						}
-					}
+			for_each_element<false>(
+			//action
+			[&](auto& k_eval, auto& trial_cache, auto& test_cache, auto wt_ptr, const auto& range){
+				auto& local_x=t_local_x[range.tid];
+				auto& local_y=t_local_y[range.tid];
+				auto& local_mat=t_local_mat[range.tid];
+				GatherLocalVector(X, trial_cache, local_x);
+				GatherLocalVector(Y, test_cache,  local_y);
+				ConstructLocalMatrix(k_eval, trial_cache.size(), test_cache.size(), wt_ptr, local_mat);
+				//handle the local yMx evaluation
+				t_val[range.tid] += GV::gecm_vmv(local_y.data(), local_y.size(), local_x.data(), local_x.size(), local_mat.data());},
+			//init
+			[&](const auto& range){
+				GUTIL_OMP(single)
+				{
+					t_local_x.resize(range.n_threads);
+					t_local_y.resize(range.n_threads);
+					t_local_mat.resize(range.n_threads);
+					t_val.assign(range.n_threads, T{0});
 				}
-
-				GUTIL_OMP(atomic) result += thread_result;
-			}
-			return result;
+				GUTIL_OMP(barrier)
+			});
+			
+			T val{0};
+			for (T v : t_val) {val += v;}
+			return val;
 		}
 
-		[[nodiscard]] T evaluate_form(std::span<const T> Y, std::span<const T> X) const noexcept requires(!Kernel_t::IS_SYMMETRIC) {
-			GUTIL_ASSERT(trial_handler.is_current());
-			GUTIL_ASSERT(test_handler.is_current());
-			GUTIL_ASSERT(X.size() == trial_handler.n_dofs());
-			GUTIL_ASSERT(Y.size() == test_handler.n_dofs());
-
-			T result{0};
-			GUTIL_OMP(parallel)
-			{
-				QuadRule_t 				quad_rule(mesh);
-				ElementTrialCache_t		trial_cache(trial_handler,quad_rule);
-				ElementTestCache_t		test_cache(test_handler,quad_rule);
-				KernelEval				k_eval(kernel, trial_cache, test_cache, quad_rule);
-				WeightCache_t			wt;
-				
-				T  						thread_result{0};
-				std::vector<T>			local_x;
-				std::vector<T>			local_y;
-
-				gutil::OmpIteratorRange	range(mesh.element_begin(), mesh.element_end());
-				for (auto it=range.begin; it!=range.end; ++it) {
-					const MeshElem_t el = *it;
-						
-					quad_rule.set_element(el,mesh.max_depth);
-					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
-					
-					test_cache.gather();		const size_t v_size = test_cache.size();
-					trial_cache.gather();	const size_t u_size = trial_cache.size();
-					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
-						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
-					}
-
-					local_x.resize(u_size);
-					for (size_t i=0; i<u_size; ++i) {local_x[i]  = X[trial_cache.global_idx[i]]; }
-
-					local_y.resize(v_size);
-					for (size_t i=0; i<v_size; ++i) {local_y[i]  = Y[test_cache.global_idx[i]]; }
-
-					//construct local matrix (col major)
-					for (size_t j=0; j<u_size; ++j) {
-						for (size_t i=0; i<v_size; ++i) {
-							Scalar_t val = k_eval(j,i,&wt);
-							thread_result += val * local_y[i]*local_x[j];
-						}
-					}
-				}
-
-				GUTIL_OMP(atomic) result += thread_result;
-			}
-			return result;
-		}
-
-
-		/////////////////////////////////////////////////////////////////////
+		
+		////////////////////////////////////////////////////////////////////
 		/// Construct diagonal of the matrix for conditioning
 		/////////////////////////////////////////////////////////////////////
-		void construct_diagonal_colored(std::span<T> D) const noexcept requires(Kernel_t::IS_SYMMETRIC) {
-			GUTIL_ASSERT(trial_handler.is_current());
-			GUTIL_ASSERT(test_handler.is_current());
-			GUTIL_ASSERT(mesh.is_color_sorted());
-			GUTIL_ASSERT(&trial_handler == &test_handler);
-
-			//note v/u dofs are the same
-			for (int clr=0; clr<mesh.n_colors(); ++clr) {
-				std::span<const MeshElem_t> quad_elems = mesh.get_color(clr);
-
-				GUTIL_OMP(parallel)
-				{
-					QuadRule_t 						quad_rule(mesh);
-					ElementTestCache_t				sym_cache(test_handler,quad_rule);
-					KernelEval						k_eval(kernel, sym_cache, sym_cache, quad_rule);
-					WeightCache_t					wt;
-					
-					gutil::OmpIndexRange 			range(quad_elems.size());
-					for (size_t q=range.begin; q<range.end; ++q) {
-						const MeshElem_t el = quad_elems[q];
-						
-						quad_rule.set_element(el,mesh.max_depth);
-						if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
-						
-						sym_cache.gather();		const size_t v_size = sym_cache.size();
-						if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
-							wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
-						}
-
-						//scatter local result
-						for (size_t i=0; i<v_size; ++i) {
-							D[sym_cache.global_idx[i]] += k_eval(i,i,&wt);
-						}
-					}
-				}
-			}
-		}
-
+		template<bool Colored=false>
 		void construct_diagonal(std::span<T> D) const noexcept requires(Kernel_t::IS_SYMMETRIC) {
-			GUTIL_ASSERT(trial_handler.is_current());
-			GUTIL_ASSERT(test_handler.is_current());
-			GUTIL_ASSERT(&trial_handler == &test_handler);
+			using ThreadData = std::vector<std::vector<T>>;
+			ThreadData t_local_mat;
 
-			GUTIL_OMP(parallel)
-			{
-				QuadRule_t 						quad_rule(mesh);
-				ElementTestCache_t				sym_cache(test_handler,quad_rule);
-				KernelEval						k_eval(kernel, sym_cache, sym_cache, quad_rule);
-				WeightCache_t					wt;
-				
-				gutil::OmpIteratorRange			range(mesh.element_begin(), mesh.element_end());
-				for (auto it=range.begin; it!=range.end; ++it) {
-					const MeshElem_t el = *it;
-
-					quad_rule.set_element(el,mesh.max_depth);
-					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
-					
-					sym_cache.gather();		const size_t v_size = sym_cache.size();
-					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
-						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
-					}
-
-					//scatter local result
-					for (size_t i=0; i<v_size; ++i) {
-						GUTIL_OMP(atomic) D[sym_cache.global_idx[i]] += k_eval(i,i,&wt);
-					}
+			for_each_element<Colored>(
+			//action
+			[&,D](auto& k_eval, auto& trial_cache, auto& test_cache, auto wt_ptr, const auto& range){
+				auto& local_mat = t_local_mat[range.tid];
+				const size_t n = trial_cache.size();
+				ConstructLocalMatrix<0b010>(k_eval, n, n, wt_ptr, local_mat);
+				//accumulate the diagonal entries into D
+				if constexpr (Colored) {
+					for (size_t i=0; i<n; ++i) { D[trial_cache.global_idx[i]] += local_mat[(n+1)*i];}
 				}
-			}
-		}
-
-
-		///////////////////////////////////////////////////////////////
-		/// Construct triples for sparese matrix construction
-		///////////////////////////////////////////////////////////////
-		template<typename Triplet_t>
-		void build_triplets(std::vector<Triplet_t>& triplets, const size_t row_offset=0, const size_t col_offset=0) const noexcept requires(!Kernel_t::IS_SYMMETRIC) {
-			GUTIL_ASSERT(trial_handler.is_current());
-			GUTIL_ASSERT(test_handler.is_current());
-			
-			size_t triplet_size{0};
-			std::vector<std::vector<Triplet_t>> 	all_thread_triplets;
-
-			GUTIL_OMP(parallel)
-			{
-				QuadRule_t 							quad_rule(mesh);
-				ElementTrialCache_t					trial_cache(trial_handler,quad_rule);
-				ElementTestCache_t					test_cache(test_handler,quad_rule);
-				KernelEval							k_eval(kernel, trial_cache, test_cache, quad_rule);
-				WeightCache_t						wt;
-				
-				gutil::OmpIteratorRange				range(mesh.element_begin(), mesh.element_end());
-
+				else {
+					for (size_t i=0; i<n; ++i) { GUTIL_OMP(atomic) D[trial_cache.global_idx[i]] += local_mat[(n+1)*i];}
+				}
+			},
+			//init
+			[&t_local_mat](const auto& range){
 				GUTIL_OMP(single)
 				{
-					all_thread_triplets.resize(range.n_threads);
+					t_local_mat.resize(range.n_threads);
 				}
 				GUTIL_OMP(barrier)
+			});
+		}
 
-				std::vector<Triplet_t>&	thread_triplet = all_thread_triplets[range.tid];
-				thread_triplet.reserve(range.count * TrialDof_t::N_DOF_PER_ELEM * TestDof_t::N_DOF_PER_ELEM);
+		template<bool Colored=false>
+		void construct_lumped_diagonal(std::span<T> D) const noexcept requires(Kernel_t::IS_SYMMETRIC) {
+			using ThreadData = std::vector<std::vector<T>>;
+			ThreadData t_local_mat, t_row_sum;
+
+			for_each_element<Colored>(
+			//action
+			[&,D](auto& k_eval, auto& trial_cache, auto& test_cache, auto wt_ptr, const auto& range){
+				auto& local_mat = t_local_mat[range.tid];
+				auto& row_sum   = t_row_sum[range.tid];
+				const size_t n  = trial_cache.size();
+				ConstructLocalMatrix(k_eval, n, n, wt_ptr, local_mat);
+				//compute the row sums and scatter to the diagonal
+				row_sum.assign(n, T{0});
+				for (size_t j=0; j<n; ++j) {
+					GUTIL_SIMD()
+					for (size_t i=0; i<n; ++i) {
+						row_sum[i] += local_mat[i + j*n];
+					}
+				}
+
+
+				if constexpr (Colored) {
+					for (size_t i=0; i<n; ++i) { D[trial_cache.global_idx[i]] += row_sum[i];}
+				}
+				else {
+					for (size_t i=0; i<n; ++i) { GUTIL_OMP(atomic) D[trial_cache.global_idx[i]] += row_sum[i];}
+				}
+			},
+			//init
+			[&t_local_mat, &t_row_sum](const auto& range){
+				GUTIL_OMP(single)
+				{
+					t_local_mat.resize(range.n_threads);
+					t_row_sum.resize(range.n_threads);
+				}
+				GUTIL_OMP(barrier)
+			});
+		}
+
+
+		///////////////////////////////////////////////////////////////
+		/// Construct triples for sparese matrix construction (any upper,lower,diagonal combinations if it is symmetric)
+		///////////////////////////////////////////////////////////////
+		template<int LDU_Flag=0b111, typename Triplet_t> requires (LDU_Flag==0b111 || Kernel_t::IS_SYMMETRIC)
+		void build_triplets(std::vector<Triplet_t>& triplets, const size_t row_offset=0, const size_t col_offset=0) const noexcept {
+			GUTIL_PROFILE_FUNCTION();
+			
+			std::vector<std::vector<T>> t_local_mat;
+			std::vector<std::vector<Triplet_t>> t_coo;
+			
+			for_each_element<false>(
+			//action
+			[&](auto& k_eval, auto& trial_cache, auto& test_cache, auto wt_ptr, const auto& range){
+				auto& local_mat = t_local_mat[range.tid];
+				auto& coo       = t_coo[range.tid];
+
+				const size_t u_size=trial_cache.size(), v_size=test_cache.size();
+				ConstructLocalMatrix<LDU_Flag>(k_eval, u_size, v_size, wt_ptr, local_mat);
 				
-				for (auto it=range.begin; it!=range.end; ++it) {
-					const MeshElem_t el = *it;
-						
-					quad_rule.set_element(el,mesh.max_depth);
-					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
-					
-					trial_cache.gather();	const size_t u_size = trial_cache.size();
-					test_cache.gather();		const size_t v_size = test_cache.size();
-					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
-						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
+				//add triplets, only loop throught the lower block of indices
+				for (size_t j=0; j<u_size; ++j) {
+					if constexpr (LDU_Flag&0b010) {
+						coo.emplace_back(
+							row_offset + test_cache.global_idx[j],
+							col_offset + trial_cache.global_idx[j],
+							local_mat[j + j*u_size]);
 					}
 
-					//add triplets
-					for (size_t j=0; j<u_size; ++j) {
-						for (size_t i=0; i<v_size; ++i) {
-							thread_triplet.emplace_back(
+					for (size_t i=j+1; i<v_size; ++i) {
+						if constexpr (LDU_Flag&0b100) {
+							coo.emplace_back(
 								row_offset + test_cache.global_idx[i],
 								col_offset + trial_cache.global_idx[j],
-								k_eval(j,i,&wt));
+								local_mat[i + j*u_size]);
+						}
+						if constexpr (LDU_Flag&0b001) {
+							//upper block, transpose the indices
+							coo.emplace_back(
+								row_offset + test_cache.global_idx[j],
+								col_offset + trial_cache.global_idx[i],
+								local_mat[j + i*u_size]);
 						}
 					}
 				}
-
-				//de-duplicate triplets and convert to the desired format (e.g, Eigen::Triplet<T>)
-				Triplet_t::Compress(thread_triplet);
-				thread_triplet.shrink_to_fit();
-
-				//join the results from each thread
-				GUTIL_OMP(atomic) triplet_size += thread_triplet.size();
+			},
+			//init
+			[&t_local_mat, &t_coo](const auto& range){
+				GUTIL_OMP(single)
+				{
+					t_local_mat.resize(range.n_threads);
+					t_coo.resize(range.n_threads);
+				}
 				GUTIL_OMP(barrier)
+			},
+			//finalize
+			[&t_coo](const auto& range){
+				//compress the per-thread coo lists (also de-duplicates)
+				Triplet_t::Compress(t_coo[range.tid]);
+				t_coo[range.tid].shrink_to_fit();
 
-
+				//merge the per-thread coo lists to thread 0 (also de-duplicates)
+				GUTIL_OMP(barrier)
 				for (size_t stride=1; stride<range.n_threads; stride*=2) {
 					if (range.tid % (2*stride) == 0 && range.tid+stride < range.n_threads) {
-						Triplet_t::Merge(all_thread_triplets[range.tid], all_thread_triplets[range.tid+stride]);
+						Triplet_t::Merge(t_coo[range.tid], t_coo[range.tid+stride]);
 					}
 					GUTIL_OMP(barrier)
 				}
+			});
 
-
-				GUTIL_OMP(single)
-				{
-					triplets.reserve(triplets.size() + triplet_size);
-				}
-			}
-
+			//move the new coo values to the provided vector
 			triplets.insert(triplets.end(),
-				std::make_move_iterator(all_thread_triplets[0].begin()),
-				std::make_move_iterator(all_thread_triplets[0].end()));
-		}
-
-		template<typename Triplet_t>
-		void build_triplets(std::vector<Triplet_t>& triplets, const size_t row_offset=0, const size_t col_offset=0) const noexcept requires(Kernel_t::IS_SYMMETRIC) {
-			GUTIL_ASSERT(trial_handler.is_current());
-			GUTIL_ASSERT(test_handler.is_current());
-			GUTIL_ASSERT(&trial_handler == &test_handler);
-
-			size_t triplet_size{0};
-			std::vector<std::vector<Triplet_t>> 	all_thread_triplets;
-
-			GUTIL_OMP(parallel)
-			{
-				QuadRule_t 							quad_rule(mesh);
-				ElementTestCache_t					sym_cache(test_handler,quad_rule);
-				KernelEval							k_eval(kernel, sym_cache, sym_cache, quad_rule);
-				WeightCache_t						wt;
-				
-				gutil::OmpIteratorRange				range(mesh.element_begin(), mesh.element_end());
-
-				GUTIL_OMP(single)
-				{
-					all_thread_triplets.resize(range.n_threads);
-				}
-				GUTIL_OMP(barrier)
-
-				std::vector<Triplet_t>&	thread_triplet = all_thread_triplets[range.tid];
-				thread_triplet.reserve(range.count * TrialDof_t::N_DOF_PER_ELEM * TestDof_t::N_DOF_PER_ELEM);
-				
-				for (auto it=range.begin; it!=range.end; ++it) {
-					const MeshElem_t el = *it;
-						
-					quad_rule.set_element(el,mesh.max_depth);
-					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
-					
-					sym_cache.gather();		const size_t v_size = sym_cache.size();
-					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
-						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
-					}
-
-					//add triplets
-					for (size_t j=0; j<v_size; ++j) {
-						thread_triplet.emplace_back(
-							row_offset + sym_cache.global_idx[j],
-							col_offset + sym_cache.global_idx[j],
-							k_eval(j,j,&wt));
-						
-						for (size_t i=j+1; i<v_size; ++i) {
-							const Scalar_t val = k_eval(j,i,&wt);
-							thread_triplet.emplace_back(
-								row_offset + sym_cache.global_idx[i],
-								col_offset + sym_cache.global_idx[j],
-								val);
-							thread_triplet.emplace_back(
-								row_offset + sym_cache.global_idx[j],
-								col_offset + sym_cache.global_idx[i],
-								val);
-						}
-					}
-				}
-
-				//de-duplicate triplets and convert to the desired format (e.g, Eigen::Triplet<T>)
-				Triplet_t::Compress(thread_triplet);
-				thread_triplet.shrink_to_fit();
-
-				//join the results from each thread
-				GUTIL_OMP(atomic) triplet_size += thread_triplet.size();
-				GUTIL_OMP(barrier)
-
-				for (size_t stride=1; stride<range.n_threads; stride*=2) {
-					if (range.tid % (2*stride) == 0 && range.tid+stride < range.n_threads) {
-						Triplet_t::Merge(all_thread_triplets[range.tid], all_thread_triplets[range.tid+stride]);
-					}
-					GUTIL_OMP(barrier)
-				}
-
-
-				GUTIL_OMP(single)
-				{
-					triplets.reserve(triplets.size() + triplet_size);
-				}
-			}
-
-			triplets.insert(triplets.end(),
-				std::make_move_iterator(all_thread_triplets[0].begin()),
-				std::make_move_iterator(all_thread_triplets[0].end()));
+				std::make_move_iterator(t_coo[0].begin()),
+				std::make_move_iterator(t_coo[0].end()));
 		}
 	};
 }

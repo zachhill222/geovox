@@ -98,12 +98,22 @@ namespace GV {
 		//set up solver
 		typename StokesProblem::InnerSolver solver;
 		solver.compute(A);
+		solver.preconditioner().setup([&](std::vector<Scalar_t>& diag){
+			diag.assign(A.rows(), Scalar_t{0});
+			stokes.make_A_form().construct_lumped_diagonal(GV::as_span(diag));
+			stokes.make_A_penalty_form().construct_lumped_diagonal(GV::as_span(diag));
+		});
 		solver.setMaxIterations(stokes.inner_iter.max_iter);
+
 
 		//build pressure mass matrix for projections and convergence
 		auto Mp = stokes.make_pressure_mass_mat();
 		Eigen::ConjugateGradient<typename StokesProblem::EigenSpMat, Eigen::Lower|Eigen::Upper, typename StokesProblem::DiagPrecon> p_solver;
 		p_solver.compute(Mp);
+		p_solver.preconditioner().setup([&](std::vector<Scalar_t>& diag){
+			diag.assign(Mp.rows(), Scalar_t{0});
+			stokes.make_M_pressure_form().construct_lumped_diagonal(GV::as_span(diag));
+		});
 		p_solver.setMaxIterations(stokes.inner_iter.max_iter);
 
 		for (int i=0; i<stokes.outer_iter.max_iter; ++i) {

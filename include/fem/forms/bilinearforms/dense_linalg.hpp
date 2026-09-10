@@ -27,6 +27,7 @@ namespace GV {
 	//
 	//	Field 2: operation type
 	//	mv  - matrix-vector product
+	//  vmv - vector-matrix-vector product (bilinear form)  
 	//
 	//	Field 3: modifiers for implicit matrix operations
 	//		note for a square matrix A, we set A = L + D + U (strict lower/diagonal/strict upper portions)
@@ -74,6 +75,25 @@ namespace GV {
 				y[i] += mat[i+offset]*x[j];
 			}
 		}
+	}
+
+	template<typename T>
+	inline constexpr T gecm_vmv(const T* y, const size_t M, const T* x, const size_t N, const T* mat) {
+		GUTIL_ASSERT(y && x && mat && M>0 && N>0);
+		// Compute y^t*A*x
+		// col major: A(i,j) = mat[i + j*M]
+		// M - number of rows
+		// N - number of columns
+		// y - result to accumulate to (size M)
+		// x - vector to multiply (size N)
+		T val{0};
+		GUTIL_SIMD(reduction(+:val) collapse(2))
+		for (size_t j=0; j<N; ++j) {
+			for (size_t i=0; i<M; ++i) {
+				val += y[i] * mat[i + j*M] * x[j];
+			}
+		}
+		return val;
 	}
 
 

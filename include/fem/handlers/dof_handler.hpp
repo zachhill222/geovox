@@ -737,7 +737,7 @@ namespace GV {
 				Predicate&& 				pred,
 				Action&& 					action=nullptr) noexcept
 		{	
-			GUTIL_PROFILE("Gathering unique dofs on ", elems.size(), " elements");
+			GUTIL_PROFILE_FUNCTION();
 
 			//sanity checks and argument deduction
 			constexpr bool PRED_MASK = std::is_invocable_r_v<bool, Predicate, uint8_t>;

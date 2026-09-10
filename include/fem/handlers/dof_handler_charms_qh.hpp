@@ -244,7 +244,7 @@ namespace GV {
 		[[maybe_unused]] size_t refine(std::span<const Elem_t> elems) noexcept {
 			GUTIL_ASSERT(mesh.is_current() && mesh.is_depth_field_correct());
 			GUTIL_ASSERT(is_current());
-			GUTIL_PROFILE("Refining (QH) dofs on ", elems.size(), " elements");
+			GUTIL_PROFILE_FUNCTION();
 			size_t n_start = active_dofs.size();
 
 			auto pred = [this](DOF_t dof) { return can_refine(dof); };
@@ -255,7 +255,6 @@ namespace GV {
 				GV_BEGIN_MASK_UNSTABLE
 				std::span<const DofElem_t> d_elems = gutil::reinterpret_as_span<DofElem_t,Elem_t>(elems);
 				std::vector<DOF_t> dofs = BASE::get_dofs_impl(d_elems, max_depth_distance, std::move(pred));
-				GUTIL_PROFILE("Processing ", dofs.size(), " dofs for refinement");
 				
 				gutil::BinSortSpan<DOF_t> dof_depth_sorter(dofs, max_depth+1);
 				dof_depth_sorter.set_threadpool(threads);
@@ -277,7 +276,6 @@ namespace GV {
 					});
 					pairity_sorter.clear_threadpool();
 
-					GUTIL_PROFILE("Checking ", list.size(), " dofs for refinement at depth ", dd);
 					for (int cc=0; cc<pairity_sorter.n_bins(); ++cc) {
 						auto par_list = pairity_sorter.get_bin(cc);
 						GUTIL_OMP(parallel for)
@@ -312,7 +310,7 @@ namespace GV {
 		[[maybe_unused]] size_t unrefine(std::span<const Elem_t> elems) noexcept {
 			GUTIL_ASSERT(mesh.is_current() && mesh.is_depth_field_correct());
 			GUTIL_ASSERT(is_current());
-			GUTIL_PROFILE("Unrefining (QH) dofs on ", elems.size(), " elements");
+			GUTIL_PROFILE_FUNCTION();
 			size_t n_start = active_dofs.size();
 
 			auto pred = [this](DOF_t dof) {
@@ -324,7 +322,6 @@ namespace GV {
 				GV_BEGIN_MASK_UNSTABLE
 				std::span<const DofElem_t> d_elems = gutil::reinterpret_as_span<DofElem_t,Elem_t>(elems);
 				std::vector<DOF_t> dofs = BASE::get_dofs_impl(d_elems, max_depth_distance, std::move(pred));
-				GUTIL_PROFILE("Processing ", dofs.size(), " dofs for unrefinement");
 				
 				for (DOF_t dof : dofs) {
 					if (can_unrefine(dof)) {

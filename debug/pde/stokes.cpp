@@ -8,7 +8,7 @@
 
 using Scalar_t   = float;
 using Assembly_t = GV::SignedDistanceSpheres<Scalar_t, 0b111, false, 1>; //last parameter 0 for non-compact support tanh heaviside
-using Stokes_t   = GV::DiffuseStokes<Assembly_t, 3, false>;	//final arg: true is QH, false is TH
+using Stokes_t   = GV::DiffuseStokes<Assembly_t, 3, true>;	//final arg: true is QH, false is TH
 
 int main() {
 	Stokes_t::Box_t domain{{-2,-2,-2}, {2,2,2}};

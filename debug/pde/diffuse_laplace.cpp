@@ -213,6 +213,10 @@ int main(int argc, char* argv[]) {
 			GUTIL_TIMER("Solving (CG)");
 			Eigen::ConjugateGradient<EigenSpMat, Eigen::Lower|Eigen::Upper, Preconditioner_t> solver;
 			solver.compute(A);
+			solver.preconditioner().setup([&](std::vector<Scalar_t>& diag){
+				laplace_form.construct_lumped_diagonal(GV::as_span(diag));
+				penalty_form.construct_lumped_diagonal(GV::as_span(diag));
+			});
 			
 			// Eigen::ConjugateGradient<decltype(lhs_op), Eigen::Lower|Eigen::Upper, Eigen::IdentityPreconditioner> solver;
 			// Eigen::ConjugateGradient<decltype(lhs_op), Eigen::Lower|Eigen::Upper, Preconditioner_t> solver;
@@ -263,5 +267,6 @@ int main(int argc, char* argv[]) {
 		mesh_handler.mesh.sort_elements_by_depth();
 	}
 
+	gutil::print_all_profiles();
 	return 0;
 }

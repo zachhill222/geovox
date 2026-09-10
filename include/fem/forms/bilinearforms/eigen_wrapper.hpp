@@ -57,14 +57,6 @@ namespace internal {
 	template<typename ContainerType> requires(gutil::IsReal<typename ContainerType::value_type>)
 	struct traits<GV::DiagonalOperator<ContainerType>> : public Eigen::internal::traits<Eigen::SparseMatrix<typename ContainerType::value_type>> {};
 
-	// template<typename ContainerType> requires(gutil::IsReal<typename ContainerType::value_type>)
-	// struct traits<GV::DiagonalPreconditioner<ContainerType>> : public Eigen::internal::traits<Eigen::SparseMatrix<typename ContainerType::value_type>> {};
-
-	// template<GV::IsEigenBaseOperator Op, int K> requires (Op::IS_SYMMETRIC)
-	// struct traits<GV::JacobiPreconditioner<Op,K>> : public Eigen::internal::traits<Eigen::SparseMatrix<typename Op::Scalar>> {};
-
-
-
 	template<GV::IsEigenBaseOperator Op1, GV::IsEigenBaseOperator Op2>
 	struct traits<GV::SumOperator<Op1,Op2>> : public Eigen::internal::traits<Eigen::SparseMatrix<typename Op1::Scalar>> {};
 }}
@@ -251,6 +243,14 @@ namespace GV {
 
 		template<typename OpType>
 		DiagonalPreconditioner& compute(const OpType& mat) noexcept {return factorize(mat);}
+
+		template<typename DiagCompute>
+		DiagonalPreconditioner& setup(DiagCompute&& diag_compute) {
+			//note diag_compute must correctly size and initialize diag.
+			diag_compute(diag);
+			Reciprocate(GV::as_span(diag));
+			return *this;
+		}
 
 		template<typename OutType = Eigen::Matrix<Scalar, Eigen::Dynamic, 1>, typename Rhs>
 		[[nodiscard]] OutType solve(const Rhs& b) const noexcept {

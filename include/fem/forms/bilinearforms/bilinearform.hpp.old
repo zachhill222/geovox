@@ -678,6 +678,7 @@ namespace GV {
 			}
 		}
 
+		void construct_lumped_diagonal(std::span<T> D) {}
 		void construct_diagonal(std::span<T> D) const noexcept requires(Kernel_t::IS_SYMMETRIC) {
 			GUTIL_ASSERT(trial_handler.is_current());
 			GUTIL_ASSERT(test_handler.is_current());
@@ -792,8 +793,11 @@ namespace GV {
 				std::make_move_iterator(all_thread_triplets[0].end()));
 		}
 
+
 		template<typename Triplet_t>
 		void build_triplets(std::vector<Triplet_t>& triplets, const size_t row_offset=0, const size_t col_offset=0) const noexcept requires(Kernel_t::IS_SYMMETRIC) {
+			GUTIL_PROFILE_FUNCTION();
+
 			GUTIL_ASSERT(trial_handler.is_current());
 			GUTIL_ASSERT(test_handler.is_current());
 			GUTIL_ASSERT(&trial_handler == &test_handler);
