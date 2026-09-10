@@ -339,7 +339,7 @@ namespace GV {
 	/// values per dof pair on the fly. This is more applicable to bilinear forms,
 	/// but logic can be re-used for linear forms.
 	///
-	/// This is intended to be created once per thread and then updated once per element.
+	/// This is intended to be created once per thread (per dofhandler) and then updated once per element.
 	///////////////////////////////////////////////////////////////////
 	template<typename Kernel_t, typename QuadRule_t, typename DOF_t>
 	struct ElementDofCacheNew {
@@ -354,22 +354,37 @@ namespace GV {
 
 		[[nodiscard]] size_t size() const noexcept {return dofs.size();}
 
-		// static factory: mutates an existing, persistent slot in place -- never
-		// constructs a fresh temporary, so it avoids the reallocation regression
-		// that a literal per-element constructor call would incur.
-		template<size_t SlotIndex, typename DofHandler_t>
-		static void Update(ElementDofCache* existing, const DofHandler_t& handler, const QuadRule_t& qr) noexcept {
+		template<size_t SlotIndex, typename DofHandler_t> requires (std::same_as<DOF_t, typename DofHandler_t::DOF_t>)
+		static void Update(ElementDofCacheNew* existing, const DofHandler_t& handler, const QuadRule_t& qr) noexcept {
 			existing->dofs = handler.get_active_dofs(qr.q_el);
 			const size_t n = existing->dofs.size();
 			existing->global_idx.resize(n);
-			constexpr bool needs_vals = Kernel_t::template needs_vals<SlotIndex>();
-			constexpr bool needs_grad = Kernel_t::template needs_grad<SlotIndex>();
-			if constexpr (needs_vals) {existing->vals.clear(); existing->vals.reserve(n);}
-			if constexpr (needs_grad) {existing->grad.clear(); existing->grad.reserve(n);}
+			static constexpr bool NEEDS_VALS = Kernel_t::NEEDS_VALS[SlotIndex];
+			static constexpr bool NEEDS_GRAD = Kernel_t::NEEDS_GRAD[SlotIndex];
+			if constexpr (NEEDS_VALS) {existing->vals.clear(); existing->vals.reserve(n);}
+			if constexpr (NEEDS_GRAD) {existing->grad.clear(); existing->grad.reserve(n);}
 			for (size_t j=0; j<n; ++j) {
 				existing->global_idx[j] = handler.global_number(existing->dofs[j]);
-				if constexpr (needs_vals) {existing->vals.emplace_back(existing->dofs[j], qr);}
-				if constexpr (needs_grad) {existing->grad.emplace_back(existing->dofs[j], qr);}
+				if constexpr (NEEDS_VALS) {existing->vals.emplace_back(existing->dofs[j], qr);}
+				if constexpr (NEEDS_GRAD) {existing->grad.emplace_back(existing->dofs[j], qr);}
+			}
+		}
+
+		//DofStorage_t should be a gutil::BinSortSpan<DOF_t> or gutil::BinSortVector<DOF_t>
+		//and it should correspond to the relevant state of the dofhandler.
+		template<size_t SlotIndex, typename DofStorage_t> requires (std::same_as<DOF_t, typename DofStorage_t::value_type>)
+		static void Update(ElementDofCacheNew* existing, std::vector<DOF_t> ds, const DofStorage_t& storage, const QuadRule_t& qr) noexcept {
+			existing->dofs = std::move(ds);
+			const size_t n = existing->dofs.size();
+			existing->global_idx.resize(n);
+			static constexpr bool NEEDS_VALS = Kernel_t::NEEDS_VALS[SlotIndex];
+			static constexpr bool NEEDS_GRAD = Kernel_t::NEEDS_GRAD[SlotIndex];
+			if constexpr (NEEDS_VALS) {existing->vals.clear(); existing->vals.reserve(n);}
+			if constexpr (NEEDS_GRAD) {existing->grad.clear(); existing->grad.reserve(n);}
+			for (size_t j=0; j<n; ++j) {
+				existing->global_idx[j] = storage.index_sorted(existing->dofs[j]);
+				if constexpr (NEEDS_VALS) {existing->vals.emplace_back(existing->dofs[j], qr);}
+				if constexpr (NEEDS_GRAD) {existing->grad.emplace_back(existing->dofs[j], qr);}
 			}
 		}
 	};

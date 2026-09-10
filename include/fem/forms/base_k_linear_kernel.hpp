@@ -34,18 +34,18 @@ namespace GV {
 	/// Note that a 0-form can be used to integrate a weight function.
 	///
 	/// Use CRTP so that kernels can be added and scaled. Note that only unweighted
-	/// kernels can be added.
+	/// kernels can be added. Examples of the Zero and Identity kernels are provided below.
 	//////////////////////////////////////////////////////////////////
-	template<size_t K_, bool NeedsWeight_=false, size_t NSymmetric_=0, typename Derived> requires (NSymmetric_ <= K_)
+	template<size_t K_, bool IsWeighted=false, size_t NSymmetric_=0, typename Derived> requires (NSymmetric_ <= K_)
 	struct KLinearKernel {
 		//////////////////////////////////////////////////////////////////
 		/// Track essential constants.
 		//////////////////////////////////////////////////////////////////
 		static constexpr size_t K            = K_;
-		static constexpr bool   NEEDS_WEIGHT = NeedsWeight_;
+		static constexpr bool   NEEDS_WEIGHT = IsWeighted;
 		static constexpr size_t N_SYMMETRIC  = NSymmetric_;
 		static constexpr bool   IS_SYMMETRIC = N_SYMMETRIC==K;
-
+		static_assert(N_SYMMETRIC!=1, "A single symmetric argument makes no sense.");
 
 		//////////////////////////////////////////////////////////////////
 		/// Track if a form needs dof values/gradients for each argument
@@ -58,7 +58,9 @@ namespace GV {
 			return true;
 		}
 
-		//pass arrays of pointers to the values, pass nullptr if that value/gradient is not needed
+		//////////////////////////////////////////////////////////////////
+		/// pass arrays of pointers to the values, pass nullptr if that value/gradient is not needed
+		//////////////////////////////////////////////////////////////////
 		template<typename QuadRule>
 		using ValueArg = std::array<const DofValueCache<QuadRule>*, K>;
 
@@ -66,10 +68,45 @@ namespace GV {
 		using GradArg = std::array<const DofGradCache<QuadRule>*, K>;
 
 		template<typename QuadRule>
-		using WeightArg = ScalarValueCache<QuadRule_t>;
+		using WeightArg = ScalarValueCache<QuadRule>;
 
-		[[nodiscard]] static constexpr bool HasStaticEval() noexcept requires( requires  {Derived::CachedEvalImpl;} ) {return true;}
-		[[nodiscard]] static constexpr bool HasStaticEval() noexcept requires( !requires {Derived::CachedEvalImpl;} ) {return false;}
+		template<typename QuadRule>
+		[[nodiscard]] static constexpr bool IsValArgValid(const ValueArg<QuadRule>& arg) noexcept {
+			bool flag = true;
+			for (size_t k=0; k<K; ++k) {
+				if (Derived::NEED_VALS[k] && arg[k]==nullptr) {
+					GUTIL_ERROR("Value argument ", k, " is nullptr but is required");
+					flag = false;
+				}
+			}
+			return flag;
+		}
+
+		template<typename QuadRule>
+		[[nodiscard]] static constexpr bool IsGradArgValid(const GradArg<QuadRule>& arg) noexcept {
+			bool flag = true;
+			for (size_t k=0; k<K; ++k) {
+				if (Derived::NEED_GRAD[k] && arg[k]==nullptr) {
+					GUTIL_ERROR("Grad argument ", k, " is nullptr but is required");
+					flag = false;
+				}
+			}
+			return flag;
+		}
+
+
+		//////////////////////////////////////////////////////////////////
+		/// Check if the kernel can be evaluated statically. If it can,
+		/// use default to static evaluation.
+		//////////////////////////////////////////////////////////////////
+		template<typename QuadRule>
+		[[nodiscard]] static constexpr bool HasStaticEval() noexcept requires( requires {
+			Derived::template CachedEvalImpl<QuadRule>(std::declval<const ValueArg<QuadRule>&>(), std::declval<const GradArg<QuadRule>&>(), std::declval<const WeightArg<QuadRule>*>(), std::declval<const QuadRule&>());
+		}) {return true;}
+		template<typename QuadRule>
+		[[nodiscard]] static constexpr bool HasStaticEval() noexcept requires( !requires {
+			Derived::template CachedEvalImpl<QuadRule>(std::declval<const ValueArg<QuadRule>&>(), std::declval<const GradArg<QuadRule>&>(), std::declval<const WeightArg<QuadRule>*>(), std::declval<const QuadRule&>());
+		}) {return false;}
 
 
 		//////////////////////////////////////////////////////////////////
@@ -83,8 +120,12 @@ namespace GV {
 		/// Forward evaluation to the Derived class for static evaluation.
 		//////////////////////////////////////////////////////////////////
 		template<typename QuadRule>
-		static typename QuadRule::Scalar_t CachedEval(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr) noexcept requires(HasStaticEval();) {
-			return Derived::CachedEvalImpl(vals, grad, wt_ptr);
+		[[nodiscard]] static typename QuadRule::Scalar_t CachedEval(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr, const QuadRule& qr) noexcept requires(HasStaticEval()) {
+			static_assert(IsValid());
+			GUTIL_ASSERT(IsValArgValid(vals));
+			GUTIL_ASSERT(IsGradArgValid(grad));
+			if constexpr (NEEDS_WEIGHT) {GUTIL_ASSERT(wt_ptr);}
+			return Derived::CachedEvalImpl(vals, grad, wt_ptr, qr);
 		}
 
 
@@ -92,14 +133,82 @@ namespace GV {
 		/// Forward evaluation to the Derived class for runtime evaluation.
 		//////////////////////////////////////////////////////////////////
 		template<typename QuadRule>
-		typename QuadRule::Scalar_t cached_eval(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr) const noexcept requires (HasStaticEval();) {	
-			return Derived::CachedEvalImpl(vals, grad, wt_ptr);
+		[[nodiscard]] typename QuadRule::Scalar_t cached_eval(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr, const QuadRule& qr) const noexcept requires (HasStaticEval()) {	
+			static_assert(IsValid());
+			GUTIL_ASSERT(IsValArgValid(vals));
+			GUTIL_ASSERT(IsGradArgValid(grad));
+			if constexpr (NEEDS_WEIGHT) {GUTIL_ASSERT(wt_ptr);}
+			return Derived::CachedEvalImpl(vals, grad, wt_ptr, qr);
 		}
 		template<typename QuadRule>
-		typename QuadRule::Scalar_t cached_eval(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr) const noexcept requires (!HasStaticEval();) {	
-			return derived()->cached_eval_impl(vals, grad, wt_ptr);
+		[[nodiscard]] typename QuadRule::Scalar_t cached_eval(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr, const QuadRule& qr) const noexcept requires (!HasStaticEval()) {	
+			static_assert(IsValid());
+			GUTIL_ASSERT(IsValArgValid(vals));
+			GUTIL_ASSERT(IsGradArgValid(grad));
+			if constexpr (NEEDS_WEIGHT) {GUTIL_ASSERT(wt_ptr);}
+			return derived()->cached_eval_impl(vals, grad, wt_ptr, qr);
 		}
 	};
+
+
+	//////////////////////////////////////////////////////////////////
+	/// Make a few helper functions for adding and scaling kernels.
+	//////////////////////////////////////////////////////////////////
+	template<size_t K>
+	struct ZeroKernel : public KLinearKernel<K, false, K, ZeroKernel<K>> {
+		using BASE = KLinearKernel<K,false,K,ZeroKernel<K>>;
+		template<typename QR>
+		using ValueArg = BASE::template ValueArg<QR>;
+		template<typename QR>
+		using GradArg = BASE::template GradArg<QR>;
+		template<typename QR>
+		using WeightArg = BASE::template WeightArg<QR>;
+
+		using BASE::BASE;
+
+		static constexpr std::array<bool,K> NEED_VALS = [](){std::array<bool,K> ar{}; ar.fill(false); return ar;}();
+		static constexpr std::array<bool,K> NEED_GRAD = [](){std::array<bool,K> ar{}; ar.fill(false); return ar;}();
+
+		template<typename QuadRule>
+		[[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(const ValueArg<QuadRule>&, const GradArg<QuadRule>&, const WeightArg<QuadRule>*, const QuadRule&) noexcept {
+			return typename QuadRule::Scalar_t{0};
+		}
+	};
+
+	template<size_t K, bool IsWeighted>
+	struct IdentityKernel : public KLinearKernel<K, IsWeighted, K, IdentityKernel<K,IsWeighted>> {
+		using BASE = KLinearKernel<K,IsWeighted,K,IdentityKernel<K,IsWeighted>>;
+		template<typename QR>
+		using ValueArg = BASE::template ValueArg<QR>;
+		template<typename QR>
+		using GradArg = BASE::template GradArg<QR>;
+		template<typename QR>
+		using WeightArg = BASE::template WeightArg<QR>;
+
+		using BASE::BASE;
+
+		static constexpr std::array<bool,K> NEED_VALS = [](){std::array<bool,K> ar{}; ar.fill(false); return ar;}();
+		static constexpr std::array<bool,K> NEED_GRAD = [](){std::array<bool,K> ar{}; ar.fill(false); return ar;}();
+
+		template<typename QuadRule>
+		[[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(const ValueArg<QuadRule>&, const GradArg<QuadRule>&, const WeightArg<QuadRule>*, const QuadRule& qr) noexcept requires(!IsWeighted) {
+			return QuadRule::quad_w_sum() * qr.jac_det();
+		}
+
+		template<typename QuadRule>
+		[[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(const ValueArg<QuadRule>&, const GradArg<QuadRule>&, const WeightArg<QuadRule>* wt_ptr, const QuadRule& qr) noexcept requires(IsWeighted) {
+			GUTIL_ASSERT(wt_ptr);
+			constexpr int N = QuadRule::TOTAL_QUAD_POINTS;
+			typename QuadRule::Scalar_t val{0};
+			static constexpr auto qw = QuadRule::quad_w();
+			GUTIL_SIMD(reduction(+:val))
+			for (int i=0; i<N; ++i) {
+				val += (*wt_ptr)[i] * qw[i];
+			}
+			return val * qr.jac_det();
+		}
+	};
+
 
 
 	//////////////////////////////////////////////////////////////////
@@ -133,10 +242,8 @@ namespace GV {
 		template<typename QR>
 		using WeightArg = BASE::template WeightArg<QR>;
 
-		static_assert(BASE::IsValid());
-
 		using BASE::BASE;
-		ScaledKernel(T s, Kernel k = Kernel{}) constexpr : BASE(), scale{s}, kernel{std::move(k)} {}
+		constexpr ScaledKernel(T s, Kernel k = Kernel{}) : BASE(), scale{s}, kernel{std::move(k)} {}
 
 		static constexpr std::array<bool,Kernel::K> NEED_VALS = Kernel::NEED_VALS;
 		static constexpr std::array<bool,Kernel::K> NEED_GRAD = Kernel::NEED_GRAD;
@@ -144,13 +251,13 @@ namespace GV {
 		[[no_unique_address]] Kernel kernel{};
 
 		template<typename QuadRule>
-		typename QuadRule::Scalar_t cached_eval_impl(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr) const noexcept requires(Kernel::HasStaticEval()){
-			return scale * Kernel::CachedEvalImpl(vals, grad, wt_ptr);
+		[[nodiscard]] typename QuadRule::Scalar_t cached_eval_impl(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr, const QuadRule& qr) const noexcept requires(Kernel::HasStaticEval()){
+			return scale * Kernel::CachedEvalImpl(vals, grad, wt_ptr, qr);
 		}
 
 		template<typename QuadRule>
-		typename QuadRule::Scalar_t cached_eval_impl(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr) const noexcept requires(!Kernel::HasStaticEval()){
-			return scale * kernel.cached_eval_impl(vals, grad, wt_ptr);
+		[[nodiscard]] typename QuadRule::Scalar_t cached_eval_impl(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr, const QuadRule& qr) const noexcept requires(!Kernel::HasStaticEval()){
+			return scale * kernel.cached_eval_impl(vals, grad, wt_ptr, qr);
 		}
 	};
 
@@ -174,28 +281,26 @@ namespace GV {
 		template<typename QR>
 		using WeightArg = BASE::template WeightArg<QR>;
 
-		static_assert(BASE::IsValid());
-
 		using BASE::BASE;
-		NegatedKernel(Kernel k) constexpr : BASE(), kernel{std::move(k)} {}
+		constexpr NegatedKernel(Kernel k) : BASE(), kernel{std::move(k)} {}
 
 		static constexpr std::array<bool,Kernel::K> NEED_VALS = Kernel::NEED_VALS;
 		static constexpr std::array<bool,Kernel::K> NEED_GRAD = Kernel::NEED_GRAD;
 		[[no_unique_address]] Kernel kernel{};
 		
 		template<typename QuadRule>
-		static typename QuadRule::Scalar_t CachedEvalImpl(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr) noexcept requires(Kernel::HasStaticEval()){
-			return -Kernel::CachedEvalImpl(vals, grad, wt_ptr);
+		[[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr, const QuadRule& qr) noexcept requires(Kernel::HasStaticEval()){
+			return -Kernel::CachedEvalImpl(vals, grad, wt_ptr, qr);
 		}
 
 		template<typename QuadRule>
-		typename QuadRule::Scalar_t cached_eval_impl(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr) const noexcept requires(Kernel::HasStaticEval()){
-			return -Kernel::CachedEvalImpl(vals, grad, wt_ptr);
+		[[nodiscard]] typename QuadRule::Scalar_t cached_eval_impl(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr, const QuadRule& qr) const noexcept requires(Kernel::HasStaticEval()){
+			return -Kernel::CachedEvalImpl(vals, grad, wt_ptr, qr);
 		}
 
 		template<typename QuadRule>
-		typename QuadRule::Scalar_t cached_eval_impl(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr) const noexcept requires(!Kernel::HasStaticEval()){
-			return -kernel.cached_eval_impl(vals, grad, wt_ptr);
+		[[nodiscard]] typename QuadRule::Scalar_t cached_eval_impl(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr, const QuadRule& qr) const noexcept requires(!Kernel::HasStaticEval()){
+			return -kernel.cached_eval_impl(vals, grad, wt_ptr, qr);
 		}
 	};
 
@@ -219,35 +324,33 @@ namespace GV {
 		template<typename QR>
 		using WeightArg = BASE::template WeightArg<QR>;
 
-		static_assert(BASE::IsValid());
-
 		using BASE::BASE;
-		SummedKernel(K1 k_left = K1{}, K2 k_right = K2{}) constexpr : BASE(), left{std::move(k_left)}, right{std::move(k_right)} {}
+		constexpr SummedKernel(K1 k_left = K1{}, K2 k_right = K2{}) : BASE(), left{std::move(k_left)}, right{std::move(k_right)} {}
 
-		static constexpr std::array<bool,Kernel::K> NEED_VALS = GV::OrArrays(K1::NEED_VALS, K2::NEED_VALS);
-		static constexpr std::array<bool,Kernel::K> NEED_GRAD = GV::OrArrays(K1::NEED_GRAD, K2::NEED_GRAD);
+		static constexpr std::array<bool,K1::K> NEED_VALS = GV::OrArrays(K1::NEED_VALS, K2::NEED_VALS);
+		static constexpr std::array<bool,K1::K> NEED_GRAD = GV::OrArrays(K1::NEED_GRAD, K2::NEED_GRAD);
 		
 		[[no_unique_address]] K1 left{};
 		[[no_unique_address]] K2 right{};
 		
 		template<typename QuadRule>
-		static typename QuadRule::Scalar_t CachedEvalImpl(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr) noexcept requires(K1::HasStaticEval() && K2::HasStaticEval()) {
-			return K1::CachedEvalImpl(vals, grad, wt_ptr) + K2::CachedEvalImpl(vals, grad, wt_ptr);
+		[[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr, const QuadRule& qr) noexcept requires(K1::HasStaticEval() && K2::HasStaticEval()) {
+			return K1::CachedEvalImpl(vals, grad, wt_ptr, qr) + K2::CachedEvalImpl(vals, grad, wt_ptr, qr);
 		}
 
 		template<typename QuadRule>
-		typename QuadRule::Scalar_t cached_eval_impl(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr) const noexcept requires(K1::HasStaticEval() && !K2::HasStaticEval()) {
-			return K1::CachedEvalImpl(vals, grad, wt_ptr) + right.cached_eval_impl(vals, grad, wt_ptr);
+		[[nodiscard]] typename QuadRule::Scalar_t cached_eval_impl(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr, const QuadRule& qr) const noexcept requires(K1::HasStaticEval() && !K2::HasStaticEval()) {
+			return K1::CachedEvalImpl(vals, grad, wt_ptr, qr) + right.cached_eval_impl(vals, grad, wt_ptr, qr);
 		}
 
 		template<typename QuadRule>
-		typename QuadRule::Scalar_t cached_eval_impl(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr) const noexcept requires(!K1::HasStaticEval() && K2::HasStaticEval()) {
-			return left.cached_eval_impl(vals, grad, wt_ptr) + K2::CachedEvalImpl(vals, grad, wt_ptr);
+		[[nodiscard]] typename QuadRule::Scalar_t cached_eval_impl(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr, const QuadRule& qr) const noexcept requires(!K1::HasStaticEval() && K2::HasStaticEval()) {
+			return left.cached_eval_impl(vals, grad, wt_ptr, qr) + K2::CachedEvalImpl(vals, grad, wt_ptr, qr);
 		}
 
 		template<typename QuadRule>
-		typename QuadRule::Scalar_t cached_eval_impl(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr) const noexcept requires(!K1::HasStaticEval() && !K2::HasStaticEval()){
-			return left.cached_eval_impl(vals, grad, wt_ptr) + right.cached_eval_impl(vals, grad, wt_ptr);
+		[[nodiscard]] typename QuadRule::Scalar_t cached_eval_impl(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr, const QuadRule& qr) const noexcept requires(!K1::HasStaticEval() && !K2::HasStaticEval()){
+			return left.cached_eval_impl(vals, grad, wt_ptr, qr) + right.cached_eval_impl(vals, grad, wt_ptr, qr);
 		}
 	};
 
@@ -273,31 +376,29 @@ namespace GV {
 		template<typename QR>
 		using WeightArg = BASE::template WeightArg<QR>;
 
-		static_assert(BASE::IsValid());
-
 		using BASE::BASE;
-		WeightedVariant(Kernel k) constexpr : BASE(), kernel{std::move(k)} {}
+		constexpr WeightedVariant(Kernel k) : BASE(), kernel{std::move(k)} {}
 
 		static constexpr std::array<bool,Kernel::K> NEED_VALS = Kernel::NEED_VALS;
 		static constexpr std::array<bool,Kernel::K> NEED_GRAD = Kernel::NEED_GRAD;
 		[[no_unique_address]] Kernel kernel{};
 		
 		template<typename QuadRule>
-		static typename QuadRule::Scalar_t CachedEvalImpl(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr) noexcept requires(Kernel::HasStaticEval()){
+		[[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr, const QuadRule& qr) noexcept requires(Kernel::HasStaticEval()){
 			GUTIL_ASSERT(wt_ptr);
-			return Kernel::CachedEvalImpl(vals, grad, wt_ptr);
+			return Kernel::CachedEvalImpl(vals, grad, wt_ptr, qr);
 		}
 
 		template<typename QuadRule>
-		typename QuadRule::Scalar_t cached_eval_impl(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr) const noexcept requires(Kernel::HasStaticEval()){
+		[[nodiscard]] typename QuadRule::Scalar_t cached_eval_impl(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr, const QuadRule& qr) const noexcept requires(Kernel::HasStaticEval()){
 			GUTIL_ASSERT(wt_ptr);
-			return Kernel::CachedEvalImpl(vals, grad, wt_ptr);
+			return Kernel::CachedEvalImpl(vals, grad, wt_ptr, qr);
 		}
 
 		template<typename QuadRule>
-		typename QuadRule::Scalar_t cached_eval_impl(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr) const noexcept requires(!Kernel::HasStaticEval()){
+		[[nodiscard]] typename QuadRule::Scalar_t cached_eval_impl(const ValueArg<QuadRule>& vals, const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr, const QuadRule& qr) const noexcept requires(!Kernel::HasStaticEval()){
 			GUTIL_ASSERT(wt_ptr);
-			return kernel.cached_eval_impl(vals, grad, wt_ptr);
+			return kernel.cached_eval_impl(vals, grad, wt_ptr, qr);
 		}
 	};
 

@@ -30,7 +30,7 @@ namespace GV {
 		using MeshElem_t = typename Mesh_t::Elem_t;
 		
 		const Mesh_t& mesh;
-		MeshQuadratureRule(const Mesh_t& mesh) : 
+		MeshQuadratureRule(const Mesh_t& mesh) constexpr : 
 			mesh(mesh), 
 			support_element(mesh.max_depth+1), 
 			proj_quad_pts(mesh.max_depth+1),
@@ -86,27 +86,37 @@ namespace GV {
 		std::vector<T>											jacobian_det_inv{};
 		std::vector<T>											geometric_coords{};
 
-		std::span<const T,TOTAL_QUAD_POINTS> quad_x(uint8_t depth) const {
+		[[nodiscard]] constexpr auto jac_det() const noexcept {return jacobian_det[q_el.depth()];}
+		[[nodiscard]] constexpr auto& jac_diag() const noexcept {return jacobian_diag[q_el.depth()];}
+		[[nodiscard]] constexpr auto& jac_inv() const noexcept {return jacobian_diag_inv[q_el.depth()];}
+
+		std::span<const T,TOTAL_QUAD_POINTS> quad_x(uint8_t depth) const noexcept {
 			return std::span<const T,TOTAL_QUAD_POINTS>{&proj_quad_pts[depth][0], TOTAL_QUAD_POINTS};
 		}
-		std::span<const T,TOTAL_QUAD_POINTS> quad_y(uint8_t depth) const {
+		std::span<const T,TOTAL_QUAD_POINTS> quad_y(uint8_t depth) const noexcept {
 			return std::span<const T,TOTAL_QUAD_POINTS>{&proj_quad_pts[depth][TOTAL_QUAD_POINTS], TOTAL_QUAD_POINTS};
 		}
-		std::span<const T,TOTAL_QUAD_POINTS> quad_z(uint8_t depth) const {
+		std::span<const T,TOTAL_QUAD_POINTS> quad_z(uint8_t depth) const noexcept {
 			return std::span<const T,TOTAL_QUAD_POINTS>{&proj_quad_pts[depth][2*TOTAL_QUAD_POINTS], TOTAL_QUAD_POINTS};
 		}
-		std::span<T,TOTAL_QUAD_POINTS> quad_x(uint8_t depth) {
+		std::span<T,TOTAL_QUAD_POINTS> quad_x(uint8_t depth) noexcept {
 			return std::span<T,TOTAL_QUAD_POINTS>{&(proj_quad_pts[depth][0]), TOTAL_QUAD_POINTS};
 		}
-		std::span<T,TOTAL_QUAD_POINTS> quad_y(uint8_t depth) {
+		std::span<T,TOTAL_QUAD_POINTS> quad_y(uint8_t depth) noexcept {
 			return std::span<T,TOTAL_QUAD_POINTS>{&proj_quad_pts[depth][TOTAL_QUAD_POINTS], TOTAL_QUAD_POINTS};
 		}
-		std::span<T,TOTAL_QUAD_POINTS> quad_z(uint8_t depth) {
+		std::span<T,TOTAL_QUAD_POINTS> quad_z(uint8_t depth) noexcept {
 			return std::span<T,TOTAL_QUAD_POINTS>{&proj_quad_pts[depth][2*TOTAL_QUAD_POINTS], TOTAL_QUAD_POINTS};
 		}
 
-		static constexpr std::span<const T, TOTAL_QUAD_POINTS> quad_w() {
+		static constexpr std::span<const T, TOTAL_QUAD_POINTS> quad_w() noexcept {
 			return std::span<const T, TOTAL_QUAD_POINTS>{&total_quad_w[0], TOTAL_QUAD_POINTS};
+		}
+
+		static constexpr T quad_w_sum() noexcept {
+			T val{0};
+			for (T w : quad_w()) {val += w;}
+			return val;
 		}
 		
 		//////////////////////////////////////////////////////////////////
