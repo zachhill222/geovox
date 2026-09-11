@@ -10,13 +10,19 @@
 
 namespace GV {
 
+	///////////////////////////////////////////////////////////////////
+	/// IMPORTANT:
+	/// 	A bilinear form B(u,v) = int_D( kernel(u,v) ) should be
+	/// indexed right to left. Use vals[0] for v and vals[1] for u.
+	///////////////////////////////////////////////////////////////////
+
 
 	///////////////////////////////////////////////////////////////////
 	/// Concept to ensure kernel consistency
 	///////////////////////////////////////////////////////////////////
 	template<typename Kernel>
 	concept IsBilinearKernel = IsKLinearKernel<Kernel> && (Kernel::K==2);
-
+	
 	template<typename Kernel>
 	concept IsSymmetricBilinearKernel = IsBilinearKernel<Kernel> && Kernel::IS_SYMMETRIC;
 
@@ -34,6 +40,8 @@ namespace GV {
 	///////////////////////////////////////////////////////////////////
 	/// The L2 bilinear kernel for the bilinear form
 	///   B(u,v) = int_D(u*v) or B(u,v) = int_D(u*v*wt)
+	///
+	/// Note the index order should be read from right (v) to left (u).
 	///////////////////////////////////////////////////////////////////
 	template<bool IsWeighted=false>
 	struct L2BilinearKernel : public KLinearKernel<2,IsWeighted,2,L2BilinearKernel<IsWeighted>> {
@@ -63,8 +71,8 @@ namespace GV {
 			static constexpr int N = QuadRule::TOTAL_QUAD_POINTS;
 			static constexpr auto qw = QuadRule::quad_w();
 
-			const auto& u_vals = *(vals[0]);
-			const auto& v_vals = *(vals[1]);
+			const auto& u_vals = *(vals[1]);
+			const auto& v_vals = *(vals[0]);
 
 			//accumulation
 			Scalar val{0};
@@ -88,6 +96,8 @@ namespace GV {
 	///////////////////////////////////////////////////////////////////
 	/// The (grad portion of the) H1 bilinear kernel for the bilinear form
 	///   B(u,v) = int_D(grad(u)*grad(v)) or B(u,v) = int_D(grad(u)*grad(v)*wt)
+	///
+	/// Note the index order should be read from right (v) to left (u).
 	///////////////////////////////////////////////////////////////////
 	template<bool IsWeighted=false>
 	struct H1BilinearKernel : public KLinearKernel<2,IsWeighted,2,H1BilinearKernel<IsWeighted>> {
@@ -117,8 +127,8 @@ namespace GV {
 			static constexpr int N = QuadRule::TOTAL_QUAD_POINTS;
 			static constexpr auto qw = QuadRule::quad_w();
 
-			const auto& u_grad = *(grad[0]);
-			const auto& v_grad = *(grad[1]);
+			const auto& u_grad = *(grad[1]);
+			const auto& v_grad = *(grad[0]);
 
 			//chain rule. note we need the jacobian inverse at the dof support depth
 			const Scalar j_i_xx = qr.jacobian_diag_inv[u_grad.depth][0]*qr.jacobian_diag_inv[v_grad.depth][0];
@@ -153,6 +163,8 @@ namespace GV {
 	///////////////////////////////////////////////////////////////////
 	/// The mixed bilinear kernel for the bilinear form (part of Hdiv)
 	///   B(u,v) = int_D(u*partial_axis(v)) or B(u,v) = int_D(u*partial_axis(v)*wt)
+	///
+	/// Note the index order should be read from right (v) to left (u).
 	///////////////////////////////////////////////////////////////////
 	template<int Axis, bool IsWeighted=false> requires (0<=Axis && Axis<3)
 	struct ValPartialBilinearForm : KLinearKernel<2,IsWeighted,0,ValPartialBilinearForm<Axis,IsWeighted>> {
@@ -167,8 +179,8 @@ namespace GV {
 
 		using BASE::BASE;
 
-		static constexpr std::array<bool,2> NEED_VALS{true,false};
-		static constexpr std::array<bool,2> NEED_GRAD{false,true};
+		static constexpr std::array<bool,2> NEED_VALS{false,true};
+		static constexpr std::array<bool,2> NEED_GRAD{true,false};
 
 		template<typename QuadRule>
 		[[nodiscard]] static typename QuadRule::Scalar CachedEvalImpl(const ValueArg<QuadRule>& vals,	
@@ -183,8 +195,8 @@ namespace GV {
 			static constexpr int N = QuadRule::TOTAL_QUAD_POINTS;
 			static constexpr auto qw = QuadRule::quad_w();
 
-			const auto& u_vals = *(vals[0]);
-			const auto& v_grad = *(grad[1]);
+			const auto& u_vals = *(vals[1]);
+			const auto& v_grad = *(grad[0]);
 
 			//chain rule. note we need the jacobian inverse at the dof support depth
 			//and that this value can be factored out of the sum.
@@ -218,6 +230,8 @@ namespace GV {
 	///////////////////////////////////////////////////////////////////
 	/// The mixed bilinear kernel for the bilinear form (part of Hdiv adjoint)
 	///   B(u,v) = int_D(partial_axis(u)*v) or B(u,v) = int_D(partial_axis(u)*v*wt)
+	///
+	/// Note the index order should be read from right (v) to left (u).
 	///////////////////////////////////////////////////////////////////
 	template<int Axis, bool IsWeighted=false> requires (0<=Axis && Axis<3)
 	struct PartialValBilinearForm : KLinearKernel<2,IsWeighted,0,PartialValBilinearForm<Axis,IsWeighted>> {
@@ -232,8 +246,8 @@ namespace GV {
 
 		using BASE::BASE;
 
-		static constexpr std::array<bool,2> NEED_VALS{false,true};
-		static constexpr std::array<bool,2> NEED_GRAD{true,false};
+		static constexpr std::array<bool,2> NEED_VALS{true,false};
+		static constexpr std::array<bool,2> NEED_GRAD{false,true};
 
 		template<typename QuadRule>
 		[[nodiscard]] static typename QuadRule::Scalar CachedEvalImpl(const ValueArg<QuadRule>& vals,	
@@ -248,8 +262,8 @@ namespace GV {
 			static constexpr int N = QuadRule::TOTAL_QUAD_POINTS;
 			static constexpr auto qw = QuadRule::quad_w();
 
-			const auto& u_grad = *(grad[0]);
-			const auto& v_vals = *(vals[1]);
+			const auto& u_grad = *(grad[1]);
+			const auto& v_vals = *(vals[0]);
 
 			//chain rule. note we need the jacobian inverse at the dof support depth
 			//and that this value can be factored out of the sum.

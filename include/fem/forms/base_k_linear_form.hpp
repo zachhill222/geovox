@@ -3,6 +3,7 @@
 
 #include "gutil.hpp"
 
+#include "util/util.hpp"
 #include "fem/forms/base_k_linear_kernel.hpp"
 
 namespace GV {
@@ -12,6 +13,12 @@ namespace GV {
 	/// from KLinearForm<N,T,K, H1, H2> and similar for other specialized types.
 	///
 	/// It may be useful to have a 0-form to simply integrate a weight over the mesh.
+	///
+	/// Note for a bilinear form B(u,v) = int_D( kernel(u,v) ), we read the indices from right
+	/// to left (i.e., v is index 0 and u is index 1). This allows us to keep consistent indexing
+	/// through various types and have column-major storage indexing be the natural order.
+	///
+	/// Thus, specify dofhandlers from the right to left. To use symmetry, the symmetric group must be the rightmost.
 	//////////////////////////////////////////////////////////////////
 	template<int N, typename T, IsKLinearKernel KernelType, typename KernelWeightType, typename... HandlerTypes>
 	class KLinearForm {
@@ -282,7 +289,77 @@ namespace GV {
 				for (size_t i=0; i<n; ++i) {Y[dof_cache.global_idx[i]] += local_y[i];}
 			}
 		}
+
+
+		//////////////////////////////////////////////////////////////////
+		/// A few fallback/generic methods.
+		/// Note that coefficients are indexed right to left.
+		//////////////////////////////////////////////////////////////////
+		template<typename... Spans> requires (sizeof...(Spans)==K && AllArgsSameAs<std::span<const Scalar_t>, Spans...>)
+		[[nodiscard]] Scalar_t evaluate(Spans... x_spans) const noexcept {
+			GUTIL_PROFILE_FUNCTION();
+			std::array<std::span<const Scalar_t>, K> X{x_spans...};
+
+			std::vector<std::vector<Scalar_t>> t_thread_resource;
+			std::vector<std::array<std::vector<Scalar_t>, K>> t_local_x;
+			std::vector<Scalar_t> t_val;
+
+			this->for_each_element(
+			//action
+			[&](auto& k_eval, const auto& range) {
+				auto& thread_resource = t_thread_resource[range.tid];
+				auto& local_x = t_local_x[range.tid];
+
+				auto tensor = k_eval.make_local_tensor(thread_resource);
+
+				[&]<size_t... Slot>(std::index_sequence<Slot...>) {
+					(GatherLocalVector(X[Slot], std::get<GetHandlerIndex(Slot)>(k_eval.dof_caches), local_x[Slot]), ...);
+				}(std::make_index_sequence<K>{});
+
+				//scatter the multiplication of each local vector across the local tensor
+				//then sum the entries of the tensor.
+				Scalar_t* data = tensor.data();
+				for (size_t s=0; s<K; ++s) {
+					for (size_t i=0; i<tensor.dim(s); ++i) {
+						const Scalar_t x_val = local_x[s][i];
+						tensor.apply_along_axis_index_simd(s,i, [x_val](Scalar_t& val) {val *= x_val;});
+					}
+				}
+
+				//sum the tensor entries
+				Scalar_t elem_val{0};
+				GUTIL_SIMD(reduction(+:elem_val))
+				for (size_t flat=0; flat<tensor.size(); ++flat) {elem_val += data[flat];}
+
+				t_val[range.tid] += elem_val;
+			},
+			//init
+			[&](size_t n_threads, size_t tid) {
+				GUTIL_OMP(single)
+				{
+					t_thread_resource.resize(n_threads);
+					t_local_x.resize(n_threads);
+					t_val.assign(n_threads, Scalar_t{0});
+				}
+				GUTIL_OMP(barrier)
+			});
+
+			Scalar_t total{0};
+			for (Scalar_t v : t_val) {total += v;}
+			return total;
+		}
 	};
+
+
+
+
+
+
+
+
+
+
+
 
 
 	//////////////////////////////////////////////////////////////////
@@ -323,6 +400,16 @@ namespace GV {
 			return {kform.template get_handler<GetFormPosition(Is)>().template make_dof_getter<MeshElem_t>(which, std::get<Is>(dof_caches).dofs)... };
 		}
 
+
+		//////////////////////////////////////////////////////////////
+		/// Access caches by form index
+		//////////////////////////////////////////////////////////////
+		template<size_t k> requires (k<K)
+		const auto& get_cache() const noexcept {
+			return std::get<GetHandlerIndex(k)>(dof_caches);
+		}
+
+
 		//////////////////////////////////////////////////////////////
 		/// Per-thread and per-element resources
 		//////////////////////////////////////////////////////////////
@@ -339,6 +426,7 @@ namespace GV {
 		[[no_unique_address]] std::array<const void*, N_HANDLERS> bin_sort_vectors{};
 		[[no_unique_address]] std::array<std::function<void(MeshElem_t)>, N_HANDLERS> getters{};
 		const bool using_snapshot{false};
+
 
 		//////////////////////////////////////////////////////////////
 		/// Per-thread constructors (before element loop)
@@ -378,8 +466,6 @@ namespace GV {
 			}
 			build_caches(el);
 		}
-
-
 
 
 		//////////////////////////////////////////////////////////////
@@ -445,6 +531,34 @@ namespace GV {
 
 		[[nodiscard]] Scalar_t operator()() const noexcept requires (K==0) {
 			return operator()({});
+		}
+
+
+		//////////////////////////////////////////////////////////////
+		/// Assemble the local 'stiffness' matrix/tensor using
+		/// a provided per-thread resource vector. This does not exploit
+		/// symmetry and should only be used as a fallback/temporary implementation.
+		//////////////////////////////////////////////////////////////
+		[[nodiscard]] std::array<size_t,K> make_local_tensor_size() const noexcept {
+			return [&]<size_t... Is>(std::index_sequence<Is...>) {
+				return std::array<size_t,K>{std::get<GetHandlerIndex(Is)>(dof_caches).dofs.size()...};
+			}(std::make_index_sequence<K>{});
+		}
+
+		gutil::TensorWrapper<Scalar_t,K> make_local_tensor(std::vector<Scalar_t>& thread_resource) const noexcept {
+			gutil::TensorWrapper<Scalar_t,K> tensor(thread_resource, make_local_tensor_size());
+			
+			Scalar_t* data = tensor.data();
+			std::array<size_t,K> local_idx;
+			
+			for (size_t flat=0; flat<tensor.size(); ++flat) {
+				//invert the flat index to get the tensor index
+				tensor.flat_to_tensor_index(flat, local_idx);
+				data[flat] = (*this)(local_idx);
+				GUTIL_ASSERT(data[flat] == tensor(local_idx));
+			}
+
+			return tensor;
 		}
 	};
 }

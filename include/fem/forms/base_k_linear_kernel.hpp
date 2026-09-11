@@ -35,6 +35,10 @@ namespace GV {
 	///
 	/// Use CRTP so that kernels can be added and scaled. Note that only unweighted
 	/// kernels can be added. Examples of the Zero and Identity kernels are provided below.
+	///
+	/// Note for a bilinear form B(u,v) = int_D( kernel(u,v) ), we read the indices from right
+	/// to left (i.e., v is index 0 and u is index 1). This allows us to keep consistent indexing
+	/// through various types and have column-major storage indexing be the natural order.
 	//////////////////////////////////////////////////////////////////
 	template<size_t K_, bool IsWeighted, size_t NSymmetric_, typename Derived> requires (NSymmetric_ <= K_)
 	struct KLinearKernel {
