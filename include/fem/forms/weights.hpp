@@ -12,9 +12,8 @@ namespace GV {
 	/// at the quadrature points.
 	///////////////////////////////////////////////////////////////////
 	template<typename W>
-	concept IsKernelWeight = requires {
+	concept IsKernelWeight = std::same_as<W,void> || requires {
 		{W::NEEDS_GEO_POINTS}  -> std::convertible_to<bool>;
-		{W::NEEDS_SCALAR_VALS} -> std::convertible_to<bool>;
 		{W::NEEDS_SDF_VALS}    -> std::convertible_to<bool>;
 		{W::NEEDS_SDF_GRAD}    -> std::convertible_to<bool>;
 		//also needs a templated build_weights(scalarvals, quad_rule)
@@ -29,7 +28,6 @@ namespace GV {
 	struct IdentityKernelWeight {
 		//weight of a constant 1, probably shouldn't actually evaluate this ever.
 		static constexpr bool NEEDS_GEO_POINTS  = false;
-		static constexpr bool NEEDS_SCALAR_VALS = false;
 		static constexpr bool NEEDS_SDF_VALS    = false;
 		static constexpr bool NEEDS_SDF_GRAD    = false;
 
@@ -48,7 +46,6 @@ namespace GV {
 	template<auto F>
 	struct FunctionWeight {
 		static constexpr bool NEEDS_GEO_POINTS  = true;
-		static constexpr bool NEEDS_SCALAR_VALS = false;
 		static constexpr bool NEEDS_SDF_VALS    = false;
 		static constexpr bool NEEDS_SDF_GRAD    = false;
 
@@ -112,7 +109,6 @@ namespace GV {
 	struct AssemblyPhaseFieldWeight : public AssemblyDiffuseDomain<Assembly_t,StaticID> {
 		//phi or 1-phi using the assembly tanh heaviside approximation
 		static constexpr bool NEEDS_GEO_POINTS  = true;
-		static constexpr bool NEEDS_SCALAR_VALS = false;
 		static constexpr bool NEEDS_SDF_VALS    = true;
 		static constexpr bool NEEDS_SDF_GRAD    = false;
 
@@ -152,7 +148,6 @@ namespace GV {
 	template<typename Assembly_t, auto F, int StaticID=0>
 	struct ModifiedFunctionKernelWeight : public AssemblyDiffuseDomain<Assembly_t,StaticID> {
 		static constexpr bool NEEDS_GEO_POINTS  = true;
-		static constexpr bool NEEDS_SCALAR_VALS = false;
 		static constexpr bool NEEDS_SDF_VALS    = true;
 		static constexpr bool NEEDS_SDF_GRAD    = true;
 
@@ -217,7 +212,6 @@ namespace GV {
 	template<typename Assembly_t, auto UExact, int StaticID=0>
 	struct L2DiffuseErrorWeight : public AssemblyDiffuseDomain<Assembly_t,StaticID> {
 		static constexpr bool NEEDS_GEO_POINTS  = true;
-		static constexpr bool NEEDS_SCALAR_VALS = true;
 		static constexpr bool NEEDS_SDF_VALS    = true;
 		static constexpr bool NEEDS_SDF_GRAD    = false;
 
@@ -262,7 +256,6 @@ namespace GV {
 	template<typename T, IsKernelWeight W>
 	struct ScaledKernelWeight {
 		static constexpr bool NEEDS_GEO_POINTS  = W::NEEDS_GEO_POINTS;
-		static constexpr bool NEEDS_SCALAR_VALS = W::NEEDS_SCALAR_VALS;
 		static constexpr bool NEEDS_SDF_VALS    = W::NEEDS_SDF_VALS;
 		static constexpr bool NEEDS_SDF_GRAD    = W::NEEDS_SDF_GRAD;
 
@@ -290,7 +283,6 @@ namespace GV {
 	template<IsKernelWeight W1, IsKernelWeight W2>
 	struct SumKernelWeight {
 		static constexpr bool NEEDS_GEO_POINTS  = W1::NEEDS_GEO_POINTS  || W2::NEEDS_GEO_POINTS;
-		static constexpr bool NEEDS_SCALAR_VALS = W1::NEEDS_SCALAR_VALS || W2::NEEDS_SCALAR_VALS;
 		static constexpr bool NEEDS_SDF_VALS    = W1::NEEDS_SDF_VALS    || W2::NEEDS_SDF_VALS;
 		static constexpr bool NEEDS_SDF_GRAD    = W1::NEEDS_SDF_GRAD    || W2::NEEDS_SDF_GRAD;
 
@@ -335,7 +327,6 @@ namespace GV {
 	template<IsKernelWeight W1, IsKernelWeight W2>
 	struct ProductKernelWeight {
 		static constexpr bool NEEDS_GEO_POINTS  = W1::NEEDS_GEO_POINTS  || W2::NEEDS_GEO_POINTS;
-		static constexpr bool NEEDS_SCALAR_VALS = W1::NEEDS_SCALAR_VALS || W2::NEEDS_SCALAR_VALS;
 		static constexpr bool NEEDS_SDF_VALS    = W1::NEEDS_SDF_VALS    || W2::NEEDS_SDF_VALS;
 		static constexpr bool NEEDS_SDF_GRAD    = W1::NEEDS_SDF_GRAD    || W2::NEEDS_SDF_GRAD;
 		
@@ -380,21 +371,82 @@ namespace GV {
 
 
 	/////////////////////////////////////////////////////////////////////////////////////
+	/// Make a tuple of weights for summed kernels of the form k1(u,v)*w1(x) + k2(u,v)*w2(x)
+	/////////////////////////////////////////////////////////////////////////////////////
+	template<IsKernelWeight Left, IsKernelWeight Right> struct TupleWeight;
+	template<typename T>
+	struct IsTupleWeightHelper : std::false_type {};
+	template<typename L, typename R>
+	struct IsTupleWeightHelper<TupleWeight<L,R>> : std::true_type {};
+	template<typename T>
+	concept IsTupleWeightType = IsTupleWeightHelper<std::remove_cvref_t<T>>::value;
+
+	template<typename T> requires (IsTupleWeightType<T> || std::same_as<T,void>)
+	constexpr size_t WeightCountOf() {
+		if constexpr (std::is_void_v<T>) {return 0;}
+		else if constexpr (IsTupleWeightType<T>) {return T::N_WEIGHTS;}
+		else {return 1;}
+	}
+
+	template<IsKernelWeight Left, IsKernelWeight Right>
+	struct TupleWeight {
+		static constexpr bool NEEDS_GEO_POINTS = Left::NEEDS_GEO_POINTS || Right::NEEDS_GEO_POINTS;
+		static constexpr bool NEEDS_SDF_VALS   = Left::NEEDS_SDF_VALS   || Right::NEEDS_SDF_VALS;
+		static constexpr bool NEEDS_SDF_GRAD   = Left::NEEDS_SDF_GRAD   || Right::NEEDS_SDF_GRAD;
+
+		static constexpr size_t N_WEIGHTS = WeightCountOf<Left>() + WeightCountOf<Right>();
+		Left left{};
+		Right right{};
+
+		template<typename QR>
+		[[nodiscard]] std::array<ScalarValueCache<QR>, N_WEIGHTS> build_weights(const QR& qr) const noexcept {
+			std::array<ScalarValueCache<QR>, N_WEIGHTS> result{};
+			if constexpr (IsTupleWeightType<Left>) {
+				auto left_arr = left.build_weights(qr);
+				for (size_t i=0; i<left_arr.size(); ++i) {result[i] = left_arr[i];}
+			} else {
+				result[0] = left.build_weights(qr);
+			}
+			constexpr size_t left_count = WeightCountOf<Left>();
+			if constexpr (IsTupleWeightType<Right>) {
+				auto right_arr = right.build_weights(qr);
+				for (size_t i=0; i<right_arr.size(); ++i) {result[left_count+i] = right_arr[i];}
+			} else {
+				result[left_count] = right.build_weights(qr);
+			}
+			return result;
+		}
+	};
+
+
+	/////////////////////////////////////////////////////////////////////////////////////
 	/// Implement the operators
 	/////////////////////////////////////////////////////////////////////////////////////
 	template<typename T, IsKernelWeight W>
-	[[nodiscard]] constexpr ScaledKernelWeight<T,W> operator*(T scale, W weight) noexcept {
+	[[nodiscard]] inline constexpr ScaledKernelWeight<T,W> operator*(T scale, W weight) noexcept {
+		return ScaledKernelWeight<T,W>{scale, weight};
+	}
+	template<typename T, IsKernelWeight W>
+	[[nodiscard]] inline constexpr ScaledKernelWeight<T,W> MakeScaledKernelWeight(T scale, W weight) noexcept {
 		return ScaledKernelWeight<T,W>{scale, weight};
 	}
 
 	template<IsKernelWeight W1, IsKernelWeight W2>
-	[[nodiscard]] constexpr ProductKernelWeight<W1,W2> operator*(W1 left, W2 right) noexcept {
+	[[nodiscard]] inline constexpr ProductKernelWeight<W1,W2> operator*(W1 left, W2 right) noexcept {
 		return ProductKernelWeight<W1,W2>{left, right};
+	}
+	template<typename T, IsKernelWeight W>
+	[[nodiscard]] inline constexpr ProductKernelWeight<T,W> MakeProductKernelWeight(T scale, W weight) noexcept {
+		return ProductKernelWeight<T,W>{scale, weight};
 	}
 
 	template<IsKernelWeight W1, IsKernelWeight W2>
-	[[nodiscard]] constexpr SumKernelWeight<W1,W2> operator+(W1 left, W2 right) noexcept {
+	[[nodiscard]] inline constexpr SumKernelWeight<W1,W2> operator+(W1 left, W2 right) noexcept {
 		return SumKernelWeight<W1,W2>{left, right};
+	}
+	template<typename T, IsKernelWeight W>
+	[[nodiscard]] inline constexpr SumKernelWeight<T,W> MakeSumKernelWeight(T scale, W weight) noexcept {
+		return SumKernelWeight<T,W>{scale, weight};
 	}
 
 }

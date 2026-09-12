@@ -4,6 +4,7 @@
 
 #include "fem/forms/util.hpp"
 #include "fem/forms/base_k_linear_kernel.hpp"
+#include "fem/forms/weights.hpp"
 
 #include <concepts>
 #include <type_traits>
@@ -32,10 +33,9 @@ namespace GV {
 	using ZeroBilinearKernel = ZeroKernel<2>;
 	static_assert(IsSymmetricBilinearKernel<ZeroBilinearKernel>);
 
-	template<bool IsWeighted=false>
-	using IdentityBilinearKernel = IdentityKernel<2,IsWeighted>;
-	static_assert(IsSymmetricBilinearKernel<IdentityBilinearKernel<true>>);
-	static_assert(IsSymmetricBilinearKernel<IdentityBilinearKernel<false>>);
+	template<IsKernelWeight Weight=void>
+	using IdentityBilinearKernel = IdentityKernel<2,Weight>;
+	static_assert(IsSymmetricBilinearKernel<IdentityBilinearKernel<void>>);
 
 	///////////////////////////////////////////////////////////////////
 	/// The L2 bilinear kernel for the bilinear form
@@ -43,28 +43,35 @@ namespace GV {
 	///
 	/// Note the index order should be read from right (v) to left (u).
 	///////////////////////////////////////////////////////////////////
-	template<bool IsWeighted=false>
-	struct L2BilinearKernel : public KLinearKernel<2,IsWeighted,2,L2BilinearKernel<IsWeighted>> {
-		using BASE = KLinearKernel<2,IsWeighted,2,L2BilinearKernel<IsWeighted>>;
+	template<IsKernelWeight Weight=void>
+	struct L2BilinearKernel : public KLinearKernel<2,Weight,2,L2BilinearKernel<Weight>> {
+		using BASE = KLinearKernel<2,Weight,2,L2BilinearKernel<Weight>>;
 		static_assert(BASE::IS_SYMMETRIC);
+		template<typename QR>
+		using ValueArgType = BASE::template ValueArgType<QR>;
+		template<typename QR>
+		using GradArgType = BASE::template GradArgType<QR>;
+		template<typename QR>
+		using WeightArgType = BASE::template WeightArgType<QR>;
 		template<typename QR>
 		using ValueArg = typename BASE::template ValueArg<QR>;
 		template<typename QR>
 		using GradArg = typename BASE::template GradArg<QR>;
 		template<typename QR>
 		using WeightArg = typename BASE::template WeightArg<QR>;
-
+		using WeightType = Weight;
+		
 		using BASE::BASE;
 
 		static constexpr std::array<bool,2> NEED_VALS{true,true};
 		static constexpr std::array<bool,2> NEED_GRAD{false,false};
 
 		template<typename QuadRule>
-		[[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(const ValueArg<QuadRule>& vals,	
-				const GradArg<QuadRule>&, const WeightArg<QuadRule>* wt_ptr, const QuadRule& qr) noexcept {
+		[[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(ValueArg<QuadRule> vals,	
+				GradArg<QuadRule>, WeightArg<QuadRule> wt_ptr, const QuadRule& qr) noexcept {
 			//sanity check
 			GUTIL_ASSERT(BASE::IsValArgValid(vals));
-			if constexpr (IsWeighted) {GUTIL_ASSERT(wt_ptr);}
+			if constexpr (BASE::NEEDS_WEIGHT) {GUTIL_ASSERT(wt_ptr);}
 
 			//types and compile constants
 			using Scalar = typename QuadRule::Scalar_t;
@@ -78,7 +85,7 @@ namespace GV {
 			Scalar val{0};
 			GUTIL_SIMD(reduction(+:val))
 			for (int i=0; i<N; ++i) {
-				if constexpr (IsWeighted) {
+				if constexpr (BASE::NEEDS_WEIGHT) {
 					val += u_vals[i] * v_vals[i] * (*wt_ptr)[i] * qw[i];
 				}
 				else {
@@ -89,8 +96,7 @@ namespace GV {
 			return val * qr.jac_det();
 		}
 	};
-	static_assert(IsSymmetricBilinearKernel<L2BilinearKernel<true>>);
-	static_assert(IsSymmetricBilinearKernel<L2BilinearKernel<false>>);
+	static_assert(IsSymmetricBilinearKernel<L2BilinearKernel<void>>);
 
 
 	///////////////////////////////////////////////////////////////////
@@ -99,16 +105,23 @@ namespace GV {
 	///
 	/// Note the index order should be read from right (v) to left (u).
 	///////////////////////////////////////////////////////////////////
-	template<bool IsWeighted=false>
-	struct H1BilinearKernel : public KLinearKernel<2,IsWeighted,2,H1BilinearKernel<IsWeighted>> {
-		using BASE = KLinearKernel<2,IsWeighted,2,H1BilinearKernel<IsWeighted>>;
+	template<IsKernelWeight Weight=void>
+	struct H1BilinearKernel : public KLinearKernel<2,Weight,2,H1BilinearKernel<Weight>> {
+		using BASE = KLinearKernel<2,Weight,2,H1BilinearKernel<Weight>>;
 		static_assert(BASE::IS_SYMMETRIC);
+		template<typename QR>
+		using ValueArgType = BASE::template ValueArgType<QR>;
+		template<typename QR>
+		using GradArgType = BASE::template GradArgType<QR>;
+		template<typename QR>
+		using WeightArgType = BASE::template WeightArgType<QR>;
 		template<typename QR>
 		using ValueArg = typename BASE::template ValueArg<QR>;
 		template<typename QR>
 		using GradArg = typename BASE::template GradArg<QR>;
 		template<typename QR>
 		using WeightArg = typename BASE::template WeightArg<QR>;
+		using WeightType = Weight;
 
 		using BASE::BASE;
 
@@ -116,11 +129,11 @@ namespace GV {
 		static constexpr std::array<bool,2> NEED_GRAD{true,true};
 
 		template<typename QuadRule>
-		[[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(const ValueArg<QuadRule>&,	
-				const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr, const QuadRule& qr) noexcept {
+		[[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(ValueArg<QuadRule>,	
+				GradArg<QuadRule> grad, WeightArg<QuadRule> wt_ptr, const QuadRule& qr) noexcept {
 			//sanity check
 			GUTIL_ASSERT(BASE::IsGradArgValid(grad));
-			if constexpr (IsWeighted) {GUTIL_ASSERT(wt_ptr);}
+			if constexpr (BASE::NEEDS_WEIGHT) {GUTIL_ASSERT(wt_ptr);}
 
 			//types and compile constants
 			using Scalar = typename QuadRule::Scalar_t;
@@ -139,7 +152,7 @@ namespace GV {
 			Scalar val{0};
 			GUTIL_SIMD(reduction(+:val))
 			for (int i=0; i<N; ++i) {
-				if constexpr (IsWeighted) {
+				if constexpr (BASE::NEEDS_WEIGHT) {
 					//note the access pattern is dof->component->value at quad point
 					val += (u_grad[0][i] * v_grad[0][i] * j_i_xx +
 							u_grad[1][i] * v_grad[1][i] * j_i_yy +
@@ -156,8 +169,7 @@ namespace GV {
 			return val * qr.jac_det();
 		}
 	};
-	static_assert(IsSymmetricBilinearKernel<H1BilinearKernel<true>>);
-	static_assert(IsSymmetricBilinearKernel<H1BilinearKernel<false>>);
+	static_assert(IsSymmetricBilinearKernel<H1BilinearKernel<void>>);
 
 
 	///////////////////////////////////////////////////////////////////
@@ -166,16 +178,23 @@ namespace GV {
 	///
 	/// Note the index order should be read from right (v) to left (u).
 	///////////////////////////////////////////////////////////////////
-	template<int Axis, bool IsWeighted=false> requires (0<=Axis && Axis<3)
-	struct ValPartialBilinearForm : KLinearKernel<2,IsWeighted,0,ValPartialBilinearForm<Axis,IsWeighted>> {
-		using BASE = KLinearKernel<2,IsWeighted,0,ValPartialBilinearForm<Axis,IsWeighted>>;
+	template<int Axis, IsKernelWeight Weight> requires (0<=Axis && Axis<3)
+	struct ValPartialBilinearForm : KLinearKernel<2,Weight,0,ValPartialBilinearForm<Axis,Weight>> {
+		using BASE = KLinearKernel<2,Weight,0,ValPartialBilinearForm<Axis,Weight>>;
 		static_assert(!BASE::IS_SYMMETRIC);
+		template<typename QR>
+		using ValueArgType = BASE::template ValueArgType<QR>;
+		template<typename QR>
+		using GradArgType = BASE::template GradArgType<QR>;
+		template<typename QR>
+		using WeightArgType = BASE::template WeightArgType<QR>;
 		template<typename QR>
 		using ValueArg = typename BASE::template ValueArg<QR>;
 		template<typename QR>
 		using GradArg = typename BASE::template GradArg<QR>;
 		template<typename QR>
 		using WeightArg = typename BASE::template WeightArg<QR>;
+		using WeightType = Weight;
 
 		using BASE::BASE;
 
@@ -183,12 +202,12 @@ namespace GV {
 		static constexpr std::array<bool,2> NEED_GRAD{true,false};
 
 		template<typename QuadRule>
-		[[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(const ValueArg<QuadRule>& vals,	
-				const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr, const QuadRule& qr) noexcept {
+		[[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(ValueArg<QuadRule> vals,	
+				GradArg<QuadRule> grad, WeightArg<QuadRule> wt_ptr, const QuadRule& qr) noexcept {
 			//sanity check
 			GUTIL_ASSERT(BASE::IsValArgValid(vals));
 			GUTIL_ASSERT(BASE::IsGradArgValid(grad));
-			if constexpr (IsWeighted) {GUTIL_ASSERT(wt_ptr);}
+			if constexpr (BASE::NEEDS_WEIGHT) {GUTIL_ASSERT(wt_ptr);}
 
 			//types and compile constants
 			using Scalar = typename QuadRule::Scalar_t;
@@ -206,7 +225,7 @@ namespace GV {
 			Scalar val{0};
 			GUTIL_SIMD(reduction(+:val))
 			for (int i=0; i<N; ++i) {
-				if constexpr (IsWeighted) {
+				if constexpr (BASE::NEEDS_WEIGHT) {
 					//note the access pattern is dof->component->value at quad point
 					val += u_vals[i] * v_grad[Axis][i] * (*wt_ptr)[i] * qw[i];
 				}
@@ -219,12 +238,9 @@ namespace GV {
 			return val * j_inv * qr.jac_det();
 		}
 	};
-	static_assert(IsBilinearKernel<ValPartialBilinearForm<0,true>>);
-	static_assert(IsBilinearKernel<ValPartialBilinearForm<1,true>>);
-	static_assert(IsBilinearKernel<ValPartialBilinearForm<2,true>>);
-	static_assert(IsBilinearKernel<ValPartialBilinearForm<0,false>>);
-	static_assert(IsBilinearKernel<ValPartialBilinearForm<1,false>>);
-	static_assert(IsBilinearKernel<ValPartialBilinearForm<2,false>>);
+	static_assert(IsBilinearKernel<ValPartialBilinearForm<0,void>>);
+	static_assert(IsBilinearKernel<ValPartialBilinearForm<1,void>>);
+	static_assert(IsBilinearKernel<ValPartialBilinearForm<2,void>>);
 
 
 	///////////////////////////////////////////////////////////////////
@@ -233,16 +249,23 @@ namespace GV {
 	///
 	/// Note the index order should be read from right (v) to left (u).
 	///////////////////////////////////////////////////////////////////
-	template<int Axis, bool IsWeighted=false> requires (0<=Axis && Axis<3)
-	struct PartialValBilinearForm : KLinearKernel<2,IsWeighted,0,PartialValBilinearForm<Axis,IsWeighted>> {
-		using BASE = KLinearKernel<2,IsWeighted,0,PartialValBilinearForm<Axis,IsWeighted>>;
+	template<int Axis, IsKernelWeight Weight> requires (0<=Axis && Axis<3)
+	struct PartialValBilinearForm : KLinearKernel<2,Weight,0,PartialValBilinearForm<Axis,Weight>> {
+		using BASE = KLinearKernel<2,Weight,0,PartialValBilinearForm<Axis,Weight>>;
 		static_assert(!BASE::IS_SYMMETRIC);
+		template<typename QR>
+		using ValueArgType = BASE::template ValueArgType<QR>;
+		template<typename QR>
+		using GradArgType = BASE::template GradArgType<QR>;
+		template<typename QR>
+		using WeightArgType = BASE::template WeightArgType<QR>;
 		template<typename QR>
 		using ValueArg = typename BASE::template ValueArg<QR>;
 		template<typename QR>
 		using GradArg = typename BASE::template GradArg<QR>;
 		template<typename QR>
 		using WeightArg = typename BASE::template WeightArg<QR>;
+		using WeightType = Weight;
 
 		using BASE::BASE;
 
@@ -250,12 +273,12 @@ namespace GV {
 		static constexpr std::array<bool,2> NEED_GRAD{false,true};
 
 		template<typename QuadRule>
-		[[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(const ValueArg<QuadRule>& vals,	
-				const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr, const QuadRule& qr) noexcept {
+		[[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(ValueArg<QuadRule> vals,	
+				GradArg<QuadRule> grad, WeightArg<QuadRule> wt_ptr, const QuadRule& qr) noexcept {
 			//sanity check
 			GUTIL_ASSERT(BASE::IsValArgValid(vals));
 			GUTIL_ASSERT(BASE::IsGradArgValid(grad));
-			if constexpr (IsWeighted) {GUTIL_ASSERT(wt_ptr);}
+			if constexpr (BASE::NEEDS_WEIGHT) {GUTIL_ASSERT(wt_ptr);}
 
 			//types and compile constants
 			using Scalar = typename QuadRule::Scalar_t;
@@ -273,7 +296,7 @@ namespace GV {
 			Scalar val{0};
 			GUTIL_SIMD(reduction(+:val))
 			for (int i=0; i<N; ++i) {
-				if constexpr (IsWeighted) {
+				if constexpr (BASE::NEEDS_WEIGHT) {
 					//note the access pattern is dof->component->value at quad point
 					val += u_grad[Axis][i] * v_vals[i] * (*wt_ptr)[i] * qw[i];
 				}
@@ -286,10 +309,7 @@ namespace GV {
 			return val * j_inv * qr.jac_det();
 		}
 	};
-	static_assert(IsBilinearKernel<PartialValBilinearForm<0,true>>);
-	static_assert(IsBilinearKernel<PartialValBilinearForm<1,true>>);
-	static_assert(IsBilinearKernel<PartialValBilinearForm<2,true>>);
-	static_assert(IsBilinearKernel<PartialValBilinearForm<0,false>>);
-	static_assert(IsBilinearKernel<PartialValBilinearForm<1,false>>);
-	static_assert(IsBilinearKernel<PartialValBilinearForm<2,false>>);
+	static_assert(IsBilinearKernel<PartialValBilinearForm<0,void>>);
+	static_assert(IsBilinearKernel<PartialValBilinearForm<1,void>>);
+	static_assert(IsBilinearKernel<PartialValBilinearForm<2,void>>);
 }

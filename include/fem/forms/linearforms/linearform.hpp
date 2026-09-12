@@ -81,7 +81,6 @@ namespace GV {
 		//////////////////////////////////////////////////////////////////
 		void evaluate_vector_colored(std::span<T> result) noexcept {
 			// compute result[i]+=L(dof[i])
-			static_assert(!Weight_t::NEEDS_SCALAR_VALS);
 			GUTIL_ASSERT(test_handler.is_current());
 			GUTIL_ASSERT(result.size() == test_handler.n_dofs());
 			GUTIL_ASSERT(mesh.is_color_sorted());
@@ -123,7 +122,6 @@ namespace GV {
 
 		void evaluate_vector(std::span<T> result) noexcept {
 			// compute result[i]+=L(dof[i])
-			static_assert(!Weight_t::NEEDS_SCALAR_VALS);
 			GUTIL_ASSERT(test_handler.is_current());
 			GUTIL_ASSERT(result.size() == test_handler.n_dofs());
 
@@ -229,7 +227,6 @@ namespace GV {
 					test_cache.gather();
 
 					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
-					if constexpr (Weight_t::NEEDS_SCALAR_VALS) {field_cache = test_cache.reconstruct_field(coefs);}
 
 					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
 						wt = weight.template build_weights<QuadRule_t>(&field_cache, quad_rule);

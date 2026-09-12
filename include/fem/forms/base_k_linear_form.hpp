@@ -506,9 +506,9 @@ namespace GV {
 		//////////////////////////////////////////////////////////////
 		/// Aliases and helper classes
 		//////////////////////////////////////////////////////////////
-		using ValueArg  = typename Kernel_t::template ValueArg<QuadRule_t>;  //array of pointers to DofValueCache
-		using GradArg   = typename Kernel_t::template GradArg<QuadRule_t>;	 //array of pointers to DofGradCache
-		using WeightArg = typename Kernel_t::template WeightArg<QuadRule_t>; //pointer to this
+		using ValueArg  = typename Kernel_t::template ValueArgType<QuadRule_t>;  //array of pointers to DofValueCache
+		using GradArg   = typename Kernel_t::template GradArgType<QuadRule_t>;	 //array of pointers to DofGradCache
+		using WeightArg = typename Kernel_t::template WeightArgType<QuadRule_t>; //pointer to this
 
 		//helper class to store the element cache per dofhandler
 		template<typename Seq> struct CacheTupleHelper;
@@ -596,7 +596,6 @@ namespace GV {
 			qr.set_element(el, qr_depth);
 			if constexpr (Kernel_t::NEEDS_WEIGHT) {
 				if constexpr (Weight_t::NEEDS_GEO_POINTS) {qr.build_geometric_coords();}
-				if constexpr (Weight_t::NEEDS_SCALAR_VALS) {GUTIL_ABORT("Not supported");} //TODO: I think we can remove this from the weight
 				wt_cache = weight.template build_weights<QuadRule_t>(nullptr, qr);
 			}
 			build_caches(el);
