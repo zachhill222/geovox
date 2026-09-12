@@ -212,5 +212,6 @@ void test_dof_handler(const TestConfig& cfg) {
 int main(int argc, char* argv[]) {
 	TestConfig cfg = parse_args(argc, argv);
 	test_dof_handler(cfg);
+	gutil::print_all_profiles();
 	return 0;
 }

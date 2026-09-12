@@ -62,6 +62,9 @@ namespace GV {
 		using TestCache_t  = typename BASE::template ElemCache_t<0>;
 		using TrialCache_t = typename BASE::template ElemCache_t<1>;
 
+		static_assert(std::same_as<TestDof_t, typename BASE::template GetDofType<0>>);
+		static_assert(std::same_as<TrialDof_t, typename BASE::template GetDofType<1>>);
+
 		static constexpr bool IS_SYMMETRIC = Kernel_t::IS_SYMMETRIC;
 		static_assert(!Kernel_t::IS_SYMMETRIC || std::same_as<TrialHandler_t,TestHandler_t>,
 			"A symmetric kernel must have the same dofhandlers for the test and trial spaces");
@@ -72,17 +75,17 @@ namespace GV {
 		/// deriving the mesh from the test handler (matching the original's own choice).
 		/// Handlers are passed test-first, trial-second, matching the right-to-left convention.
 		//////////////////////////////////////////////////////////////////
-		BilinearForm(const TrialHandler_t& u_handler, const TestHandler_t& v_handler, KernelType kernel = KernelType{}, KernelWeightType weight = KernelWeightType{}) :
-			BASE(v_handler.mesh, std::move(kernel), std::move(weight), v_handler, u_handler) {}
+		BilinearForm(const TrialHandler_t& u_handler, const TestHandler_t& v_handler, KernelType kernel = KernelType{}, Weight_t weight = Weight_t{}) :
+			BASE(v_handler.mesh, std::move(kernel), std::move(weight)) {BASE::set_handlers(v_handler, u_handler);}
 
-		BilinearForm(const TrialHandler_t& sym_handler, KernelType kernel=KernelType{}, KernelWeightType weight = KernelWeightType{}) requires(Kernel_t::IS_SYMMETRIC) :
-			BASE(sym_handler.mesh, std::move(kernel), std::move(weight), sym_handler, sym_handler) {}
+		BilinearForm(const TrialHandler_t& sym_handler, KernelType kernel=KernelType{}, Weight_t weight = Weight_t{}) requires(Kernel_t::IS_SYMMETRIC) :
+			BASE(sym_handler.mesh, std::move(kernel), std::move(weight)) {BASE::set_handlers(sym_handler);}
 
 
 		//////////////////////////////////////////////////////////////////
 		/// A few convenience methods
 		//////////////////////////////////////////////////////////////////
-		const TrialHandler_t& test_handler() const noexcept {return this->template get_handler<0>();}
+		const TestHandler_t& test_handler() const noexcept {return this->template get_handler<0>();}
 		const TrialHandler_t& trial_handler() const noexcept {return this->template get_handler<1>();}
 		
 		static const auto& get_test_cache(const typename BASE::KernelEval& k_eval) noexcept {return k_eval.template get_cache<0>();}
@@ -114,7 +117,7 @@ namespace GV {
 		void for_each_element(Action&& action, Init&& init=nullptr, Finalize&& finalize=nullptr) const noexcept {
 			GUTIL_ASSERT(this->template get_handler<0>().is_current());
 			GUTIL_ASSERT(this->template get_handler<1>().is_current());
-			BASE::template for_each_element<Colored>(std::forward<Init>(init), std::forward<Action>(action), std::forward<Finalize>(finalize));
+			BASE::template for_each_element<Colored>(std::forward<Action>(action), std::forward<Init>(init), std::forward<Finalize>(finalize));
 		}
 
 
@@ -140,6 +143,7 @@ namespace GV {
 		template<int LDU_Flag = 0b111, typename KernelEval_t>
 		static void ConstructLocalMatrix(const KernelEval_t& k_eval, size_t u_size, size_t v_size,
 			std::vector<Scalar_t>& local_mat) noexcept requires (Kernel_t::IS_SYMMETRIC) {
+			GUTIL_PROFILE_FUNCTION();
 			GUTIL_ASSERT(u_size==v_size);
 			//assemble the local matrix in column major format
 			local_mat.resize(v_size*v_size);
@@ -163,6 +167,7 @@ namespace GV {
 		//////////////////////////////////////////////////////////////////
 		template<int LDU_Flag=0b111, bool Colored=false> requires (Kernel_t::IS_SYMMETRIC || LDU_Flag==0b111)
 		void mat_vec_multiply_accumulate(std::span<T> Y, std::span<const T> X, const T alpha = T{1}) const noexcept {
+			GUTIL_PROFILE_FUNCTION();
 			GUTIL_ASSERT(X.size()==trial_handler().n_dofs() && Y.size()==test_handler().n_dofs());
 			if constexpr (Colored) {GUTIL_ASSERT(this->mesh().is_color_sorted());}
 			using ThreadData = std::vector<std::vector<T>>;
@@ -202,6 +207,11 @@ namespace GV {
 				}
 				GUTIL_OMP(barrier)
 			});
+		}
+
+		template<int LDU_Flag=0b111> requires (Kernel_t::IS_SYMMETRIC || LDU_Flag==0b111)
+		void mat_vec_multiply_accumulate_colored(std::span<T> Y, std::span<const T> X, const T alpha = T{1}) const noexcept {
+			mat_vec_multiply_accumulate<LDU_Flag,true>(Y,X,alpha);
 		}
 
 

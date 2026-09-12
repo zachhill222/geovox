@@ -231,6 +231,72 @@ namespace GV {
 
 
 	///////////////////////////////////////////////////////////////////
+	/// Store dynamically sized vectors contiguously
+	///////////////////////////////////////////////////////////////////
+	template<typename T, int M>
+	struct DynamicVectorValueCache {
+		///////////////////////////////////////////////////////////////
+		/// M blocks, each of a runtime-determined (possibly different) size,
+		/// stored contiguously in one buffer -- better locality than M
+		/// separately-allocated std::vector<T>s.
+		///////////////////////////////////////////////////////////////
+		using Scalar_t = T;
+
+		std::vector<Scalar_t> val;
+		std::array<size_t,M> offsets{};
+		std::array<size_t,M> sizes{};
+
+		void resize(const std::array<size_t,M>& block_sizes) noexcept {
+			sizes = block_sizes;
+			size_t total = 0;
+			for (int i=0; i<M; ++i) {offsets[i] = total; total += sizes[i];}
+			val.assign(total, Scalar_t{0});
+		}
+
+		[[nodiscard]] Scalar_t* operator[](int i) noexcept {GUTIL_ASSERT(i<M); return val.data() + offsets[i];}
+		[[nodiscard]] const Scalar_t* operator[](int i) const noexcept {GUTIL_ASSERT(i<M); return val.data() + offsets[i];}
+		[[nodiscard]] size_t size(int i) const noexcept {GUTIL_ASSERT(i<M); return sizes[i];}
+		[[nodiscard]] size_t total_size() const noexcept {return val.size();}
+		[[nodiscard]] Scalar_t* data() noexcept {return val.data();}
+		[[nodiscard]] const Scalar_t* data(int i) const noexcept {return val.data();}
+		[[nodiscard]] std::array<std::span<const Scalar_t>,M> to_spans() const noexcept {
+			std::array<std::span<const Scalar_t>,M> spans{};
+			for (int i=0; i<M; ++i) {
+				spans[i] = std::span<const Scalar_t>{(*this)[i], size(i)};
+			}
+			return spans;
+		}
+		[[nodiscard]] std::array<std::span<Scalar_t>,M> to_spans() noexcept {
+			std::array<std::span<Scalar_t>,M> spans{};
+			for (int i=0; i<M; ++i) {
+				spans[i] = std::span<Scalar_t>{(*this)[i], size(i)};
+			}
+			return spans;
+		}
+
+		///////////////////////////////////////////////////////////////
+		/// Component-wise ops over the whole, combined buffer.
+		///////////////////////////////////////////////////////////////
+		DynamicVectorValueCache& operator*=(Scalar_t a) noexcept {
+			GUTIL_SIMD()
+			for (size_t i=0; i<val.size(); ++i) {val[i] *= a;}
+			return *this;
+		}
+		DynamicVectorValueCache& operator*=(const DynamicVectorValueCache& other) noexcept {
+			GUTIL_ASSERT(val.size()==other.val.size());
+			GUTIL_SIMD()
+			for (size_t i=0; i<val.size(); ++i) {val[i] *= other.val[i];}
+			return *this;
+		}
+		DynamicVectorValueCache& operator+=(const DynamicVectorValueCache& other) noexcept {
+			GUTIL_ASSERT(val.size()==other.val.size());
+			GUTIL_SIMD()
+			for (size_t i=0; i<val.size(); ++i) {val[i] += other.val[i];}
+			return *this;
+		}
+	};
+
+	///////////////////////////////////////////////////////////////////
 	/// Utility operations between weights
 	///////////////////////////////////////////////////////////////////
 	template<typename QuadRule_t, int M>
@@ -359,8 +425,8 @@ namespace GV {
 			existing->dofs = handler.get_active_dofs(qr.q_el);
 			const size_t n = existing->dofs.size();
 			existing->global_idx.resize(n);
-			static constexpr bool NEEDS_VALS = Kernel_t::NEEDS_VALS[SlotIndex];
-			static constexpr bool NEEDS_GRAD = Kernel_t::NEEDS_GRAD[SlotIndex];
+			static constexpr bool NEEDS_VALS = Kernel_t::NEED_VALS[SlotIndex];
+			static constexpr bool NEEDS_GRAD = Kernel_t::NEED_GRAD[SlotIndex];
 			if constexpr (NEEDS_VALS) {existing->vals.clear(); existing->vals.reserve(n);}
 			if constexpr (NEEDS_GRAD) {existing->grad.clear(); existing->grad.reserve(n);}
 			for (size_t j=0; j<n; ++j) {
@@ -380,8 +446,8 @@ namespace GV {
 		static void Update(ElementDofCacheNew* existing, const DofStorage_t& storage, const QuadRule_t& qr) noexcept {
 			const size_t n = existing->dofs.size();
 			existing->global_idx.resize(n);
-			static constexpr bool NEEDS_VALS = Kernel_t::NEEDS_VALS[SlotIndex];
-			static constexpr bool NEEDS_GRAD = Kernel_t::NEEDS_GRAD[SlotIndex];
+			static constexpr bool NEEDS_VALS = Kernel_t::NEED_VALS[SlotIndex];
+			static constexpr bool NEEDS_GRAD = Kernel_t::NEED_GRAD[SlotIndex];
 			if constexpr (NEEDS_VALS) {existing->vals.clear(); existing->vals.reserve(n);}
 			if constexpr (NEEDS_GRAD) {existing->grad.clear(); existing->grad.reserve(n);}
 			for (size_t j=0; j<n; ++j) {

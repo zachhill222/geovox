@@ -30,7 +30,7 @@ namespace GV {
 		using MeshElem_t = typename Mesh_t::Elem_t;
 		
 		const Mesh_t& mesh;
-		MeshQuadratureRule(const Mesh_t& mesh) constexpr : 
+		constexpr MeshQuadratureRule(const Mesh_t& mesh) : 
 			mesh(mesh), 
 			support_element(mesh.max_depth+1), 
 			proj_quad_pts(mesh.max_depth+1),

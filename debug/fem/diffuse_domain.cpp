@@ -32,7 +32,7 @@ using CoefHandler_t = GV::CoefHandler<DofHandler_t,Scalar_t,1>;
 
 using InteriorWeight_t	= GV::AssemblyPhaseFieldWeight<true,Assembly_t>;
 using ExteriorWeight_t	= GV::AssemblyPhaseFieldWeight<false,Assembly_t>;
-using BKernel_t      	= GV::L2BilinearKernel<true,true>;
+using BKernel_t      	= GV::L2BilinearKernel<true>;
 using BilinearForm_t    = GV::BilinearForm<4, Scalar_t, DofHandler_t, DofHandler_t, BKernel_t, InteriorWeight_t>;
 using LKernel_t      	= GV::L2LinearKernel<true>;
 using LinearForm_t      = GV::LinearForm<4,Scalar_t,DofHandler_t,LKernel_t,ExteriorWeight_t>;
@@ -142,8 +142,9 @@ int main(int argc, char* argv[]) {
 				std::vector<Scalar_t> vec(d_handler.n_dofs(), 0);
 
 				b_form.mat_vec_multiply_accumulate(GV::as_span(vec), c_handler.get_coefs(0));
-
 				Scalar_t approx = gutil::dot_product_reduce<Scalar_t>(vec, c_handler.get_coefs(0));
+				std::span<const Scalar_t> coefs = c_handler.get_coefs(0);
+				approx = b_form.evaluate(coefs,coefs);
 				GUTIL_LOG("Interor: exact=", interior_exact, " approx=", approx, " err=", std::abs(approx-interior_exact));
 			}
 		}
@@ -244,7 +245,5 @@ int main(int argc, char* argv[]) {
 	
 
 	
-
-
-
+	gutil::print_all_profiles();
 }

@@ -19,14 +19,14 @@ using Elem_t 		= typename Mesh_t::Elem_t;
 using Vert_t		= typename Mesh_t::Vert_t;
 
 using DOF_t         = GV::Keys::DOFS::VoxelQ1<GV_TEST_DOF_PERIOD>;
-using DofHandler_t  = GV::CharmsHandlerQH<Mesh_t,DOF_t>;
+using DofHandler_t  = GV::CharmsHandlerTH<Mesh_t,DOF_t>;
 using DofVert_t     = typename DofHandler_t::DofVert_t;
 using DofElem_t     = typename DofHandler_t::DofElem_t;
 
 using CoefHandler_t = GV::CoefHandler<DofHandler_t,Scalar_t,1>;
 
-using Kernel_t      = GV::L2BilinearKernel<true,false>;
-// using Kernel_t      = GV::H1BilinearKernel<true,false>;
+using Kernel_t      = GV::L2BilinearKernel<>;
+// using Kernel_t      = GV::H1BilinearKernel<>;
 using BilinearForm_t    = GV::BilinearForm<4, Scalar_t, DofHandler_t, DofHandler_t, Kernel_t>;
 
 inline constexpr Box_t domain{ {-1,-1,-1},
@@ -65,12 +65,14 @@ void test_box_domain(Mesh_t& mesh, DofHandler_t& d_handler, CoefHandler_t& c_han
 	{
 		std::vector<Scalar_t> y(d_handler.n_dofs(), 0);
 		// std::vector<Scalar_t> ones(d_handler.n_dofs(), 1);
-		auto coefs = c_handler.get_coefs(0);
+		std::span<const Scalar_t> coefs = c_handler.get_coefs(0);
 
 		GUTIL_TIMER("Test bilinear form vector evaluation (colored)");
-		b_form.mat_vec_multiply_accumulate_colored(GV::as_span(y), coefs);
+		// b_form.mat_vec_multiply_accumulate_colored(GV::as_span(y), coefs);
+		// Scalar_t approx = gutil::dot_product_reduce<Scalar_t>(y,coefs);
+		
+		Scalar_t approx = b_form.evaluate(coefs,coefs);
 
-		Scalar_t approx = gutil::dot_product_reduce<Scalar_t>(y,coefs);
 		GUTIL_LOG("approx=", approx, " exact=", exact, " (error=", std::abs(exact-approx), ")");
 	}
 	mesh.sort_elements_by_depth();
@@ -195,6 +197,7 @@ int main(int argc, char* argv[]) {
 		test_box_domain(mesh, d_handler, c_handler);
 	}
 
+	gutil::print_all_profiles();
 	return 0;
 }
 

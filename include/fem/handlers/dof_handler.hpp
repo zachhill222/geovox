@@ -678,6 +678,7 @@ namespace GV {
 			requires(std::same_as<Elem_t,DofElem_t> || std::same_as<Elem_t,MeshElem_t> ) 
 					&& (std::same_as<Predicate,std::nullptr_t> || std::is_invocable_r_v<bool, Predicate, DOF_t>)
 		[[nodiscard]] std::vector<DOF_t> get_active_dofs(Elem_t el_, Predicate&& pred = nullptr) const noexcept {
+			GUTIL_PROFILE_FUNCTION();
 			GV_ASSERT_ACTIVE_KEYS_STABLE_STATE
 			GV_ASSERT_KEY_MASK_STABLE_STATE
 

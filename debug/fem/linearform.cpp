@@ -231,7 +231,8 @@ int main(int argc, char* argv[]) {
 		GUTIL_TIMER("Unrefined mesh");
 		test_box_domain(mesh, d_handler, c_handler);
 	}
-
+	
+	gutil::print_all_profiles();
 	return 0;
 }
 

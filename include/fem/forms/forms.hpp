@@ -17,12 +17,12 @@ namespace GV {
 	///////////////////////////////////////////////////////////////
 	/// A few common aliases
 	///////////////////////////////////////////////////////////////
-	using H1BilinearKernel_S  = GV::H1BilinearKernel<true,false>;	//symetric, non-weighted
-	using H1BilinearKernel_SW = GV::H1BilinearKernel<true,true>;	//symetric, weighted
-	using L2BilinearKernel_S  = GV::L2BilinearKernel<true,false>;	//symetric, non-weighted
-	using L2BilinearKernel_SW = GV::L2BilinearKernel<true,true>;	//symetric, weighted
+	using H1BilinearKernel_S  = GV::H1BilinearKernel<false>;	//symetric, non-weighted
+	using H1BilinearKernel_SW = GV::H1BilinearKernel<true>;		//symetric, weighted
+	using L2BilinearKernel_S  = GV::L2BilinearKernel<false>;	//symetric, non-weighted
+	using L2BilinearKernel_SW = GV::L2BilinearKernel<true>;		//symetric, weighted
 
-	using L2LinearKernel_W    = GV::L2LinearKernel<true>;			//weighted
+	using L2LinearKernel_W    = GV::L2LinearKernel<true>;		//weighted
 
 
 	///////////////////////////////////////////////////////////////

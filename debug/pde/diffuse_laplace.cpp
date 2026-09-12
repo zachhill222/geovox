@@ -100,8 +100,8 @@ using ExteriorWeight_t = GV::AssemblyPhaseFieldWeight<false, Assembly_t>;
 using SourceWeight_t   = GV::ProductKernelWeight<InteriorWeight_t, GV::ModifiedFunctionKernelWeight<Assembly_t, f_source>>;
 using BoundaryWeight_t = GV::ProductKernelWeight<ExteriorWeight_t, GV::ModifiedFunctionKernelWeight<Assembly_t, g_boundary>>;
 
-using LaplaceKernel_t  = GV::H1BilinearKernel<true,true>;
-using PenaltyKernel_t  = GV::L2BilinearKernel<true,true>;
+using LaplaceKernel_t  = GV::H1BilinearKernel<true>;
+using PenaltyKernel_t  = GV::L2BilinearKernel<true>;
 
 using LaplaceForm_t  = GV::BilinearForm<4, Scalar_t, DofHandler_t, DofHandler_t, LaplaceKernel_t, InteriorWeight_t>;
 using SourceForm_t   = GV::LinearForm<4, Scalar_t, DofHandler_t, GV::L2LinearKernel<true>, SourceWeight_t>;
@@ -213,10 +213,10 @@ int main(int argc, char* argv[]) {
 			GUTIL_TIMER("Solving (CG)");
 			Eigen::ConjugateGradient<EigenSpMat, Eigen::Lower|Eigen::Upper, Preconditioner_t> solver;
 			solver.compute(A);
-			solver.preconditioner().setup([&](std::vector<Scalar_t>& diag){
-				laplace_form.construct_lumped_diagonal(GV::as_span(diag));
-				penalty_form.construct_lumped_diagonal(GV::as_span(diag));
-			});
+			// solver.preconditioner().setup([&](std::vector<Scalar_t>& diag){
+			// 	laplace_form.construct_lumped_diagonal(GV::as_span(diag));
+			// 	penalty_form.construct_lumped_diagonal(GV::as_span(diag));
+			// });
 			
 			// Eigen::ConjugateGradient<decltype(lhs_op), Eigen::Lower|Eigen::Upper, Eigen::IdentityPreconditioner> solver;
 			// Eigen::ConjugateGradient<decltype(lhs_op), Eigen::Lower|Eigen::Upper, Preconditioner_t> solver;

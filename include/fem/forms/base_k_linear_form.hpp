@@ -30,16 +30,25 @@ namespace GV {
 		/// the same dofhandler.
 		//////////////////////////////////////////////////////////////////
 		static constexpr size_t K = KernelType::K;
-		static constexpr size_t N_HANDLERS = sizeof...(HandlerTypes);
 		static constexpr size_t N_SYMMETRIC = KernelType::N_SYMMETRIC;
+		static constexpr size_t N_HANDLERS  = (N_SYMMETRIC==0) ? K : (K - N_SYMMETRIC + 1);	//number of required handlers
 
-		static_assert(KernelType::K == 0 || (N_SYMMETRIC==0 ? (N_HANDLERS==KernelType::K) : 
-											(KernelType::K == (N_HANDLERS + N_SYMMETRIC) - 1)),
-			"Kernel and handlers must have compatible sizes");
+		//The KLinearForm type must be set using the full dofhandler types
+		//but the first N_SYMMETRIC must be identical and only one handler
+		//will be stored for those arguments.
 		using HandlerTuple = std::tuple<HandlerTypes...>;
-
-		template<size_t Index>
+		
+		template<size_t Index> requires (Index<K)
 		using HandlerType = std::tuple_element_t<Index, HandlerTuple>;
+		
+		static_assert(KernelType::K == sizeof...(HandlerTypes), 
+			"Must supply exactly K handler types (one per kernel argument)");
+		
+		static_assert([]<size_t... Is>(std::index_sequence<Is...>) {
+			return (std::same_as<HandlerType<Is>, HandlerType<0>> && ...);
+		}(std::make_index_sequence<N_SYMMETRIC>{}),
+			"Symmetric slots must all use the same handler type.");
+
 
 		static constexpr size_t GetHandlerIndex(size_t k) noexcept {
 			if constexpr (N_SYMMETRIC==0) {return k;}
@@ -92,7 +101,7 @@ namespace GV {
 		/// Constructors
 		//////////////////////////////////////////////////////////////////
 		KLinearForm(const Mesh_t& m, KernelType k, Weight_t w, const HandlerTypes&... hs) :
-			mesh_ptr(&m), kernel{std::move(k)}, weight{std::move(w)}, handlers{static_cast<const void*>(&hs)...} {}
+			mesh_ptr(&m), kernel{std::move(k)}, weight{std::move(w)} {set_handlers(hs...);}
 
 		KLinearForm(const Mesh_t& m, KernelType k = KernelType{}, Weight_t w = Weight_t{}) :
 			mesh_ptr(&m), kernel{std::move(k)}, weight{std::move(w)}, handlers{} {}
@@ -107,30 +116,41 @@ namespace GV {
 		//////////////////////////////////////////////////////////////////
 		/// Setters and getters
 		//////////////////////////////////////////////////////////////////
+		void set_handlers(const HandlerTypes&... hs) {
+			std::array<const void*,K> full_handlers{static_cast<const void*>(&hs)...};
+
+			for (size_t k=0; k<N_SYMMETRIC; ++k) {
+				if (full_handlers[k]!=full_handlers[0]) {GUTIL_ABORT("symmetric block has different dofhandlers");}
+			}
+
+			[&]<size_t... Is>(std::index_sequence<Is...>) {
+				((handlers[Is] = full_handlers[GetFormPosition(Is)]), ...);
+			}(std::make_index_sequence<N_HANDLERS>{});
+		}
+
+
+		//set the handlers with one handler per variable
+		//symmetric components must use the same handler
+		template<typename... Handlers> requires (
+			sizeof...(Handlers)==N_HANDLERS && N_HANDLERS<K &&
+			[]<size_t... Is>(std::index_sequence<Is...>) {
+				return (std::same_as<std::tuple_element_t<Is, std::tuple<Handlers...>>, HandlerType<GetFormPosition(Is)>> && ...);
+			}(std::make_index_sequence<N_HANDLERS>{})
+		)
+		void set_handlers(const Handlers&... hs) {
+			handlers = std::array<const void*,N_HANDLERS>{static_cast<const void*>(&hs)...};
+		}
+
+
 		[[nodiscard]] const Mesh_t& mesh() const noexcept {GUTIL_ASSERT(mesh_ptr); return *mesh_ptr;}
 		void set_mesh(const Mesh_t& m) noexcept {mesh_ptr = &m;}
 
 		template<size_t k> requires (k < K)
-		[[nodiscard]] const GetHandlerType<k>& get_handler() const noexcept {
+		[[nodiscard]] const HandlerType<k>& get_handler() const noexcept {
 			static constexpr size_t Index = GetHandlerIndex(k);
-			return *reinterpret_cast<const HandlerType<Index>*>(handlers[Index]);
+			static_assert(std::same_as<HandlerType<k>, GetHandlerType<Index>>);
+			return *reinterpret_cast<const HandlerType<k>*>(handlers[Index]);
 		}
-
-		template<size_t k> requires (k < K)
-		void set_handler(const GetHandlerType<k>& h) noexcept {
-			static constexpr size_t Index = GetHandlerIndex(k);
-			handlers[Index] = &h;
-		}
-
-		[[nodiscard]] const auto& handler0() const noexcept requires (K>0) {return get_handler<0>();}
-		[[nodiscard]] const auto& handler1() const noexcept requires (K>1) {return get_handler<1>();}
-		[[nodiscard]] const auto& handler2() const noexcept requires (K>2) {return get_handler<2>();}
-		[[nodiscard]] const auto& handler3() const noexcept requires (K>3) {return get_handler<3>();}
-
-		void set_handler0(const GetHandlerType<0>& h) noexcept requires (K>0) {set_handler<0>(h);}
-		void set_handler1(const GetHandlerType<1>& h) noexcept requires (K>1) {set_handler<1>(h);}
-		void set_handler2(const GetHandlerType<2>& h) noexcept requires (K>2) {set_handler<2>(h);}
-		void set_handler3(const GetHandlerType<3>& h) noexcept requires (K>3) {set_handler<3>(h);}
 
 	protected:
 		//////////////////////////////////////////////////////////////////
@@ -184,7 +204,6 @@ namespace GV {
 
 		template<bool Colored=false, typename Action, typename Init = std::nullptr_t,  typename Finalize= std::nullptr_t>
 		void for_each_element(Action&& action, Init&& init=nullptr, Finalize&& finalize=nullptr) const noexcept {
-			GUTIL_PROFILE_FUNCTION();
 			static constexpr bool HAS_INIT = std::is_invocable_r_v<void, Init&, size_t, size_t>;
 			static constexpr bool HAS_FINALIZE = std::is_invocable_r_v<void, Finalize&, size_t, size_t>;
 
@@ -194,7 +213,7 @@ namespace GV {
 					KernelEval k_eval(*this);
 					const gutil::OmpIndexRange dummy_range(size_t{0});//get n_threads and tid
 					if constexpr (HAS_INIT) {init(dummy_range.n_threads, dummy_range.tid);}
-					for (size_t clr=0; clr<mesh().n_colors(); ++clr) {
+					for (int clr=0; clr<mesh().n_colors(); ++clr) {
 						auto quad_elems = mesh().get_color(clr);
 						const gutil::OmpIteratorRange range(quad_elems.begin(), quad_elems.end());
 						ApplyActionOverRange(range, k_eval, action);
@@ -219,7 +238,6 @@ namespace GV {
 		template<bool Colored=false, typename Action, typename Init = std::nullptr_t,  typename Finalize= std::nullptr_t>
 		void for_each_element(uint8_t which, const gutil::BinSortVector<typename HandlerTypes::DOF_t>&... bin_sorts, 
 				Action&& action, Init&& init=nullptr, Finalize&& finalize=nullptr) const noexcept {
-			GUTIL_PROFILE_FUNCTION();
 			static constexpr bool HAS_INIT = std::is_invocable_r_v<void, Init&, size_t, size_t>;
 			static constexpr bool HAS_FINALIZE = std::is_invocable_r_v<void, Finalize&, size_t, size_t>;
 
@@ -264,6 +282,16 @@ namespace GV {
 			for (size_t i=0; i<n; ++i) {local_x[i] = X[dof_cache.global_idx[i]];}
 		}
 
+		template<typename Cache_t, typename VecX>
+		static void GatherLocalVector(std::span<const Scalar_t> X, const Cache_t& dof_cache, VecX&& local_x) noexcept {
+			//dof_cache has the dof values and global numbers for test/trial dofs whose support overlaps the current element
+			//for allowing simd operations and better memory caching, it is often best to copy/gather the (spread out)
+			//X-values into contiguous values.
+			const size_t n = dof_cache.global_idx.size();
+			//assume local_x is correctly sized
+			for (size_t i=0; i<n; ++i) {local_x[i] = X[dof_cache.global_idx[i]];}
+		}
+
 		template<bool Atomic, typename Cache_t>
 		static void ScatterLocalVector(std::span<Scalar_t> Y, const Cache_t& dof_cache, std::span<const Scalar_t> local_y, Scalar_t alpha) noexcept {
 			//increment Y by alpha*y_local with the local to global index conversion supplied by the cache.
@@ -295,13 +323,14 @@ namespace GV {
 		/// A few fallback/generic methods.
 		/// Note that coefficients are indexed right to left.
 		//////////////////////////////////////////////////////////////////
+	public:
 		template<typename... Spans> requires (sizeof...(Spans)==K && AllArgsSameAs<std::span<const Scalar_t>, Spans...>)
 		[[nodiscard]] Scalar_t evaluate(Spans... x_spans) const noexcept {
 			GUTIL_PROFILE_FUNCTION();
 			std::array<std::span<const Scalar_t>, K> X{x_spans...};
 
 			std::vector<std::vector<Scalar_t>> t_thread_resource;
-			std::vector<std::array<std::vector<Scalar_t>, K>> t_local_x;
+			std::vector<DynamicVectorValueCache<Scalar_t,K>> t_local_x;
 			std::vector<Scalar_t> t_val;
 
 			this->for_each_element(
@@ -310,28 +339,18 @@ namespace GV {
 				auto& thread_resource = t_thread_resource[range.tid];
 				auto& local_x = t_local_x[range.tid];
 
-				auto tensor = k_eval.make_local_tensor(thread_resource);
+				std::array<size_t,K> sizes;
+				[&]<size_t... Slot>(std::index_sequence<Slot...>) {
+					((sizes[Slot] = std::get<GetHandlerIndex(Slot)>(k_eval.dof_caches).global_idx.size()), ...);
+				}(std::make_index_sequence<K>{});
+				local_x.resize(sizes);
 
 				[&]<size_t... Slot>(std::index_sequence<Slot...>) {
 					(GatherLocalVector(X[Slot], std::get<GetHandlerIndex(Slot)>(k_eval.dof_caches), local_x[Slot]), ...);
 				}(std::make_index_sequence<K>{});
 
-				//scatter the multiplication of each local vector across the local tensor
-				//then sum the entries of the tensor.
-				Scalar_t* data = tensor.data();
-				for (size_t s=0; s<K; ++s) {
-					for (size_t i=0; i<tensor.dim(s); ++i) {
-						const Scalar_t x_val = local_x[s][i];
-						tensor.apply_along_axis_index_simd(s,i, [x_val](Scalar_t& val) {val *= x_val;});
-					}
-				}
-
-				//sum the tensor entries
-				Scalar_t elem_val{0};
-				GUTIL_SIMD(reduction(+:elem_val))
-				for (size_t flat=0; flat<tensor.size(); ++flat) {elem_val += data[flat];}
-
-				t_val[range.tid] += elem_val;
+				k_eval.make_local_tensor(thread_resource);
+				t_val[range.tid] += gutil::Tensor<T,K>::EvaluateKFormConsume(thread_resource, local_x.to_spans(), std::move(sizes));
 			},
 			//init
 			[&](size_t n_threads, size_t tid) {
@@ -347,6 +366,96 @@ namespace GV {
 			Scalar_t total{0};
 			for (Scalar_t v : t_val) {total += v;}
 			return total;
+		}
+
+
+		//build a sparse matrix in COO format. allow specifying which variable to use for rows/columns
+		//and supplying variables of the other fields to contract with.
+		template<size_t RowSlot, size_t ColSlot, typename Triplet_t, typename... ExtraSpans> requires (
+			RowSlot<K && ColSlot<K && RowSlot!=ColSlot &&
+			sizeof...(ExtraSpans)==K-2 &&
+			(std::same_as<ExtraSpans,std::span<const Scalar_t>> && ...)
+		)
+		void build_triplets(std::vector<Triplet_t>& triplets, size_t row_offset, size_t col_offset, ExtraSpans... extra_spans) const noexcept {
+			GUTIL_PROFILE_FUNCTION();
+			std::array<std::span<const Scalar_t>, K-2> X_extra{extra_spans...};
+
+			static constexpr std::array<size_t,K-2> ExtraSlots = []() {
+				std::array<size_t,K-2> result{};
+				size_t pos = 0;
+				for (size_t s=0; s<K; ++s) {
+					if (s!=RowSlot && s!=ColSlot) {result[pos++] = s;}
+				}
+				return result;
+			}();
+
+			std::vector<std::vector<Scalar_t>> t_thread_resource;
+			std::vector<DynamicVectorValueCache<Scalar_t,K-2>> t_local_extra;
+			std::vector<std::vector<Triplet_t>> t_coo;
+
+			this->for_each_element(
+			[&](auto& k_eval, const auto& range) {
+				auto& thread_resource = t_thread_resource[range.tid];
+				auto& local_extra = t_local_extra[range.tid];
+				auto& coo = t_coo[range.tid];
+
+				std::array<size_t,K-2> extra_sizes;
+				[&]<size_t... Idx>(std::index_sequence<Idx...>) {
+					((extra_sizes[Idx] = std::get<GetHandlerIndex(ExtraSlots[Idx])>(k_eval.dof_caches).global_idx.size()), ...);
+				}(std::make_index_sequence<K-2>{});
+				local_extra.resize(extra_sizes);
+
+				[&]<size_t... Idx>(std::index_sequence<Idx...>) {
+					(GatherLocalVector(X_extra[Idx], std::get<GetHandlerIndex(ExtraSlots[Idx])>(k_eval.dof_caches), local_extra[Idx]), ...);
+				}(std::make_index_sequence<K-2>{});
+
+				//make_local_tensor now returns void and mutates thread_resource in place --
+				//construct a local, non-owning view over the already-populated buffer.
+				k_eval.make_local_tensor(thread_resource);
+				gutil::RawTensorBase<Scalar_t,K,false> tensor(thread_resource.data(), k_eval.make_local_tensor_size());
+
+				auto extra_spans_view = local_extra.to_spans();
+				for (size_t idx=0; idx<K-2; ++idx) {
+					tensor.contract_axis_vector(ExtraSlots[idx], extra_spans_view[idx].data());
+				}
+
+				const auto& row_cache = std::get<GetHandlerIndex(RowSlot)>(k_eval.dof_caches);
+				const auto& col_cache = std::get<GetHandlerIndex(ColSlot)>(k_eval.dof_caches);
+				const size_t v_size = row_cache.dofs.size(), u_size = col_cache.dofs.size();
+
+				std::array<size_t,K> idx{};
+				for (size_t j=0; j<u_size; ++j) {
+					idx[ColSlot] = j;
+					for (size_t i=0; i<v_size; ++i) {
+						idx[RowSlot] = i;
+						coo.emplace_back(row_offset + row_cache.global_idx[i], col_offset + col_cache.global_idx[j], tensor(idx));
+					}
+				}
+			},
+			[&](size_t n_threads, size_t tid) {
+				GUTIL_OMP(single)
+				{
+					t_thread_resource.resize(n_threads);
+					t_local_extra.resize(n_threads);
+					t_coo.resize(n_threads);
+				}
+				GUTIL_OMP(barrier)
+			},
+			[&](size_t n_threads, size_t tid) {
+				Triplet_t::Compress(t_coo[tid]);
+				t_coo[tid].shrink_to_fit();
+				GUTIL_OMP(barrier)
+				for (size_t stride=1; stride<n_threads; stride*=2) {
+					if (tid % (2*stride) == 0 && tid+stride < n_threads) {
+						Triplet_t::Merge(t_coo[tid], t_coo[tid+stride]);
+					}
+					GUTIL_OMP(barrier)
+				}
+			});
+
+			triplets.insert(triplets.end(),
+				std::make_move_iterator(t_coo[0].begin()),
+				std::make_move_iterator(t_coo[0].end()));
 		}
 	};
 
@@ -435,7 +544,7 @@ namespace GV {
 			if constexpr (K==0) {qr_depth = 0;}
 			else {
 				qr_depth = [&]<size_t... Is>(std::index_sequence<Is...>) {
-					return std::min((uint8_t)kform.mesh().max_depth, gutil::max(kform.template get_handler<Is>().max_depth_distance()...));
+					return std::min((uint8_t)kform.mesh().max_depth, gutil::max(kform.template get_handler<Is>().max_depth_distance...));
 				}(std::make_index_sequence<K>{});
 			}
 		}
@@ -474,6 +583,7 @@ namespace GV {
 		/// symmetry so that other methods can be fairly generic and efficient.
 		//////////////////////////////////////////////////////////////
 		void build_caches(MeshElem_t el) noexcept {
+			GUTIL_PROFILE_FUNCTION(N_HANDLERS);
 			if (!using_snapshot) {
 				//call the cache updates using the dof_handlers
 				[&]<size_t... Is>(std::index_sequence<Is...>) {
@@ -545,20 +655,88 @@ namespace GV {
 			}(std::make_index_sequence<K>{});
 		}
 
-		gutil::TensorWrapper<Scalar_t,K> make_local_tensor(std::vector<Scalar_t>& thread_resource) const noexcept {
-			gutil::TensorWrapper<Scalar_t,K> tensor(thread_resource, make_local_tensor_size());
-			
-			Scalar_t* data = tensor.data();
+		void make_local_tensor(std::vector<Scalar_t>& thread_resource) const noexcept requires (K==2 && N_SYMMETRIC==2) {
+			GUTIL_PROFILE_FUNCTION("SymmetricBilinearForm");
+			const size_t n = std::get<0>(dof_caches).dofs.size();
+			thread_resource.resize(n*n);
+			for (size_t j=0; j<n; ++j) {
+				thread_resource[j+j*n] = (*this)({j,j});
+				for (size_t i=j+1; i<n; ++i) {
+					const Scalar_t val = (*this)({i,j});
+					thread_resource[i+j*n] = val;
+					thread_resource[j+i*n] = val;
+				}
+			}
+		}
+
+		void make_local_tensor(std::vector<Scalar_t>& thread_resource) const noexcept requires (!(K==2 && N_SYMMETRIC==2)) {
+			GUTIL_PROFILE_FUNCTION(N_SYMMETRIC);
+			const std::array<size_t,K> dims = make_local_tensor_size();
+			const size_t total = gutil::product_reduce(dims);
+			thread_resource.resize(total);
+
+			using Tensor = gutil::Tensor<T,K>;
+			// gutil::TensorWrapper<Scalar_t,K> tensor(thread_resource, make_local_tensor_size());
+
+			// Scalar_t* data = thread_resource.data();
 			std::array<size_t,K> local_idx;
-			
-			for (size_t flat=0; flat<tensor.size(); ++flat) {
-				//invert the flat index to get the tensor index
-				tensor.flat_to_tensor_index(flat, local_idx);
-				data[flat] = (*this)(local_idx);
-				GUTIL_ASSERT(data[flat] == tensor(local_idx));
+
+			if constexpr (N_SYMMETRIC==0) {
+				for (size_t flat=0; flat<total; ++flat) {
+					// tensor.flat_to_tensor_index(flat, local_idx);
+					Tensor::FlatToTensorIndex(flat, local_idx, dims);
+					thread_resource[flat] = (*this)(local_idx);
+				}
+			}
+			else {
+				//canonicalize: sorts the first N_SYMMETRIC entries of idx into the
+				//minimum-flat-index order -- descending, since column-major storage
+				//weights earlier slots by smaller strides, so the smallest flat index
+				//comes from putting the largest values there. Returns whether idx was
+				//already in that order. note that dimensions of the tensor along each
+				//symmetric axis is constant.
+				auto canonicalize = [](std::array<size_t,K>& idx) noexcept -> bool {
+					if constexpr (N_SYMMETRIC==2) {
+						//by far the most common case (symmetric bilinear forms) --
+						//a direct compare-and-swap, no loop overhead at all.
+						if (idx[0] >= idx[1]) {return true;}
+						std::swap(idx[0], idx[1]);
+						return false;
+					}
+					else {
+						//general fallback: single-pass insertion sort.
+						bool was_canonical = true;
+						for (size_t a=1; a<N_SYMMETRIC; ++a) {
+							const size_t val = idx[a];
+							size_t b = a;
+							while (b>0 && idx[b-1]<val) {
+								idx[b] = idx[b-1];
+								--b;
+								was_canonical = false;
+							}
+							idx[b] = val;
+						}
+						return was_canonical;
+					}
+				};
+
+				for (size_t flat=0; flat<total; ++flat) {
+					Tensor::FlatToTensorIndex(flat, local_idx, dims);
+					// tensor.flat_to_tensor_index(flat, local_idx);
+
+					if (canonicalize(local_idx)) {
+						thread_resource[flat] = (*this)(local_idx);
+					}
+					else {
+						//local_idx is now the canonical version; its flat index is <= the
+						//current one, so it's guaranteed already computed by a prior iteration.
+						// thread_resource[flat] = thread_resource[tensor.flat_index(local_idx)];
+						thread_resource[flat] = thread_resource[Tensor::FlatIndex(flat, local_idx, dims)];
+					}
+				}
 			}
 
-			return tensor;
+			// return tensor;
 		}
 	};
 }

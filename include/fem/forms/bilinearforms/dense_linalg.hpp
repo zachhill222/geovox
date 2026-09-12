@@ -41,6 +41,7 @@ namespace GV {
 
 	template<typename T>
 	inline constexpr void germ_mv(T* y, const size_t M, const T* x, const size_t N, const T* mat) {
+		GUTIL_PROFILE_FUNCTION();
 		GUTIL_ASSERT(y && x && mat && M>0 && N>0);
 		// Compute y += A*x
 		// row major: A(i,j) = mat[j + i*N]
@@ -61,6 +62,7 @@ namespace GV {
 
 	template<typename T>
 	inline constexpr void gecm_mv(T* y, const size_t M, const T* x, const size_t N, const T* mat) {
+		GUTIL_PROFILE_FUNCTION();
 		GUTIL_ASSERT(y && x && mat && M>0 && N>0);
 		// Compute y += A*x
 		// col major: A(i,j) = mat[i + j*M]
@@ -79,6 +81,7 @@ namespace GV {
 
 	template<typename T>
 	inline constexpr T gecm_vmv(const T* y, const size_t M, const T* x, const size_t N, const T* mat) {
+		GUTIL_PROFILE_FUNCTION();
 		GUTIL_ASSERT(y && x && mat && M>0 && N>0);
 		// Compute y^t*A*x
 		// col major: A(i,j) = mat[i + j*M]

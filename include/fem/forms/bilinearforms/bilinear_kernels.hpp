@@ -60,14 +60,14 @@ namespace GV {
 		static constexpr std::array<bool,2> NEED_GRAD{false,false};
 
 		template<typename QuadRule>
-		[[nodiscard]] static typename QuadRule::Scalar CachedEvalImpl(const ValueArg<QuadRule>& vals,	
+		[[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(const ValueArg<QuadRule>& vals,	
 				const GradArg<QuadRule>&, const WeightArg<QuadRule>* wt_ptr, const QuadRule& qr) noexcept {
 			//sanity check
 			GUTIL_ASSERT(BASE::IsValArgValid(vals));
 			if constexpr (IsWeighted) {GUTIL_ASSERT(wt_ptr);}
 
 			//types and compile constants
-			using Scalar = typename QuadRule::Scalar;
+			using Scalar = typename QuadRule::Scalar_t;
 			static constexpr int N = QuadRule::TOTAL_QUAD_POINTS;
 			static constexpr auto qw = QuadRule::quad_w();
 
@@ -116,14 +116,14 @@ namespace GV {
 		static constexpr std::array<bool,2> NEED_GRAD{true,true};
 
 		template<typename QuadRule>
-		[[nodiscard]] static typename QuadRule::Scalar CachedEvalImpl(const ValueArg<QuadRule>&,	
+		[[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(const ValueArg<QuadRule>&,	
 				const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr, const QuadRule& qr) noexcept {
 			//sanity check
 			GUTIL_ASSERT(BASE::IsGradArgValid(grad));
 			if constexpr (IsWeighted) {GUTIL_ASSERT(wt_ptr);}
 
 			//types and compile constants
-			using Scalar = typename QuadRule::Scalar;
+			using Scalar = typename QuadRule::Scalar_t;
 			static constexpr int N = QuadRule::TOTAL_QUAD_POINTS;
 			static constexpr auto qw = QuadRule::quad_w();
 
@@ -183,7 +183,7 @@ namespace GV {
 		static constexpr std::array<bool,2> NEED_GRAD{true,false};
 
 		template<typename QuadRule>
-		[[nodiscard]] static typename QuadRule::Scalar CachedEvalImpl(const ValueArg<QuadRule>& vals,	
+		[[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(const ValueArg<QuadRule>& vals,	
 				const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr, const QuadRule& qr) noexcept {
 			//sanity check
 			GUTIL_ASSERT(BASE::IsValArgValid(vals));
@@ -191,7 +191,7 @@ namespace GV {
 			if constexpr (IsWeighted) {GUTIL_ASSERT(wt_ptr);}
 
 			//types and compile constants
-			using Scalar = typename QuadRule::Scalar;
+			using Scalar = typename QuadRule::Scalar_t;
 			static constexpr int N = QuadRule::TOTAL_QUAD_POINTS;
 			static constexpr auto qw = QuadRule::quad_w();
 
@@ -250,7 +250,7 @@ namespace GV {
 		static constexpr std::array<bool,2> NEED_GRAD{false,true};
 
 		template<typename QuadRule>
-		[[nodiscard]] static typename QuadRule::Scalar CachedEvalImpl(const ValueArg<QuadRule>& vals,	
+		[[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(const ValueArg<QuadRule>& vals,	
 				const GradArg<QuadRule>& grad, const WeightArg<QuadRule>* wt_ptr, const QuadRule& qr) noexcept {
 			//sanity check
 			GUTIL_ASSERT(BASE::IsValArgValid(vals));
@@ -258,7 +258,7 @@ namespace GV {
 			if constexpr (IsWeighted) {GUTIL_ASSERT(wt_ptr);}
 
 			//types and compile constants
-			using Scalar = typename QuadRule::Scalar;
+			using Scalar = typename QuadRule::Scalar_t;
 			static constexpr int N = QuadRule::TOTAL_QUAD_POINTS;
 			static constexpr auto qw = QuadRule::quad_w();
 
