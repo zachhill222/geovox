@@ -20,7 +20,7 @@ int main() {
 	stokes.eps_scale = 2;
 
 	stokes.inner_iter.max_iter = 1000;
-	stokes.outer_iter.max_iter = 50;
+	stokes.outer_iter.max_iter = 1000;
 	stokes.initialize(2);
 	stokes.update_eps();
 
@@ -41,5 +41,7 @@ int main() {
 
 	std::cout << "Done. n_pressure_dofs=" << stokes.p_handler.n_dofs()
 	          << " n_velocity_dofs=" << stokes.u_handler.n_dofs() << "\n";
+	
+	gutil::print_all_profiles();
 	return 0;
 }

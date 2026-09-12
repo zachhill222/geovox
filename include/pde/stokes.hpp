@@ -340,6 +340,13 @@ namespace GV {
 			Gt_form1.build_triplets(triplets, 3*n_v, 1*n_v);
 			Gt_form2.build_triplets(triplets, 3*n_v, 2*n_v);
 
+			size_t n = G_form0.n_cols() + 3*n_v;
+			for (const auto& t : triplets) {
+				if(!(t.row() >= 0 && (size_t)t.row() < n && t.col() >= 0 && (size_t)t.col() < n)) {
+					std::cout << t << std::endl;
+					GUTIL_ABORT("out of range");
+				}
+			}
 			return triplets;
 		}
 

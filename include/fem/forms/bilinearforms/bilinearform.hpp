@@ -383,77 +383,88 @@ namespace GV {
 		///////////////////////////////////////////////////////////////
 		template<int LDU_Flag=0b111, typename Triplet_t> requires (LDU_Flag==0b111 || Kernel_t::IS_SYMMETRIC)
 		void build_triplets(std::vector<Triplet_t>& triplets, const size_t row_offset=0, const size_t col_offset=0) const noexcept {
-			GUTIL_PROFILE_FUNCTION();
-			
-			std::vector<std::vector<T>> t_local_mat;
-			std::vector<std::vector<Triplet_t>> t_coo;
-			
-			for_each_element(
-			//action
-			[&](auto& k_eval, const auto& range){
-				auto& local_mat   = t_local_mat[range.tid];
-				auto& coo         = t_coo[range.tid];
-				auto& test_cache  = std::get<0>(k_eval.dof_caches);
-				auto& trial_cache = std::get<1>(k_eval.dof_caches);
-
-				const size_t u_size=trial_cache.dofs.size(), v_size=test_cache.dofs.size();
-				ConstructLocalMatrix<LDU_Flag>(k_eval, u_size, v_size, local_mat);
-				
-				//add triplets, only loop throught the lower block of indices
-				for (size_t j=0; j<u_size; ++j) {
-					if constexpr (LDU_Flag&0b010) {
-						coo.emplace_back(
-							row_offset + test_cache.global_idx[j],
-							col_offset + trial_cache.global_idx[j],
-							local_mat[j + j*u_size]);
-					}
-
-					for (size_t i=j+1; i<v_size; ++i) {
-						if constexpr (LDU_Flag&0b100) {
-							coo.emplace_back(
-								row_offset + test_cache.global_idx[i],
-								col_offset + trial_cache.global_idx[j],
-								local_mat[i + j*u_size]);
-						}
-						if constexpr (LDU_Flag&0b001) {
-							//upper block, transpose the indices
-							coo.emplace_back(
-								row_offset + test_cache.global_idx[j],
-								col_offset + trial_cache.global_idx[i],
-								local_mat[j + i*u_size]);
-						}
-					}
-				}
-			},
-			//init
-			[&t_local_mat, &t_coo](size_t n_threads, size_t tid){
-				GUTIL_OMP(single)
-				{
-					t_local_mat.resize(n_threads);
-					t_coo.resize(n_threads);
-				}
-				GUTIL_OMP(barrier)
-			},
-			//finalize
-			[&t_coo](size_t n_threads, size_t tid){
-				//compress the per-thread coo lists (also de-duplicates)
-				Triplet_t::Compress(t_coo[tid]);
-				t_coo[tid].shrink_to_fit();
-
-				//merge the per-thread coo lists to thread 0 (also de-duplicates)
-				GUTIL_OMP(barrier)
-				for (size_t stride=1; stride<n_threads; stride*=2) {
-					if (tid % (2*stride) == 0 && tid+stride < n_threads) {
-						Triplet_t::Merge(t_coo[tid], t_coo[tid+stride]);
-					}
-					GUTIL_OMP(barrier)
-				}
-			});
-
-			//move the new coo values to the provided vector
-			triplets.insert(triplets.end(),
-				std::make_move_iterator(t_coo[0].begin()),
-				std::make_move_iterator(t_coo[0].end()));
+		
+			if constexpr (LDU_Flag==0b111) {BASE::build_triplets(triplets, row_offset, col_offset);}
+			else {
+				BASE::build_triplets(triplets, row_offset, col_offset, [](size_t i, size_t j) -> bool {
+					if (i==j) {return LDU_Flag&0b010;}
+					if (i>j)  {return LDU_Flag&0b100;}
+					return LDU_Flag&0b001;
+				});
+			}
 		}
+
+		// 	GUTIL_PROFILE_FUNCTION();
+			
+		// 	std::vector<std::vector<T>> t_local_mat;
+		// 	std::vector<std::vector<Triplet_t>> t_coo;
+			
+		// 	for_each_element(
+		// 	//action
+		// 	[&](auto& k_eval, const auto& range){
+		// 		auto& local_mat   = t_local_mat[range.tid];
+		// 		auto& coo         = t_coo[range.tid];
+		// 		const auto& test_cache  = get_test_cache(k_eval);
+		// 		const auto& trial_cache = get_trial_cache(k_eval);
+
+		// 		const size_t u_size=trial_cache.dofs.size(), v_size=test_cache.dofs.size();
+		// 		ConstructLocalMatrix<LDU_Flag>(k_eval, u_size, v_size, local_mat);
+				
+		// 		//add triplets, only loop throught the lower block of indices
+		// 		for (size_t j=0; j<u_size; ++j) {
+		// 			if constexpr (LDU_Flag&0b010) {
+		// 				coo.emplace_back(
+		// 					row_offset + test_cache.global_idx[j],
+		// 					col_offset + trial_cache.global_idx[j],
+		// 					local_mat[j + j*u_size]);
+		// 			}
+
+		// 			for (size_t i=j+1; i<v_size; ++i) {
+		// 				if constexpr (LDU_Flag&0b100) {
+		// 					coo.emplace_back(
+		// 						row_offset + test_cache.global_idx[i],
+		// 						col_offset + trial_cache.global_idx[j],
+		// 						local_mat[i + j*u_size]);
+		// 				}
+		// 				if constexpr (LDU_Flag&0b001) {
+		// 					//upper block, transpose the indices
+		// 					coo.emplace_back(
+		// 						row_offset + test_cache.global_idx[j],
+		// 						col_offset + trial_cache.global_idx[i],
+		// 						local_mat[j + i*u_size]);
+		// 				}
+		// 			}
+		// 		}
+		// 	},
+		// 	//init
+		// 	[&t_local_mat, &t_coo](size_t n_threads, size_t tid){
+		// 		GUTIL_OMP(single)
+		// 		{
+		// 			t_local_mat.resize(n_threads);
+		// 			t_coo.resize(n_threads);
+		// 		}
+		// 		GUTIL_OMP(barrier)
+		// 	},
+		// 	//finalize
+		// 	[&t_coo](size_t n_threads, size_t tid){
+		// 		//compress the per-thread coo lists (also de-duplicates)
+		// 		Triplet_t::Compress(t_coo[tid]);
+		// 		t_coo[tid].shrink_to_fit();
+
+		// 		//merge the per-thread coo lists to thread 0 (also de-duplicates)
+		// 		GUTIL_OMP(barrier)
+		// 		for (size_t stride=1; stride<n_threads; stride*=2) {
+		// 			if (tid % (2*stride) == 0 && tid+stride < n_threads) {
+		// 				Triplet_t::Merge(t_coo[tid], t_coo[tid+stride]);
+		// 			}
+		// 			GUTIL_OMP(barrier)
+		// 		}
+		// 	});
+
+		// 	//move the new coo values to the provided vector
+		// 	triplets.insert(triplets.end(),
+		// 		std::make_move_iterator(t_coo[0].begin()),
+		// 		std::make_move_iterator(t_coo[0].end()));
+		// }
 	};
 }

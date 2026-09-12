@@ -323,7 +323,6 @@ namespace GV {
 		/// A few fallback/generic methods.
 		/// Note that coefficients are indexed right to left.
 		//////////////////////////////////////////////////////////////////
-	public:
 		template<typename... Spans> requires (sizeof...(Spans)==K && AllArgsSameAs<std::span<const Scalar_t>, Spans...>)
 		[[nodiscard]] Scalar_t evaluate(Spans... x_spans) const noexcept {
 			GUTIL_PROFILE_FUNCTION();
@@ -369,18 +368,32 @@ namespace GV {
 		}
 
 
+		///////////////////////////////////////////////////////////////////////////
+		/// Methods to build triplets for the sparse matrix. Wrappers designate to the *_impl method.
+		///////////////////////////////////////////////////////////////////////////
+		template<size_t RowSlot=0, size_t ColSlot=1, typename Triplet_t, typename LPred=std::nullptr_t, typename GPred=std::nullptr_t> requires (K==2)
+		void build_triplets(std::vector<Triplet_t>& triplets, size_t row_offset=0, size_t col_offset=0, LPred&& l_pred=nullptr, GPred&& g_pred=nullptr) const noexcept {
+			build_triplets_impl<RowSlot,ColSlot,Triplet_t,LPred,GPred>(triplets, row_offset, col_offset, std::forward<LPred>(l_pred), std::forward<GPred>(g_pred));
+		}
+
+	protected:
 		//build a sparse matrix in COO format. allow specifying which variable to use for rows/columns
 		//and supplying variables of the other fields to contract with.
-		template<size_t RowSlot, size_t ColSlot, typename Triplet_t, typename... ExtraSpans> requires (
+		template<size_t RowSlot, size_t ColSlot, typename Triplet_t, typename LocalIndexPredicate, typename GlobalIndexPredicate, typename... ExtraSpans> requires (
 			RowSlot<K && ColSlot<K && RowSlot!=ColSlot &&
 			sizeof...(ExtraSpans)==K-2 &&
 			(std::same_as<ExtraSpans,std::span<const Scalar_t>> && ...)
 		)
-		void build_triplets(std::vector<Triplet_t>& triplets, size_t row_offset, size_t col_offset, ExtraSpans... extra_spans) const noexcept {
+		void build_triplets_impl(std::vector<Triplet_t>& triplets, size_t row_offset, size_t col_offset,
+			LocalIndexPredicate&& l_pred, GlobalIndexPredicate&& g_pred, ExtraSpans... extra_spans) const noexcept {
+			
+			static_assert(std::same_as<LocalIndexPredicate,std::nullptr_t> || std::is_invocable_r_v<bool, LocalIndexPredicate, size_t, size_t>);
+			static_assert(std::same_as<GlobalIndexPredicate,std::nullptr_t> || std::is_invocable_r_v<bool, GlobalIndexPredicate, size_t, size_t>);
+			
 			GUTIL_PROFILE_FUNCTION();
 			std::array<std::span<const Scalar_t>, K-2> X_extra{extra_spans...};
 
-			static constexpr std::array<size_t,K-2> ExtraSlots = []() {
+			[[maybe_unused]] static constexpr std::array<size_t,K-2> ExtraSlots = []() {
 				std::array<size_t,K-2> result{};
 				size_t pos = 0;
 				for (size_t s=0; s<K; ++s) {
@@ -392,6 +405,15 @@ namespace GV {
 			std::vector<std::vector<Scalar_t>> t_thread_resource;
 			std::vector<DynamicVectorValueCache<Scalar_t,K-2>> t_local_extra;
 			std::vector<std::vector<Triplet_t>> t_coo;
+
+			const auto local_pred = [l_pred = std::forward<LocalIndexPredicate>(l_pred)](size_t row, size_t col) {
+				if constexpr (!std::same_as<LocalIndexPredicate,std::nullptr_t>) {return l_pred(row,col);}
+				else {return true;}
+			};
+			const auto global_pred = [g_pred = std::forward<GlobalIndexPredicate>(g_pred)](size_t row, size_t col) {
+				if constexpr (!std::same_as<GlobalIndexPredicate,std::nullptr_t>) {return g_pred(row,col);}
+				else {return true;}
+			};
 
 			this->for_each_element(
 			[&](auto& k_eval, const auto& range) {
@@ -428,7 +450,11 @@ namespace GV {
 					idx[ColSlot] = j;
 					for (size_t i=0; i<v_size; ++i) {
 						idx[RowSlot] = i;
-						coo.emplace_back(row_offset + row_cache.global_idx[i], col_offset + col_cache.global_idx[j], tensor(idx));
+						if (!local_pred(i,j)) {continue;}
+						size_t row = row_offset + row_cache.global_idx[i];
+						size_t col = col_offset + col_cache.global_idx[j];
+						if (!global_pred(row,col)) {continue;}
+						coo.emplace_back(row, col, tensor(idx));
 					}
 				}
 			},
@@ -672,7 +698,7 @@ namespace GV {
 		void make_local_tensor(std::vector<Scalar_t>& thread_resource) const noexcept requires (!(K==2 && N_SYMMETRIC==2)) {
 			GUTIL_PROFILE_FUNCTION(N_SYMMETRIC);
 			const std::array<size_t,K> dims = make_local_tensor_size();
-			const size_t total = gutil::product_reduce(dims);
+			const size_t total = gutil::product_reduce(std::span<const size_t,K>{dims});
 			thread_resource.resize(total);
 
 			using Tensor = gutil::Tensor<T,K>;

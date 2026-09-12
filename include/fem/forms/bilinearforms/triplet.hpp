@@ -46,6 +46,14 @@ namespace GV {
 			return i==other.i && j==other.j;
 		}
 
+		//////////////////////////////////////////////////////////////////////////////////////////////
+		/// Debug and convenience methods
+		//////////////////////////////////////////////////////////////////////////////////////////////
+		[[nodiscard]] std::string to_string() const noexcept {
+			std::string result = "(";
+			result += std::to_string(val) + ", " + std::to_string(i) + ", " + std::to_string(j) + ")";
+			return result;
+		}
 
 		//////////////////////////////////////////////////////////////////////////////////////////////
 		/// Static methods to de-duplicate entries
@@ -201,6 +209,15 @@ namespace GV {
 			coo_triplets.shrink_to_fit();
 		}
 	};
+
+
+	////////////////////////////////////////////////////////////////////////
+	/// Print triplets for debugging
+	////////////////////////////////////////////////////////////////////////
+	template<typename Scalar_t, typename StorageIndex=size_t, int StorageOrder=0> requires (StorageOrder==0 || StorageOrder==1)
+	std::ostream& operator<<(std::ostream& os, const Triplet<Scalar_t,StorageIndex,StorageOrder>& triplet) noexcept {
+		return os<<triplet.to_string();
+	}
 }
 
 

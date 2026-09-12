@@ -186,6 +186,9 @@ int main(int argc, char* argv[]) {
 			GUTIL_TIMER("Assembling A (triplets)");
 			laplace_form.build_triplets(triplets);
 			penalty_form.build_triplets(triplets);
+
+			// laplace_form.build_triplets(triplets,0,0);
+			// penalty_form.build_triplets(triplets,0,0);
 		}
 
 		auto t1 = new gutil::LogTime{"Assembling A (Eigen from triplets)"};
