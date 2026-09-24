@@ -32,14 +32,13 @@ namespace GV {
 		static constexpr bool NEEDS_SDF_GRAD    = false;
 
 		template<typename QuadRule_t>
-		static constexpr ScalarValueCache<QuadRule_t> build_weights(const ScalarValueCache<QuadRule_t>*, const QuadRule_t&) noexcept {
+		static constexpr ScalarValueCache<QuadRule_t> build_weights(const QuadRule_t&) noexcept {
 			return ScalarValueCache<QuadRule_t>::Filled(typename QuadRule_t::Scalar_t{1});
 		}
 
 		template<typename QuadRule_t>
-		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights_cached_sdf(const SdfValueCache<QuadRule_t>*, const SdfGradCache<QuadRule_t>*,
-				const ScalarValueCache<QuadRule_t>*, const QuadRule_t& qr) const noexcept {
-			return build_weights(nullptr, qr);
+		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights_cached_sdf(const SdfValueCache<QuadRule_t>*, const SdfGradCache<QuadRule_t>*, const QuadRule_t& qr) const noexcept {
+			return build_weights(qr);
 		}
 	};
 
@@ -50,7 +49,7 @@ namespace GV {
 		static constexpr bool NEEDS_SDF_GRAD    = false;
 
 		template<typename QuadRule_t>
-		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights(const ScalarValueCache<QuadRule_t>*, const QuadRule_t& qr) const noexcept {
+		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights(const QuadRule_t& qr) const noexcept {
 			using Scalar_t = typename QuadRule_t::Scalar_t;
 			constexpr int N = QuadRule_t::TOTAL_QUAD_POINTS;
 			ScalarValueCache<QuadRule_t> result;
@@ -63,9 +62,8 @@ namespace GV {
 		}
 
 		template<typename QuadRule_t>
-		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights_cached_sdf(const SdfValueCache<QuadRule_t>*, const SdfGradCache<QuadRule_t>*,
-				const ScalarValueCache<QuadRule_t>*, const QuadRule_t& qr) const noexcept {
-			return build_weights(nullptr, qr);
+		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights_cached_sdf(const SdfValueCache<QuadRule_t>*, const SdfGradCache<QuadRule_t>*, const QuadRule_t& qr) const noexcept {
+			return build_weights(qr);
 		}
 	};
 
@@ -119,14 +117,13 @@ namespace GV {
 		using BASE::eps;
 		
 		template<typename QuadRule_t>
-		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights(const ScalarValueCache<QuadRule_t>*, const QuadRule_t& qr) const noexcept {
+		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights(const QuadRule_t& qr) const noexcept {
 			SdfValueCache<QuadRule_t> sdf(*assembly,qr);
-			return build_weights_cached_sdf<QuadRule_t>(&sdf, nullptr, nullptr, qr);
+			return build_weights_cached_sdf<QuadRule_t>(&sdf, nullptr, qr);
 		}
 
 		template<typename QuadRule_t>
-		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights_cached_sdf(const SdfValueCache<QuadRule_t>* sdf, const SdfGradCache<QuadRule_t>*,
-				const ScalarValueCache<QuadRule_t>*, const QuadRule_t& qr) const noexcept {
+		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights_cached_sdf(const SdfValueCache<QuadRule_t>* sdf, const SdfGradCache<QuadRule_t>*, const QuadRule_t& qr) const noexcept {
 			using Scalar_t = typename QuadRule_t::Scalar_t;
 			constexpr int N = QuadRule_t::TOTAL_QUAD_POINTS;
 			
@@ -160,19 +157,18 @@ namespace GV {
 		static void SetModifyRangeScale(typename Assembly_t::Scalar_t s) noexcept {modify_range_scale = s;}
 
 		template<typename QuadRule_t>
-		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights(const ScalarValueCache<QuadRule_t>*, const QuadRule_t& qr) const noexcept {
+		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights(const QuadRule_t& qr) const noexcept {
 			static_assert( std::same_as<typename QuadRule_t::Scalar_t, typename Assembly_t::Scalar_t> );
 			
 			constexpr int N = QuadRule_t::TOTAL_QUAD_POINTS;
 			SdfValueCache<QuadRule_t> sdf;
 			SdfGradCache<QuadRule_t> grad;
 			BASE::CacheSdfValsGrad(sdf,grad,qr);
-			return build_weights_cached_sdf<QuadRule_t>(&sdf, &grad, nullptr, qr);
+			return build_weights_cached_sdf<QuadRule_t>(&sdf, &grad, qr);
 		}
 
 		template<typename QuadRule_t>
-		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights_cached_sdf(const SdfValueCache<QuadRule_t>* sdf, const SdfGradCache<QuadRule_t>* grad,
-				const ScalarValueCache<QuadRule_t>*, const QuadRule_t& qr) const noexcept {
+		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights_cached_sdf(const SdfValueCache<QuadRule_t>* sdf, const SdfGradCache<QuadRule_t>* grad, const QuadRule_t& qr) const noexcept {
 			using Scalar_t = typename QuadRule_t::Scalar_t;
 			constexpr int N = QuadRule_t::TOTAL_QUAD_POINTS;
 			const typename Assembly_t::Scalar_t modify_range = modify_range_scale*eps;
@@ -209,43 +205,42 @@ namespace GV {
 	/// assembly loop calls build_weights must reconstruct u_h and pass it
 	/// in as scalar_field -- this weight never reconstructs it itself.
 	///////////////////////////////////////////////////////////////////
-	template<typename Assembly_t, auto UExact, int StaticID=0>
-	struct L2DiffuseErrorWeight : public AssemblyDiffuseDomain<Assembly_t,StaticID> {
-		static constexpr bool NEEDS_GEO_POINTS  = true;
-		static constexpr bool NEEDS_SDF_VALS    = true;
-		static constexpr bool NEEDS_SDF_GRAD    = false;
+	// template<typename Assembly_t, auto UExact, int StaticID=0>
+	// struct L2DiffuseErrorWeight : public AssemblyDiffuseDomain<Assembly_t,StaticID> {
+	// 	static constexpr bool NEEDS_GEO_POINTS  = true;
+	// 	static constexpr bool NEEDS_SDF_VALS    = true;
+	// 	static constexpr bool NEEDS_SDF_GRAD    = false;
 
-		using DiffuseDomain = AssemblyDiffuseDomain<Assembly_t,StaticID>;
-		using BASE = AssemblyDiffuseDomain<Assembly_t,StaticID>;
-		using BASE::assembly;
-		using BASE::eps;
+	// 	using DiffuseDomain = AssemblyDiffuseDomain<Assembly_t,StaticID>;
+	// 	using BASE = AssemblyDiffuseDomain<Assembly_t,StaticID>;
+	// 	using BASE::assembly;
+	// 	using BASE::eps;
 
-		template<typename QuadRule_t>
-		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights(const ScalarValueCache<QuadRule_t>* scalar_field, const QuadRule_t& qr) const noexcept {
-			SdfValueCache<QuadRule_t> sdf(*assembly, qr);
-			return build_weights_cached_sdf<QuadRule_t>(&sdf, nullptr, scalar_field, qr);
-		}
+	// 	template<typename QuadRule_t>
+	// 	[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights(const QuadRule_t& qr) const noexcept {
+	// 		SdfValueCache<QuadRule_t> sdf(*assembly, qr);
+	// 		return build_weights_cached_sdf<QuadRule_t>(&sdf, nullptr, qr);
+	// 	}
 
-		template<typename QuadRule_t>
-		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights_cached_sdf(const SdfValueCache<QuadRule_t>* sdf, const SdfGradCache<QuadRule_t>*,
-				const ScalarValueCache<QuadRule_t>* scalar_field, const QuadRule_t& qr) const noexcept {
-			using Scalar_t = typename QuadRule_t::Scalar_t;
-			constexpr int N = QuadRule_t::TOTAL_QUAD_POINTS;
-			GUTIL_ASSERT(scalar_field);   // NEEDS_SCALAR_VALS=true means this must be provided by the caller
+	// 	template<typename QuadRule_t>
+	// 	[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights_cached_sdf(const SdfValueCache<QuadRule_t>* sdf, const SdfGradCache<QuadRule_t>*, const QuadRule_t& qr) const noexcept {
+	// 		using Scalar_t = typename QuadRule_t::Scalar_t;
+	// 		constexpr int N = QuadRule_t::TOTAL_QUAD_POINTS;
+	// 		GUTIL_ASSERT(scalar_field);   // NEEDS_SCALAR_VALS=true means this must be provided by the caller
 
-			ScalarValueCache<QuadRule_t> phi;
-			Assembly_t::heaviside({phi.data(),N}, {sdf->data(),N}, eps);
+	// 		ScalarValueCache<QuadRule_t> phi;
+	// 		Assembly_t::heaviside({phi.data(),N}, {sdf->data(),N}, eps);
 
-			auto gx=qr.geo_x(), gy=qr.geo_y(), gz=qr.geo_z();
-			ScalarValueCache<QuadRule_t> result;
-			GUTIL_SIMD()
-			for (int i=0; i<N; ++i) {
-				const Scalar_t diff = (*scalar_field)[i] - static_cast<Scalar_t>(UExact(gx[i], gy[i], gz[i]));
-				result[i] = phi[i] * diff * diff;
-			}
-			return result;
-		}
-	};
+	// 		auto gx=qr.geo_x(), gy=qr.geo_y(), gz=qr.geo_z();
+	// 		ScalarValueCache<QuadRule_t> result;
+	// 		GUTIL_SIMD()
+	// 		for (int i=0; i<N; ++i) {
+	// 			const Scalar_t diff = (*scalar_field)[i] - static_cast<Scalar_t>(UExact(gx[i], gy[i], gz[i]));
+	// 			result[i] = phi[i] * diff * diff;
+	// 		}
+	// 		return result;
+	// 	}
+	// };
 
 
 
@@ -269,14 +264,13 @@ namespace GV {
 		constexpr ScaledKernelWeight(T s, W w) : scale(s), weight(std::move(w)) {}
  
 		template<typename QuadRule_t>
-		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights(const ScalarValueCache<QuadRule_t>* scalar_field, const QuadRule_t& qr) const noexcept {
-			return scale * weight.template build_weights<QuadRule_t>(scalar_field, qr);
+		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights(const QuadRule_t& qr) const noexcept {
+			return scale * weight.template build_weights<QuadRule_t>(qr);
 		}
 
 		template<typename QuadRule_t>
-		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights_cached_sdf(const SdfValueCache<QuadRule_t>* sdf, const SdfGradCache<QuadRule_t>* grad,
-				const ScalarValueCache<QuadRule_t>* scalar_field, const QuadRule_t& qr) const noexcept requires (NEEDS_SDF_VALS || NEEDS_SDF_GRAD) {
-			return scale * weight.template build_weights_cached_sdf<QuadRule_t>(sdf,grad,scalar_field,qr);
+		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights_cached_sdf(const SdfValueCache<QuadRule_t>* sdf, const SdfGradCache<QuadRule_t>* grad, const QuadRule_t& qr) const noexcept requires (NEEDS_SDF_VALS || NEEDS_SDF_GRAD) {
+			return scale * weight.template build_weights_cached_sdf<QuadRule_t>(sdf,grad,qr);
 		}
 	};
 
@@ -296,31 +290,30 @@ namespace GV {
 		constexpr SumKernelWeight(W1 l, W2 r) : left(std::move(l)), right(std::move(r)) {}
  		
 		template<typename QuadRule_t>
-		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights(const ScalarValueCache<QuadRule_t>* scalar_field, const QuadRule_t& qr) const noexcept {
+		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights(const QuadRule_t& qr) const noexcept {
 			if constexpr (NEEDS_SDF_VALS && NEEDS_SDF_GRAD) {
 				SdfValueCache<QuadRule_t> sdf;
 				SdfGradCache<QuadRule_t> grad;
 				DiffuseDomain::CacheSdfValsGrad(sdf,grad,qr);
-				return build_weights_cached_sdf<QuadRule_t>(&sdf, &grad, scalar_field, qr);
+				return build_weights_cached_sdf<QuadRule_t>(&sdf, &grad, qr);
 			}
 			else if constexpr (NEEDS_SDF_VALS) {
 				SdfValueCache<QuadRule_t> sdf = DiffuseDomain::CacheSdfVals(qr);
-				return build_weights_cached_sdf<QuadRule_t>(&sdf, nullptr, scalar_field, qr);
+				return build_weights_cached_sdf<QuadRule_t>(&sdf, nullptr, qr);
 			}
 			else if constexpr (NEEDS_SDF_GRAD) {
 				SdfGradCache<QuadRule_t> grad = DiffuseDomain::CacheSdfGrad(qr);
-				return build_weights_cached_sdf<QuadRule_t>(nullptr, &grad, scalar_field, qr);
+				return build_weights_cached_sdf<QuadRule_t>(nullptr, &grad, qr);
 			}
 			else {
-				return left.template build_weights<QuadRule_t>(scalar_field, qr) + right.template build_weights<QuadRule_t>(scalar_field, qr);
+				return left.template build_weights<QuadRule_t>(qr) + right.template build_weights<QuadRule_t>(qr);
 			}
 		}
 
 		template<typename QuadRule_t>
-		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights_cached_sdf(const SdfValueCache<QuadRule_t>* sdf, const SdfGradCache<QuadRule_t>* grad,
-				const ScalarValueCache<QuadRule_t>* scalar_field, const QuadRule_t& qr) const noexcept requires (NEEDS_SDF_VALS || NEEDS_SDF_GRAD) {
-			return left.template build_weights_cached_sdf<QuadRule_t>(sdf, grad, scalar_field, qr) + 
-					right.template build_weights_cached_sdf<QuadRule_t>(sdf, grad, scalar_field, qr);
+		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights_cached_sdf(const SdfValueCache<QuadRule_t>* sdf, const SdfGradCache<QuadRule_t>* grad, const QuadRule_t& qr) const noexcept requires (NEEDS_SDF_VALS || NEEDS_SDF_GRAD) {
+			return left.template build_weights_cached_sdf<QuadRule_t>(sdf, grad, qr) + 
+					right.template build_weights_cached_sdf<QuadRule_t>(sdf, grad, qr);
 		}
 	};
 
@@ -341,31 +334,30 @@ namespace GV {
 		constexpr ProductKernelWeight(W1 l, W2 r) : left(std::move(l)), right(std::move(r)) {}
  
 		template<typename QuadRule_t>
-		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights(const ScalarValueCache<QuadRule_t>* scalar_field, const QuadRule_t& qr) const noexcept {
+		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights(const QuadRule_t& qr) const noexcept {
 			if constexpr (NEEDS_SDF_VALS && NEEDS_SDF_GRAD) {
 				SdfValueCache<QuadRule_t> sdf;
 				SdfGradCache<QuadRule_t> grad;
 				DiffuseDomain::CacheSdfValsGrad(sdf,grad,qr);
-				return build_weights_cached_sdf<QuadRule_t>(&sdf, &grad, scalar_field, qr);
+				return build_weights_cached_sdf<QuadRule_t>(&sdf, &grad, qr);
 			}
 			else if constexpr (NEEDS_SDF_VALS) {
 				SdfValueCache<QuadRule_t> sdf = DiffuseDomain::CacheSdfVals(qr);
-				return build_weights_cached_sdf<QuadRule_t>(&sdf, nullptr, scalar_field, qr);
+				return build_weights_cached_sdf<QuadRule_t>(&sdf, nullptr, qr);
 			}
 			else if constexpr (NEEDS_SDF_GRAD) {
 				SdfGradCache<QuadRule_t> grad = DiffuseDomain::CacheSdfGrad(qr);
-				return build_weights_cached_sdf<QuadRule_t>(nullptr, &grad, scalar_field, qr);
+				return build_weights_cached_sdf<QuadRule_t>(nullptr, &grad, qr);
 			}
 			else {
-				return left.template build_weights<QuadRule_t>(scalar_field, qr) * right.template build_weights<QuadRule_t>(scalar_field, qr);
+				return left.template build_weights<QuadRule_t>(qr) * right.template build_weights<QuadRule_t>(qr);
 			}
 		}
 
 		template<typename QuadRule_t>
-		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights_cached_sdf(const SdfValueCache<QuadRule_t>* sdf, const SdfGradCache<QuadRule_t>* grad,
-				const ScalarValueCache<QuadRule_t>* scalar_field, const QuadRule_t& qr) const noexcept requires (NEEDS_SDF_VALS || NEEDS_SDF_GRAD) {
-			return left.template build_weights_cached_sdf<QuadRule_t>(sdf, grad, scalar_field, qr) * 
-					right.template build_weights_cached_sdf<QuadRule_t>(sdf, grad, scalar_field, qr);
+		[[nodiscard]] ScalarValueCache<QuadRule_t> build_weights_cached_sdf(const SdfValueCache<QuadRule_t>* sdf, const SdfGradCache<QuadRule_t>* grad, const QuadRule_t& qr) const noexcept requires (NEEDS_SDF_VALS || NEEDS_SDF_GRAD) {
+			return left.template build_weights_cached_sdf<QuadRule_t>(sdf, grad, qr) * 
+					right.template build_weights_cached_sdf<QuadRule_t>(sdf, grad, qr);
 		}
 	};
 
@@ -381,7 +373,7 @@ namespace GV {
 	template<typename T>
 	concept IsTupleWeightType = IsTupleWeightHelper<std::remove_cvref_t<T>>::value;
 
-	template<typename T> requires (IsTupleWeightType<T> || std::same_as<T,void>)
+	template<typename T> requires (IsTupleWeightType<T> || IsKernelWeight<T>)
 	constexpr size_t WeightCountOf() {
 		if constexpr (std::is_void_v<T>) {return 0;}
 		else if constexpr (IsTupleWeightType<T>) {return T::N_WEIGHTS;}
@@ -448,7 +440,6 @@ namespace GV {
 	[[nodiscard]] inline constexpr SumKernelWeight<T,W> MakeSumKernelWeight(T scale, W weight) noexcept {
 		return SumKernelWeight<T,W>{scale, weight};
 	}
-
 }
 
 

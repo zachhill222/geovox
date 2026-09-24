@@ -253,14 +253,14 @@ namespace GV {
 		auto make_G_form() const {
 			//G(p,v) = int( \partial_i(p) * v * phi)
 			//(Top right block, p is trial, v is test)
-			return MakeBilinearForm<N_QUAD,Scalar_t>(p_handler, u_handler, PartialValBilinearForm<Axis,true>{}, InteriorWeight_t{});
+			return MakeBilinearForm<N_QUAD,Scalar_t>(p_handler, u_handler, PartialValBilinearForm<Axis,InteriorWeight_t>{}, InteriorWeight_t{});
 		}
 
 		template<int Axis> requires(0<=Axis && Axis<3)
 		auto make_Gt_form() const {
 			//Gt(u,q) = int( \partial_i(u) * q * phi)
 			//(Bottom left block, u is trial, q is test)
-			return MakeBilinearForm<N_QUAD,Scalar_t>(u_handler, p_handler, PartialValBilinearForm<Axis,true>{}, InteriorWeight_t{});
+			return MakeBilinearForm<N_QUAD,Scalar_t>(u_handler, p_handler, PartialValBilinearForm<Axis,InteriorWeight_t>{}, InteriorWeight_t{});
 		}
 
 		template<int Axis> requires(0<=Axis && Axis<3)

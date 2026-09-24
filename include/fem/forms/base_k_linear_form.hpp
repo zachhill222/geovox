@@ -20,7 +20,7 @@ namespace GV {
 	///
 	/// Thus, specify dofhandlers from the right to left. To use symmetry, the symmetric group must be the rightmost.
 	//////////////////////////////////////////////////////////////////
-	template<int N, typename T, IsKLinearKernel KernelType, typename KernelWeightType, typename... HandlerTypes>
+	template<int N, typename T, IsKLinearKernel KernelType, typename... HandlerTypes>
 	class KLinearForm {
 	public:
 		//////////////////////////////////////////////////////////////////
@@ -71,7 +71,7 @@ namespace GV {
 		/// Other aliases and constants
 		//////////////////////////////////////////////////////////////////
 		using Kernel_t   = KernelType;
-		using Weight_t   = std::conditional_t<KernelType::NEEDS_WEIGHT, KernelWeightType, int>;
+		using Weight_t   = std::conditional_t<KernelType::NEEDS_WEIGHT, typename KernelType::WeightType, int>;
 		using QuadRule_t = MeshQuadratureRule<N,T>;
 		using Scalar_t   = T;
 		using Mesh_t     = UnstructuredVoxelMesh<T>;
@@ -92,7 +92,6 @@ namespace GV {
 	protected:
 		const Mesh_t* 						mesh_ptr{nullptr};
 		Kernel_t      						kernel{};
-		[[no_unique_address]] Weight_t		weight{};
 		std::array<const void*, N_HANDLERS> handlers{};
 
 
@@ -100,11 +99,11 @@ namespace GV {
 		//////////////////////////////////////////////////////////////////
 		/// Constructors
 		//////////////////////////////////////////////////////////////////
-		KLinearForm(const Mesh_t& m, KernelType k, Weight_t w, const HandlerTypes&... hs) :
-			mesh_ptr(&m), kernel{std::move(k)}, weight{std::move(w)} {set_handlers(hs...);}
+		KLinearForm(const Mesh_t& m, KernelType k, const HandlerTypes&... hs) :
+			mesh_ptr(&m), kernel{std::move(k)} {set_handlers(hs...);}
 
-		KLinearForm(const Mesh_t& m, KernelType k = KernelType{}, Weight_t w = Weight_t{}) :
-			mesh_ptr(&m), kernel{std::move(k)}, weight{std::move(w)}, handlers{} {}
+		KLinearForm(const Mesh_t& m, KernelType k = KernelType{}) :
+			mesh_ptr(&m), kernel{std::move(k)}, handlers{} {}
 
 		KLinearForm()=default;
 		KLinearForm(const KLinearForm&)=default;
@@ -318,7 +317,7 @@ namespace GV {
 			}
 		}
 
-
+	public:
 		//////////////////////////////////////////////////////////////////
 		/// A few fallback/generic methods.
 		/// Note that coefficients are indexed right to left.
@@ -501,8 +500,8 @@ namespace GV {
 	/// A helper type to evaluate the kernel and manage the per-thread
 	/// caches that need to be updated per-element.
 	//////////////////////////////////////////////////////////////////
-	template<int N, typename T, IsKLinearKernel KernelType, typename KernelWeightType, typename... HandlerTypes>
-	struct KLinearForm<N,T,KernelType,KernelWeightType,HandlerTypes...>::KernelEval {
+	template<int N, typename T, IsKLinearKernel KernelType, typename... HandlerTypes>
+	struct KLinearForm<N,T,KernelType,HandlerTypes...>::KernelEval {
 		//////////////////////////////////////////////////////////////
 		/// Aliases and helper classes
 		//////////////////////////////////////////////////////////////
@@ -552,7 +551,7 @@ namespace GV {
 		QuadRule_t qr;
 		uint8_t qr_depth{};
 		Kernel_t kernel{};
-		[[no_unique_address]] Weight_t weight{};
+		Weight_t weight{};
 
 		CacheTuple_t dof_caches{};
 		[[no_unique_address]] WeightArg wt_cache{};
@@ -566,7 +565,7 @@ namespace GV {
 		//////////////////////////////////////////////////////////////
 		/// Per-thread constructors (before element loop)
 		//////////////////////////////////////////////////////////////
-		KernelEval(const KLinearForm& kf) noexcept : kform{kf}, qr{kf.mesh()}, kernel{kform.kernel}, weight{kform.weight} {
+		KernelEval(const KLinearForm& kf) noexcept : kform{kf}, qr{kf.mesh()}, kernel{kform.kernel} {
 			if constexpr (K==0) {qr_depth = 0;}
 			else {
 				qr_depth = [&]<size_t... Is>(std::index_sequence<Is...>) {
@@ -576,7 +575,7 @@ namespace GV {
 		}
 
 		KernelEval(const KLinearForm& kf, uint8_t which, const gutil::BinSortVector<typename HandlerTypes::DOF_t>&... bin_sorts) noexcept :
-			kform{kf}, qr{kf.mesh()}, kernel{kform.kernel}, weight{kform.weight},
+			kform{kf}, qr{kf.mesh()}, kernel{kform.kernel},
 			bin_sort_vectors{static_cast<const void*>(&bin_sorts)...}, using_snapshot{true} {
 			if constexpr (K==0) {qr_depth = 0;}
 			else {
@@ -596,7 +595,7 @@ namespace GV {
 			qr.set_element(el, qr_depth);
 			if constexpr (Kernel_t::NEEDS_WEIGHT) {
 				if constexpr (Weight_t::NEEDS_GEO_POINTS) {qr.build_geometric_coords();}
-				wt_cache = weight.template build_weights<QuadRule_t>(nullptr, qr);
+				wt_cache = weight.template build_weights<QuadRule_t>(qr);
 			}
 			build_caches(el);
 		}

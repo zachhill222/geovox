@@ -74,19 +74,14 @@ namespace GV {
 		//////////////////////////////////////////////////////////////////
 		template<typename QR>
 		using ValueArgType = std::array<const DofValueCache<QR>*, K>;
-
 		template<typename QR>
 		using ValueArg = const std::array<const DofValueCache<QR>*, K>&;
-
 		template<typename QR>
 		using GradArgType = std::array<const DofGradCache<QR>*, K>;
-
 		template<typename QR>
 		using GradArg = const std::array<const DofGradCache<QR>*, K>&;
-
 		template<typename QR>
 		using WeightArgType = std::conditional_t<(N_WEIGHTS<=1), ScalarValueCache<QR>, std::span<const ScalarValueCache<QR>*, N_WEIGHTS>>;
-
 		template<typename QR>
 		using WeightArg = std::conditional_t<(N_WEIGHTS<=1), const ScalarValueCache<QR>*, std::span<const ScalarValueCache<QR>*, N_WEIGHTS>>;
 
@@ -147,11 +142,10 @@ namespace GV {
 		//////////////////////////////////////////////////////////////////
 		template<typename QR>
 		[[nodiscard]] static typename QR::Scalar_t CachedEval(ValueArg<QR> vals, GradArg<QR> grad, WeightArg<QR> wt_ptr, const QR& qr) noexcept requires(HasStaticEval<QR>()) {
-			// GUTIL_PROFILE_FUNCTION();
 			static_assert(IsValid());
-			GUTIL_ASSERT(IsValArgValid(vals));
-			GUTIL_ASSERT(IsGradArgValid(grad));
-			GUTIL_ASSERT(IsWeightArgValid(wt_ptr));
+			GUTIL_ASSERT(IsValArgValid<QR>(vals));
+			GUTIL_ASSERT(IsGradArgValid<QR>(grad));
+			GUTIL_ASSERT(IsWeightArgValid<QR>(wt_ptr));
 			return Derived::CachedEvalImpl(vals, grad, wt_ptr, qr);
 		}
 
@@ -161,20 +155,18 @@ namespace GV {
 		//////////////////////////////////////////////////////////////////
 		template<typename QR>
 		[[nodiscard]] typename QR::Scalar_t cached_eval(ValueArg<QR> vals, GradArg<QR> grad, WeightArg<QR> wt_ptr, const QR& qr) const noexcept requires (HasStaticEval<QR>()) {	
-			// GUTIL_PROFILE_FUNCTION();
 			static_assert(IsValid());
-			GUTIL_ASSERT(IsValArgValid(vals));
-			GUTIL_ASSERT(IsGradArgValid(grad));
-			GUTIL_ASSERT(IsWeightArgValid(wt_ptr));
+			GUTIL_ASSERT(IsValArgValid<QR>(vals));
+			GUTIL_ASSERT(IsGradArgValid<QR>(grad));
+			GUTIL_ASSERT(IsWeightArgValid<QR>(wt_ptr));
 			return Derived::CachedEvalImpl(vals, grad, wt_ptr, qr);
 		}
 		template<typename QR>
 		[[nodiscard]] typename QR::Scalar_t cached_eval(ValueArg<QR> vals, GradArg<QR> grad, WeightArg<QR> wt_ptr, const QR& qr) const noexcept requires (!HasStaticEval<QR>()) {	
-			// GUTIL_PROFILE_FUNCTION();
 			static_assert(IsValid());
-			GUTIL_ASSERT(IsValArgValid(vals));
-			GUTIL_ASSERT(IsGradArgValid(grad));
-			GUTIL_ASSERT(IsWeightArgValid(wt_ptr));
+			GUTIL_ASSERT(IsValArgValid<QR>(vals));
+			GUTIL_ASSERT(IsGradArgValid<QR>(grad));
+			GUTIL_ASSERT(IsWeightArgValid<QR>(wt_ptr));
 			return derived()->cached_eval_impl(vals, grad, wt_ptr, qr);
 		}
 	};

@@ -32,7 +32,7 @@ using CoefHandler_t = GV::CoefHandler<DofHandler_t,Scalar_t,1>;
 
 using InteriorWeight_t	= GV::AssemblyPhaseFieldWeight<true,Assembly_t>;
 using ExteriorWeight_t	= GV::AssemblyPhaseFieldWeight<false,Assembly_t>;
-using BKernel_t      	= GV::L2BilinearKernel<true>;
+using BKernel_t      	= GV::L2BilinearKernel<InteriorWeight_t>;
 using BilinearForm_t    = GV::BilinearForm<4, Scalar_t, DofHandler_t, DofHandler_t, BKernel_t, InteriorWeight_t>;
 using LKernel_t      	= GV::L2LinearKernel<true>;
 using LinearForm_t      = GV::LinearForm<4,Scalar_t,DofHandler_t,LKernel_t,ExteriorWeight_t>;

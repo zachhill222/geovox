@@ -22,7 +22,7 @@ namespace GV {
 	using L2BilinearKernel_S  = GV::L2BilinearKernel<void>;	//symetric, non-weighted
 	using L2BilinearKernel_SW = GV::L2BilinearKernel<void>;	//symetric, weighted
 
-	using L2LinearKernel_W    = GV::L2LinearKernel<void>;	//weighted
+	using L2LinearKernel_W    = GV::L2LinearKernel<true>;	//weighted
 
 
 	///////////////////////////////////////////////////////////////

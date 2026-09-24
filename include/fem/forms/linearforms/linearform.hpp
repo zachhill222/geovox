@@ -143,7 +143,7 @@ namespace GV {
 					
 					test_cache.gather();
 					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
-						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
+						wt = weight.template build_weights<QuadRule_t>(quad_rule);
 					}
 					
 					for (size_t i=0; i<test_cache.size(); ++i) {
@@ -182,7 +182,7 @@ namespace GV {
 					
 					test_cache.gather();
 					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
-						wt = weight.template build_weights<QuadRule_t>(nullptr, quad_rule);
+						wt = weight.template build_weights<QuadRule_t>(quad_rule);
 					}
 					
 					for (size_t i=0; i<test_cache.size(); ++i) {
@@ -203,46 +203,46 @@ namespace GV {
 		///
 		/// TODO: maybe move out of linearform.
 		//////////////////////////////////////////////////////////////////
-		T integrate_weight(std::span<const Scalar_t> coefs) const noexcept {
-			GUTIL_ASSERT(test_handler.is_current());
-			GUTIL_ASSERT(coefs.size() == test_handler.n_dofs());
+		// T integrate_weight(std::span<const Scalar_t> coefs) const noexcept {
+		// 	GUTIL_ASSERT(test_handler.is_current());
+		// 	GUTIL_ASSERT(coefs.size() == test_handler.n_dofs());
 
-			Scalar_t result{0};
+		// 	Scalar_t result{0};
 
-			GUTIL_OMP(parallel)
-			{
-				Scalar_t 						thread_result{0};
-				QuadRule_t 						quad_rule(mesh);
-				ElementTestCache_t				test_cache(test_handler,quad_rule);	
-				ScalarValueCache<QuadRule_t>	field_cache;
-				WeightCache_t					wt;
+		// 	GUTIL_OMP(parallel)
+		// 	{
+		// 		Scalar_t 						thread_result{0};
+		// 		QuadRule_t 						quad_rule(mesh);
+		// 		ElementTestCache_t				test_cache(test_handler,quad_rule);	
+		// 		ScalarValueCache<QuadRule_t>	field_cache;
+		// 		WeightCache_t					wt;
 
-				gutil::OmpIteratorRange			range(mesh.element_begin(), mesh.element_end());
+		// 		gutil::OmpIteratorRange			range(mesh.element_begin(), mesh.element_end());
 
-				GUTIL_OMP(for)
-				for (auto it=range.begin; it!=range.end; ++it) {
-					const MeshElem_t el = *it;
+		// 		GUTIL_OMP(for)
+		// 		for (auto it=range.begin; it!=range.end; ++it) {
+		// 			const MeshElem_t el = *it;
 					
-					quad_rule.set_element(el,mesh.max_depth);
-					test_cache.gather();
+		// 			quad_rule.set_element(el,mesh.max_depth);
+		// 			test_cache.gather();
 
-					if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
+		// 			if constexpr (Weight_t::NEEDS_GEO_POINTS) {quad_rule.build_geometric_coords();}
 
-					if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
-						wt = weight.template build_weights<QuadRule_t>(&field_cache, quad_rule);
-					}
+		// 			if constexpr (!std::same_as<Weight_t,IdentityKernelWeight>) {
+		// 				wt = weight.template build_weights<QuadRule_t>(&field_cache, quad_rule);
+		// 			}
 					
-					Scalar_t el_result{0};
-					auto q_wt = quad_rule.quad_w();
-					for (size_t i=0; i<wt.size(); ++i) {
-						el_result += wt[i]*q_wt[i];
-					}
-					thread_result += el_result*quad_rule.jacobian_det[el.depth()];
-				}
+		// 			Scalar_t el_result{0};
+		// 			auto q_wt = quad_rule.quad_w();
+		// 			for (size_t i=0; i<wt.size(); ++i) {
+		// 				el_result += wt[i]*q_wt[i];
+		// 			}
+		// 			thread_result += el_result*quad_rule.jacobian_det[el.depth()];
+		// 		}
 
-				GUTIL_OMP(atomic) result += thread_result;
-			}
-			return result;
-		}
+		// 		GUTIL_OMP(atomic) result += thread_result;
+		// 	}
+		// 	return result;
+		// }
 	};
 }

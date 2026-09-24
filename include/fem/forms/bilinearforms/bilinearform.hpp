@@ -41,13 +41,14 @@ namespace GV {
 	/// inherited KernelEval/for_each_element rather than a separate, BilinearForm-specific mechanism.
 	/////////////////////////////////////////////////////////////////////
 	template<int N, typename T, typename TrialHandlerType, typename TestHandlerType, typename KernelType, typename KernelWeightType=IdentityKernelWeight>
-	class BilinearForm : public KLinearForm<N,T,KernelType,KernelWeightType,TestHandlerType,TrialHandlerType> {
+	class BilinearForm : public KLinearForm<N,T,KernelType
+	,TestHandlerType,TrialHandlerType> {
 	public:
 
 		//////////////////////////////////////////////////////////////////
 		/// Aliases and sanity checks
 		//////////////////////////////////////////////////////////////////
-		using BASE           = KLinearForm<N,T,KernelType,KernelWeightType,TestHandlerType,TrialHandlerType>;
+		using BASE           = KLinearForm<N,T,KernelType,TestHandlerType,TrialHandlerType>;
 		using Kernel_t       = typename BASE::Kernel_t;
 		using Weight_t       = typename BASE::Weight_t;
 		using QuadRule_t     = typename BASE::QuadRule_t;
@@ -76,10 +77,10 @@ namespace GV {
 		/// Handlers are passed test-first, trial-second, matching the right-to-left convention.
 		//////////////////////////////////////////////////////////////////
 		BilinearForm(const TrialHandler_t& u_handler, const TestHandler_t& v_handler, KernelType kernel = KernelType{}, Weight_t weight = Weight_t{}) :
-			BASE(v_handler.mesh, std::move(kernel), std::move(weight)) {BASE::set_handlers(v_handler, u_handler);}
+			BASE(v_handler.mesh, std::move(kernel)) {BASE::set_handlers(v_handler, u_handler);}
 
 		BilinearForm(const TrialHandler_t& sym_handler, KernelType kernel=KernelType{}, Weight_t weight = Weight_t{}) requires(Kernel_t::IS_SYMMETRIC) :
-			BASE(sym_handler.mesh, std::move(kernel), std::move(weight)) {BASE::set_handlers(sym_handler);}
+			BASE(sym_handler.mesh, std::move(kernel)) {BASE::set_handlers(sym_handler);}
 
 
 		//////////////////////////////////////////////////////////////////
