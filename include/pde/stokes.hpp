@@ -191,7 +191,7 @@ namespace GV {
 					return gutil::abs(m_handler.assembly.signed_distance(pt)) < tol_dist;
 				});
 
-			p_handler.refine(elems);
+			p_handler.refine(std::move(elems));
 			set_velocity_dofs();
 
 			p_coefs.prolong_coefs();
