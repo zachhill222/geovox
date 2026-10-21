@@ -7,8 +7,6 @@
 
 #include "fem/mesh_quadrature.hpp"
 #include "fem/forms/util.hpp"
-#include "fem/forms/bilinearforms/triplet.hpp"
-#include "fem/forms/bilinearforms/bilinear_kernels.hpp"
 #include "fem/forms/bilinearforms/dense_linalg.hpp"
 #include "fem/forms/base_k_linear_form.hpp"
 
@@ -40,9 +38,8 @@ namespace GV {
 	/// (K=2). All per-element kernel evaluation, dof caching, and looping now goes through the
 	/// inherited KernelEval/for_each_element rather than a separate, BilinearForm-specific mechanism.
 	/////////////////////////////////////////////////////////////////////
-	template<int N, typename T, typename TrialHandlerType, typename TestHandlerType, typename KernelType, typename KernelWeightType=IdentityKernelWeight>
-	class BilinearForm : public KLinearForm<N,T,KernelType
-	,TestHandlerType,TrialHandlerType> {
+	template<int N, typename T, typename TrialHandlerType, typename TestHandlerType, typename KernelType> 
+	class BilinearForm : public KLinearForm<N,T,KernelType,TestHandlerType,TrialHandlerType> {
 	public:
 
 		//////////////////////////////////////////////////////////////////
@@ -50,7 +47,6 @@ namespace GV {
 		//////////////////////////////////////////////////////////////////
 		using BASE           = KLinearForm<N,T,KernelType,TestHandlerType,TrialHandlerType>;
 		using Kernel_t       = typename BASE::Kernel_t;
-		using Weight_t       = typename BASE::Weight_t;
 		using QuadRule_t     = typename BASE::QuadRule_t;
 		using Scalar_t       = typename BASE::Scalar_t;
 		using Mesh_t         = typename BASE::Mesh_t;
@@ -76,10 +72,10 @@ namespace GV {
 		/// deriving the mesh from the test handler (matching the original's own choice).
 		/// Handlers are passed test-first, trial-second, matching the right-to-left convention.
 		//////////////////////////////////////////////////////////////////
-		BilinearForm(const TrialHandler_t& u_handler, const TestHandler_t& v_handler, KernelType kernel = KernelType{}, Weight_t weight = Weight_t{}) :
+		BilinearForm(const TrialHandler_t& u_handler, const TestHandler_t& v_handler, KernelType kernel = KernelType{}) :
 			BASE(v_handler.mesh, std::move(kernel)) {BASE::set_handlers(v_handler, u_handler);}
 
-		BilinearForm(const TrialHandler_t& sym_handler, KernelType kernel=KernelType{}, Weight_t weight = Weight_t{}) requires(Kernel_t::IS_SYMMETRIC) :
+		BilinearForm(const TrialHandler_t& sym_handler, KernelType kernel=KernelType{}) requires(Kernel_t::IS_SYMMETRIC) :
 			BASE(sym_handler.mesh, std::move(kernel)) {BASE::set_handlers(sym_handler);}
 
 

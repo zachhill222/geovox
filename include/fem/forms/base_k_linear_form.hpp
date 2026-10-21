@@ -78,7 +78,7 @@ namespace GV {
 		using MeshElem_t = typename Mesh_t::Elem_t;
 
 		template<size_t Index>
-		using ElemCache_t   = ElementDofCacheNew<Kernel_t, QuadRule_t, typename HandlerType<Index>::DOF_t>;
+		using ElemCache_t   = ElementDofCache<Kernel_t, QuadRule_t, typename HandlerType<Index>::DOF_t>;
 		using WeightCache_t = std::conditional_t<KernelType::NEEDS_WEIGHT, ScalarValueCache<QuadRule_t>, int>;
 
 
@@ -569,14 +569,24 @@ namespace GV {
 			if constexpr (K==0) {qr_depth = 0;}
 			else {
 				qr_depth = [&]<size_t... Is>(std::index_sequence<Is...>) {
-					return std::min((uint8_t)kform.mesh().max_depth, gutil::max(kform.template get_handler<Is>().max_depth_distance...));
+					return std::min((uint8_t)kform.mesh().max_depth, gutil::max(kform.template get_handler<Is>().max_depth_distance()...));
 				}(std::make_index_sequence<K>{});
 			}
 		}
 
+		//For snapshot evaluations, 'which' snapshot must be consistent for all DOF handlers.
+		//Note that integration is done over the current mesh.
 		KernelEval(const KLinearForm& kf, uint8_t which, const gutil::BinSortVector<typename HandlerTypes::DOF_t>&... bin_sorts) noexcept :
-			kform{kf}, qr{kf.mesh()}, kernel{kform.kernel},
-			bin_sort_vectors{static_cast<const void*>(&bin_sorts)...}, using_snapshot{true} {
+				kform{kf}, qr{kf.mesh()}, kernel{kform.kernel},
+				bin_sort_vectors{[&]{
+					std::array<const void*,K> full_bin_sorts{static_cast<const void*>(&bin_sorts)...};
+					std::array<const void*,N_HANDLERS> result{};
+					[&]<size_t... Is>(std::index_sequence<Is...>) {
+						((result[Is] = full_bin_sorts[GetFormPosition(Is)]), ...);
+					}(std::make_index_sequence<N_HANDLERS>{});
+					return result;
+				}()},
+				using_snapshot{true} {
 			if constexpr (K==0) {qr_depth = 0;}
 			else {
 				qr_depth = [&]<size_t... Is>(std::index_sequence<Is...>) {
@@ -586,6 +596,18 @@ namespace GV {
 			getters = make_getters_impl(which, std::make_index_sequence<N_HANDLERS>{});
 		}
 
+
+		// KernelEval(const KLinearForm& kf, uint8_t which, const gutil::BinSortVector<typename HandlerTypes::DOF_t>&... bin_sorts) noexcept :
+		// 	kform{kf}, qr{kf.mesh()}, kernel{kform.kernel},
+		// 	bin_sort_vectors{static_cast<const void*>(&bin_sorts)...}, using_snapshot{true} {
+		// 	if constexpr (K==0) {qr_depth = 0;}
+		// 	else {
+		// 		qr_depth = [&]<size_t... Is>(std::index_sequence<Is...>) {
+		// 			return std::min((uint8_t)kform.mesh().max_depth, gutil::max(kform.template get_handler<Is>().max_depth_distance()...));
+		// 		}(std::make_index_sequence<K>{});
+		// 	}
+		// 	getters = make_getters_impl(which, std::make_index_sequence<N_HANDLERS>{});
+		// }
 
 
 		//////////////////////////////////////////////////////////////

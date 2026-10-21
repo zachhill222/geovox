@@ -27,6 +27,7 @@ namespace GV {
 	template<typename Kernel>
 	concept IsSymmetricBilinearKernel = IsBilinearKernel<Kernel> && Kernel::IS_SYMMETRIC;
 
+
 	///////////////////////////////////////////////////////////////////
 	/// A few standard bilinear kernels
 	///////////////////////////////////////////////////////////////////
@@ -34,8 +35,9 @@ namespace GV {
 	static_assert(IsSymmetricBilinearKernel<ZeroBilinearKernel>);
 
 	template<IsKernelWeight Weight=void>
-	using IdentityBilinearKernel = IdentityKernel<2,Weight>;
-	static_assert(IsSymmetricBilinearKernel<IdentityBilinearKernel<void>>);
+	using UnitBilinearKernel = UnitKernel<2,Weight>;
+	static_assert(IsSymmetricBilinearKernel<UnitBilinearKernel<void>>);
+
 
 	///////////////////////////////////////////////////////////////////
 	/// The L2 bilinear kernel for the bilinear form

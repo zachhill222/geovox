@@ -54,7 +54,7 @@ namespace GV {
 		static constexpr bool   NEEDS_WEIGHT = N_WEIGHTS>0;
 		static constexpr size_t N_SYMMETRIC  = NSymmetric;
 		static constexpr bool   IS_SYMMETRIC = N_SYMMETRIC==K;
-		using WeighType = Weight;
+		using WeightType = Weight;
 		static_assert(N_SYMMETRIC!=1, "A single symmetric argument makes no sense.");
 
 		//////////////////////////////////////////////////////////////////
@@ -176,8 +176,8 @@ namespace GV {
 	/// Make a few helper functions for adding and scaling kernels.
 	//////////////////////////////////////////////////////////////////
 	template<size_t K>
-	struct ZeroKernel : public KLinearKernel<K, void, K, ZeroKernel<K>> {
-		using BASE = KLinearKernel<K,void,K,ZeroKernel<K>>;
+	struct ZeroKernel : public KLinearKernel<K, void, (K==1) ? 0 : K, ZeroKernel<K>> {
+		using BASE = KLinearKernel<K,void,(K==1) ? 0 : K,ZeroKernel<K>>;
 		template<typename QR>
 		using ValueArgType = BASE::template ValueArgType<QR>;
 		template<typename QR>
@@ -204,8 +204,8 @@ namespace GV {
 	};
 
 	template<size_t K, typename Weight=void>
-	struct IdentityKernel : public KLinearKernel<K, Weight, K, IdentityKernel<K,Weight>> {
-		using BASE = KLinearKernel<K,Weight,K,IdentityKernel<K,Weight>>;
+	struct UnitKernel : public KLinearKernel<K, Weight, (K==1) ? 0 : K, UnitKernel<K,Weight>> {
+		using BASE = KLinearKernel<K,Weight,(K==1) ? 0 : K,UnitKernel<K,Weight>>;
 		template<typename QR>
 		using ValueArgType = BASE::template ValueArgType<QR>;
 		template<typename QR>

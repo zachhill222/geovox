@@ -408,7 +408,7 @@ namespace GV {
 	/// This is intended to be created once per thread (per dofhandler) and then updated once per element.
 	///////////////////////////////////////////////////////////////////
 	template<typename Kernel_t, typename QuadRule_t, typename DOF_t>
-	struct ElementDofCacheNew {
+	struct ElementDofCache {
 		using Scalar_t = typename QuadRule_t::Scalar_t;
 		using DofValueCache_t = DofValueCache<QuadRule_t>;
 		using DofGradCache_t  = DofGradCache<QuadRule_t>;
@@ -421,7 +421,7 @@ namespace GV {
 		[[nodiscard]] size_t size() const noexcept {return dofs.size();}
 
 		template<size_t SlotIndex, typename DofHandler_t> requires (std::same_as<DOF_t, typename DofHandler_t::DOF_t>)
-		static void Update(ElementDofCacheNew* existing, const DofHandler_t& handler, const QuadRule_t& qr) noexcept {
+		static void Update(ElementDofCache* existing, const DofHandler_t& handler, const QuadRule_t& qr) noexcept {
 			existing->dofs = handler.get_active_dofs(qr.q_el);
 			const size_t n = existing->dofs.size();
 			existing->global_idx.resize(n);
@@ -443,7 +443,7 @@ namespace GV {
 		// this is inteded to be used for snapshots of the dofhandler where determining
 		// how to look up which dofs are active on an element is more tricky.
 		template<size_t SlotIndex, typename DofStorage_t> requires (std::same_as<DOF_t, typename DofStorage_t::value_type>)
-		static void Update(ElementDofCacheNew* existing, const DofStorage_t& storage, const QuadRule_t& qr) noexcept {
+		static void Update(ElementDofCache* existing, const DofStorage_t& storage, const QuadRule_t& qr) noexcept {
 			const size_t n = existing->dofs.size();
 			existing->global_idx.resize(n);
 			static constexpr bool NEEDS_VALS = Kernel_t::NEED_VALS[SlotIndex];
@@ -460,83 +460,83 @@ namespace GV {
 
 
 	//TODO: phase out this class
-	template<bool AsTest, typename Kernel_t, typename DofHandler_t, typename QuadRule_t>
-	struct ElementDofCache {
+	// template<bool AsTest, typename Kernel_t, typename DofHandler_t, typename QuadRule_t>
+	// struct ElementDofCache {
 
 
-		///////////////////////////////////////////////////////////////
-		/// Aliases and data
-		///////////////////////////////////////////////////////////////
-		using DOF_t      = typename DofHandler_t::DOF_t;
-		using MeshElem_t = typename DofHandler_t::Mesh_t::Elem_t;
-		using Scalar_t   = typename QuadRule_t::Scalar_t;
+	// 	///////////////////////////////////////////////////////////////
+	// 	/// Aliases and data
+	// 	///////////////////////////////////////////////////////////////
+	// 	using DOF_t      = typename DofHandler_t::DOF_t;
+	// 	using MeshElem_t = typename DofHandler_t::Mesh_t::Elem_t;
+	// 	using Scalar_t   = typename QuadRule_t::Scalar_t;
 
-		using DofValueCache_t = DofValueCache<QuadRule_t>;
-		using DofGradCache_t  = DofGradCache<QuadRule_t>;
+	// 	using DofValueCache_t = DofValueCache<QuadRule_t>;
+	// 	using DofGradCache_t  = DofGradCache<QuadRule_t>;
 
-		static constexpr bool NEEDS_DOF_VALS = AsTest ? Kernel_t::TEST_DOF_VALS : Kernel_t::TRIAL_DOF_VALS;
-		static constexpr bool NEEDS_DOF_GRAD = AsTest ? Kernel_t::TEST_DOF_GRAD : Kernel_t::TRIAL_DOF_GRAD;
+	// 	static constexpr bool NEEDS_DOF_VALS = AsTest ? Kernel_t::TEST_DOF_VALS : Kernel_t::TRIAL_DOF_VALS;
+	// 	static constexpr bool NEEDS_DOF_GRAD = AsTest ? Kernel_t::TEST_DOF_GRAD : Kernel_t::TRIAL_DOF_GRAD;
 
-		std::vector<DOF_t>  dofs;		//active dofs on the current element
-		std::vector<size_t> global_idx;	//global numbers of the dofs
+	// 	std::vector<DOF_t>  dofs;		//active dofs on the current element
+	// 	std::vector<size_t> global_idx;	//global numbers of the dofs
 		
-		std::vector<DofValueCache_t> vals;
-		std::vector<DofGradCache_t>  grad;
+	// 	std::vector<DofValueCache_t> vals;
+	// 	std::vector<DofGradCache_t>  grad;
 
-		const DofHandler_t& handler;
-		const QuadRule_t& 	qr;
-
-
-		///////////////////////////////////////////////////////////////
-		/// Constructor to link handler and quadrature rule
-		///////////////////////////////////////////////////////////////
-		ElementDofCache(const DofHandler_t& h, const QuadRule_t& q) : handler(h), qr(q) {}
-		[[nodiscard]] size_t size() const noexcept {return dofs.size();}
-
-		///////////////////////////////////////////////////////////////
-		/// Primary method for caching values. The quadrature rule must already
-		/// be updated.
-		///////////////////////////////////////////////////////////////
-		template<typename Predicate = std::nullptr_t>
-		void gather(Predicate&& pred = nullptr) noexcept {
-			dofs = handler.get_active_dofs(qr.q_el, std::forward<Predicate>(pred));
-			const size_t n = dofs.size();
-
-			global_idx.resize(n);
-			if constexpr (NEEDS_DOF_VALS) {vals.clear(); vals.reserve(n);}
-			if constexpr (NEEDS_DOF_GRAD) {grad.clear(); grad.reserve(n);}
-
-			for (size_t j=0; j<n; ++j) {
-				global_idx[j] = handler.global_number(dofs[j]);
-				GUTIL_ASSERT(global_idx[j] < handler.n_dofs());
-				if constexpr (NEEDS_DOF_VALS) {vals.emplace_back(dofs[j], qr);}
-				if constexpr (NEEDS_DOF_GRAD) {grad.emplace_back(dofs[j], qr);}
-			}
-		}
+	// 	const DofHandler_t& handler;
+	// 	const QuadRule_t& 	qr;
 
 
-		///////////////////////////////////////////////////////////////
-		/// A few query methods to help with computing weights
-		///////////////////////////////////////////////////////////////
-		[[nodiscard]] ScalarValueCache<QuadRule_t> reconstruct_field(std::span<const Scalar_t> global_coefs) noexcept {
-			GUTIL_ASSERT(!vals.empty() && "the dof values were not cached");
-			GUTIL_ASSERT(handler.n_dofs() == global_coefs.size());
-			GUTIL_ASSERT(vals.size() == dofs.size());
+	// 	///////////////////////////////////////////////////////////////
+	// 	/// Constructor to link handler and quadrature rule
+	// 	///////////////////////////////////////////////////////////////
+	// 	ElementDofCache(const DofHandler_t& h, const QuadRule_t& q) : handler(h), qr(q) {}
+	// 	[[nodiscard]] size_t size() const noexcept {return dofs.size();}
 
-			//gather local coefficients
-			ScalarValueCache<QuadRule_t> result{};
-			for (size_t j=0; j<dofs.size(); ++j) {
-				result += global_coefs[global_idx[j]] * vals[j];
-			}
+	// 	///////////////////////////////////////////////////////////////
+	// 	/// Primary method for caching values. The quadrature rule must already
+	// 	/// be updated.
+	// 	///////////////////////////////////////////////////////////////
+	// 	template<typename Predicate = std::nullptr_t>
+	// 	void gather(Predicate&& pred = nullptr) noexcept {
+	// 		dofs = handler.get_active_dofs(qr.q_el, std::forward<Predicate>(pred));
+	// 		const size_t n = dofs.size();
 
-			//evaluate and return
-			return result;
-		}
-	};
+	// 		global_idx.resize(n);
+	// 		if constexpr (NEEDS_DOF_VALS) {vals.clear(); vals.reserve(n);}
+	// 		if constexpr (NEEDS_DOF_GRAD) {grad.clear(); grad.reserve(n);}
 
-	template<typename Kernel_t, typename DofHandler_t, typename QuadRule_t>
-	using ElementTestCache = ElementDofCache<true,Kernel_t,DofHandler_t,QuadRule_t>;
+	// 		for (size_t j=0; j<n; ++j) {
+	// 			global_idx[j] = handler.global_number(dofs[j]);
+	// 			GUTIL_ASSERT(global_idx[j] < handler.n_dofs());
+	// 			if constexpr (NEEDS_DOF_VALS) {vals.emplace_back(dofs[j], qr);}
+	// 			if constexpr (NEEDS_DOF_GRAD) {grad.emplace_back(dofs[j], qr);}
+	// 		}
+	// 	}
 
-	template<typename Kernel_t, typename DofHandler_t, typename QuadRule_t>
-	using ElementTrialCache = ElementDofCache<false,Kernel_t,DofHandler_t,QuadRule_t>;
+
+	// 	///////////////////////////////////////////////////////////////
+	// 	/// A few query methods to help with computing weights
+	// 	///////////////////////////////////////////////////////////////
+	// 	[[nodiscard]] ScalarValueCache<QuadRule_t> reconstruct_field(std::span<const Scalar_t> global_coefs) noexcept {
+	// 		GUTIL_ASSERT(!vals.empty() && "the dof values were not cached");
+	// 		GUTIL_ASSERT(handler.n_dofs() == global_coefs.size());
+	// 		GUTIL_ASSERT(vals.size() == dofs.size());
+
+	// 		//gather local coefficients
+	// 		ScalarValueCache<QuadRule_t> result{};
+	// 		for (size_t j=0; j<dofs.size(); ++j) {
+	// 			result += global_coefs[global_idx[j]] * vals[j];
+	// 		}
+
+	// 		//evaluate and return
+	// 		return result;
+	// 	}
+	// };
+
+	// template<typename Kernel_t, typename DofHandler_t, typename QuadRule_t>
+	// using ElementTestCache = ElementDofCache<true,Kernel_t,DofHandler_t,QuadRule_t>;
+
+	// template<typename Kernel_t, typename DofHandler_t, typename QuadRule_t>
+	// using ElementTrialCache = ElementDofCache<false,Kernel_t,DofHandler_t,QuadRule_t>;
 }
