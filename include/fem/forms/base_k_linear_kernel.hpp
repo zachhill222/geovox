@@ -20,6 +20,20 @@ namespace GV {
 
 
 	//////////////////////////////////////////////////////////////////
+	/// Kernels support addition, scalar multiplication, weights and such.
+	/// The final kernel type could be a type of abstract syntax tree.
+	/// The 'leaf' kernels do the majority of the work and the AST determines
+	/// how to combine the leaf values. For now, the quadrature is done in the leaf nodes
+	/// so that something like wt*(L2 + H1) needs to be represented as (wt*L2)+(wt*H1) instead.
+	/// 
+	/// This is a helper type to store a weight type 
+	/// TODO: build a combined true AST system for weights and kernel values at each quad point.
+
+
+
+
+
+	//////////////////////////////////////////////////////////////////
 	/// A base class for K-linear kernels to use in K-linear forms.
 	/// Specific kernels (eg L2Linear, L2Bilinear, ...) should inherit from this
 	/// so generic queries about what values need to be computed.
