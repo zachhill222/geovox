@@ -12,6 +12,8 @@
 #include "fem/forms/bilinearforms/eigen_wrapper.hpp"
 #include "fem/forms/bilinearforms/triplet.hpp"
 
+#include "fem/forms/syntax_tree/ast_cache.hpp"
+
 namespace GV {
 	///////////////////////////////////////////////////////////////
 	/// A few helpful factories

@@ -172,6 +172,7 @@ namespace GV {
 
 		static constexpr size_t size() noexcept {return static_cast<size_t>(N);}
 		constexpr Scalar_t* data() noexcept {return val;}
+		constexpr const Scalar_t* data() const noexcept {return val;}
 
 		constexpr VectorValueCache() : val{} {}
 		constexpr VectorValueCache(const VectorValueCache&) noexcept = default;

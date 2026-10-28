@@ -6,6 +6,8 @@
 #include "fem/forms/base_k_linear_kernel.hpp"
 #include "fem/forms/weights.hpp"
 
+#include "fem/forms/syntax_tree/ast_cache.hpp"
+
 #include <concepts>
 #include <type_traits>
 
@@ -69,6 +71,36 @@ namespace GV {
 		static constexpr std::array<bool,2> NEED_GRAD{false,false};
 		static constexpr bool IMPL_NEEDS_GEO_POINTS = false;
 
+		// template<typename QuadRule>
+		// [[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(ValueArg<QuadRule> vals,	
+		// 		GradArg<QuadRule>, WeightArg<QuadRule> wt_ptr, const QuadRule& qr) noexcept {
+		// 	//sanity check
+		// 	GUTIL_ASSERT(BASE::IsValArgValid(vals));
+		// 	if constexpr (BASE::NEEDS_WEIGHT) {GUTIL_ASSERT(wt_ptr);}
+
+		// 	//types and compile constants
+		// 	using Scalar = typename QuadRule::Scalar_t;
+		// 	static constexpr int N = QuadRule::TOTAL_QUAD_POINTS;
+		// 	static constexpr auto qw = QuadRule::quad_w();
+
+		// 	const auto& u_vals = *(vals[1]);
+		// 	const auto& v_vals = *(vals[0]);
+
+		// 	//accumulation
+		// 	Scalar val{0};
+		// 	GUTIL_SIMD(reduction(+:val))
+		// 	for (int i=0; i<N; ++i) {
+		// 		if constexpr (BASE::NEEDS_WEIGHT) {
+		// 			val += u_vals[i] * v_vals[i] * (*wt_ptr)[i] * qw[i];
+		// 		}
+		// 		else {
+		// 			val += u_vals[i] * v_vals[i] * qw[i];
+		// 		}
+		// 	}
+
+		// 	return val * qr.jac_det();
+		// }
+
 		template<typename QuadRule>
 		[[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(ValueArg<QuadRule> vals,	
 				GradArg<QuadRule>, WeightArg<QuadRule> wt_ptr, const QuadRule& qr) noexcept {
@@ -78,25 +110,20 @@ namespace GV {
 
 			//types and compile constants
 			using Scalar = typename QuadRule::Scalar_t;
-			static constexpr int N = QuadRule::TOTAL_QUAD_POINTS;
-			static constexpr auto qw = QuadRule::quad_w();
+			static constexpr size_t N = (size_t) QuadRule::TOTAL_QUAD_POINTS;
 
-			const auto& u_vals = *(vals[1]);
-			const auto& v_vals = *(vals[0]);
+			//AST
+			TensorAstNode<Scalar,N,3,0,false> u_node(vals[1]->data());
+			TensorAstNode<Scalar,N,3,0,false> v_node(vals[0]->data());
+			auto l2 = u_node*v_node;
 
-			//accumulation
-			Scalar val{0};
-			GUTIL_SIMD(reduction(+:val))
-			for (int i=0; i<N; ++i) {
-				if constexpr (BASE::NEEDS_WEIGHT) {
-					val += u_vals[i] * v_vals[i] * (*wt_ptr)[i] * qw[i];
-				}
-				else {
-					val += u_vals[i] * v_vals[i] * qw[i];
-				}
+			if constexpr (BASE::NEEDS_WEIGHT) {
+				TensorAstNode<Scalar,N,3,0,false> wt_node(wt_ptr->data());
+				return integrate(wt_node*l2, qr);
 			}
-
-			return val * qr.jac_det();
+			else {
+				return integrate(l2, qr);
+			}
 		}
 	};
 	static_assert(IsSymmetricBilinearKernel<L2BilinearKernel<void>>);
@@ -132,6 +159,47 @@ namespace GV {
 		static constexpr std::array<bool,2> NEED_GRAD{true,true};
 		static constexpr bool IMPL_NEEDS_GEO_POINTS = false;
 
+		// template<typename QuadRule>
+		// [[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(ValueArg<QuadRule>,	
+		// 		GradArg<QuadRule> grad, WeightArg<QuadRule> wt_ptr, const QuadRule& qr) noexcept {
+		// 	//sanity check
+		// 	GUTIL_ASSERT(BASE::IsGradArgValid(grad));
+		// 	if constexpr (BASE::NEEDS_WEIGHT) {GUTIL_ASSERT(wt_ptr);}
+
+		// 	//types and compile constants
+		// 	using Scalar = typename QuadRule::Scalar_t;
+		// 	static constexpr int N = QuadRule::TOTAL_QUAD_POINTS;
+		// 	static constexpr auto qw = QuadRule::quad_w();
+
+		// 	const auto& u_grad = *(grad[1]);
+		// 	const auto& v_grad = *(grad[0]);
+
+		// 	//chain rule. note we need the jacobian inverse at the dof support depth
+		// 	const Scalar j_i_xx = qr.jacobian_diag_inv[u_grad.depth][0]*qr.jacobian_diag_inv[v_grad.depth][0];
+		// 	const Scalar j_i_yy = qr.jacobian_diag_inv[u_grad.depth][1]*qr.jacobian_diag_inv[v_grad.depth][1];
+		// 	const Scalar j_i_zz = qr.jacobian_diag_inv[u_grad.depth][2]*qr.jacobian_diag_inv[v_grad.depth][2];
+			
+		// 	//accumulation
+		// 	Scalar val{0};
+		// 	GUTIL_SIMD(reduction(+:val))
+		// 	for (int i=0; i<N; ++i) {
+		// 		if constexpr (BASE::NEEDS_WEIGHT) {
+		// 			//note the access pattern is dof->component->value at quad point
+		// 			val += (u_grad[0][i] * v_grad[0][i] * j_i_xx +
+		// 					u_grad[1][i] * v_grad[1][i] * j_i_yy +
+		// 					u_grad[2][i] * v_grad[2][i] * j_i_zz ) * (*wt_ptr)[i] * qw[i];
+		// 		}
+		// 		else {
+		// 			//note the access pattern is dof->component->value at quad point
+		// 			val += (u_grad[0][i] * v_grad[0][i] * j_i_xx +
+		// 					u_grad[1][i] * v_grad[1][i] * j_i_yy +
+		// 					u_grad[2][i] * v_grad[2][i] * j_i_zz ) * qw[i];
+		// 		}
+		// 	}
+
+		// 	return val * qr.jac_det();
+		// }
+
 		template<typename QuadRule>
 		[[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(ValueArg<QuadRule>,	
 				GradArg<QuadRule> grad, WeightArg<QuadRule> wt_ptr, const QuadRule& qr) noexcept {
@@ -141,36 +209,32 @@ namespace GV {
 
 			//types and compile constants
 			using Scalar = typename QuadRule::Scalar_t;
-			static constexpr int N = QuadRule::TOTAL_QUAD_POINTS;
-			static constexpr auto qw = QuadRule::quad_w();
+			static constexpr size_t N = (size_t) QuadRule::TOTAL_QUAD_POINTS;
 
 			const auto& u_grad = *(grad[1]);
 			const auto& v_grad = *(grad[0]);
 
-			//chain rule. note we need the jacobian inverse at the dof support depth
-			const Scalar j_i_xx = qr.jacobian_diag_inv[u_grad.depth][0]*qr.jacobian_diag_inv[v_grad.depth][0];
-			const Scalar j_i_yy = qr.jacobian_diag_inv[u_grad.depth][1]*qr.jacobian_diag_inv[v_grad.depth][1];
-			const Scalar j_i_zz = qr.jacobian_diag_inv[u_grad.depth][2]*qr.jacobian_diag_inv[v_grad.depth][2];
-			
-			//accumulation
-			Scalar val{0};
-			GUTIL_SIMD(reduction(+:val))
-			for (int i=0; i<N; ++i) {
-				if constexpr (BASE::NEEDS_WEIGHT) {
-					//note the access pattern is dof->component->value at quad point
-					val += (u_grad[0][i] * v_grad[0][i] * j_i_xx +
-							u_grad[1][i] * v_grad[1][i] * j_i_yy +
-							u_grad[2][i] * v_grad[2][i] * j_i_zz ) * (*wt_ptr)[i] * qw[i];
-				}
-				else {
-					//note the access pattern is dof->component->value at quad point
-					val += (u_grad[0][i] * v_grad[0][i] * j_i_xx +
-							u_grad[1][i] * v_grad[1][i] * j_i_yy +
-							u_grad[2][i] * v_grad[2][i] * j_i_zz ) * qw[i];
-				}
-			}
+			//Chain rule jacobian
+			Scalar jac_diag[3] {
+				qr.jacobian_diag_inv[u_grad.depth][0]*qr.jacobian_diag_inv[v_grad.depth][0],
+				qr.jacobian_diag_inv[u_grad.depth][1]*qr.jacobian_diag_inv[v_grad.depth][1],
+				qr.jacobian_diag_inv[u_grad.depth][2]*qr.jacobian_diag_inv[v_grad.depth][2]
+			};
 
-			return val * qr.jac_det();
+			//AST
+			TensorAstNode<Scalar,N,3,1,false> u_node(u_grad.data());
+			TensorAstNode<Scalar,N,3,1,false> v_node(v_grad.data());
+			
+			TensorAstNode<Scalar,N,3,1,true> jac_node(jac_diag);
+			auto h1 = dot(u_node,jac_node*v_node);
+
+			if constexpr (BASE::NEEDS_WEIGHT) {
+				TensorAstNode<Scalar,N,3,0,false> wt_node(wt_ptr->data());
+				return integrate(wt_node*h1, qr);
+			}
+			else {
+				return integrate(h1, qr);
+			}
 		}
 	};
 	static_assert(IsSymmetricBilinearKernel<H1BilinearKernel<void>>);
