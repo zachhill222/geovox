@@ -67,6 +67,7 @@ namespace GV {
 
 		static constexpr std::array<bool,2> NEED_VALS{true,true};
 		static constexpr std::array<bool,2> NEED_GRAD{false,false};
+		static constexpr bool IMPL_NEEDS_GEO_POINTS = false;
 
 		template<typename QuadRule>
 		[[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(ValueArg<QuadRule> vals,	
@@ -129,6 +130,7 @@ namespace GV {
 
 		static constexpr std::array<bool,2> NEED_VALS{false,false};
 		static constexpr std::array<bool,2> NEED_GRAD{true,true};
+		static constexpr bool IMPL_NEEDS_GEO_POINTS = false;
 
 		template<typename QuadRule>
 		[[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(ValueArg<QuadRule>,	
@@ -202,6 +204,7 @@ namespace GV {
 
 		static constexpr std::array<bool,2> NEED_VALS{false,true};
 		static constexpr std::array<bool,2> NEED_GRAD{true,false};
+		static constexpr bool IMPL_NEEDS_GEO_POINTS = false;
 
 		template<typename QuadRule>
 		[[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(ValueArg<QuadRule> vals,	
@@ -273,6 +276,7 @@ namespace GV {
 
 		static constexpr std::array<bool,2> NEED_VALS{true,false};
 		static constexpr std::array<bool,2> NEED_GRAD{false,true};
+		static constexpr bool IMPL_NEEDS_GEO_POINTS = false;
 
 		template<typename QuadRule>
 		[[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(ValueArg<QuadRule> vals,	
@@ -314,4 +318,214 @@ namespace GV {
 	static_assert(IsBilinearKernel<PartialValBilinearForm<0,void>>);
 	static_assert(IsBilinearKernel<PartialValBilinearForm<1,void>>);
 	static_assert(IsBilinearKernel<PartialValBilinearForm<2,void>>);
+
+
+	///////////////////////////////////////////////////////////////////
+	/// Pseudo bilinear forms
+	///////////////////////////////////////////////////////////////////
+	///////////////////////////////////////////////////////////////////
+	/// Not a bilinear form, but can be evaluated as such. Do not use this
+	/// to create a mass/stiffness matrix.
+	///
+	/// Compute the value E_L1(u,v) = int_D( |u-v| * wt)
+	///////////////////////////////////////////////////////////////////
+	template<IsKernelWeight Weight=void>
+	struct L1Error : public KLinearKernel<2,Weight,2,L1Error<Weight>> {
+		using BASE = KLinearKernel<2,Weight,2,L1Error<Weight>>;
+		static_assert(BASE::IS_SYMMETRIC);
+		template<typename QR>
+		using ValueArgType = BASE::template ValueArgType<QR>;
+		template<typename QR>
+		using GradArgType = BASE::template GradArgType<QR>;
+		template<typename QR>
+		using WeightArgType = BASE::template WeightArgType<QR>;
+		template<typename QR>
+		using ValueArg = typename BASE::template ValueArg<QR>;
+		template<typename QR>
+		using GradArg = typename BASE::template GradArg<QR>;
+		template<typename QR>
+		using WeightArg = typename BASE::template WeightArg<QR>;
+		using WeightType = Weight;
+		
+		using BASE::BASE;
+
+		static constexpr std::array<bool,2> NEED_VALS{true,true};
+		static constexpr std::array<bool,2> NEED_GRAD{false,false};
+		static constexpr bool IMPL_NEEDS_GEO_POINTS = false;
+
+		template<typename QuadRule>
+		[[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(ValueArg<QuadRule> vals,	
+				GradArg<QuadRule>, WeightArg<QuadRule> wt_ptr, const QuadRule& qr) noexcept {
+			//sanity check
+			GUTIL_ASSERT(BASE::IsValArgValid(vals));
+			if constexpr (BASE::NEEDS_WEIGHT) {GUTIL_ASSERT(wt_ptr);}
+
+			//types and compile constants
+			using Scalar = typename QuadRule::Scalar_t;
+			static constexpr int N = QuadRule::TOTAL_QUAD_POINTS;
+			static constexpr auto qw = QuadRule::quad_w();
+
+			const auto& u_vals = *(vals[1]);
+			const auto& v_vals = *(vals[0]);
+
+			//accumulation
+			Scalar val{0};
+			GUTIL_SIMD(reduction(+:val))
+			for (int i=0; i<N; ++i) {
+				Scalar delta = u_vals[i] - v_vals[i];
+				if constexpr (BASE::NEEDS_WEIGHT) {
+					val += gutil::abs(delta) * (*wt_ptr)[i] * qw[i];
+				}
+				else {
+					val += gutil::abs(delta) * qw[i];
+				}
+			}
+
+			return val * qr.jac_det();
+		}
+	};
+	static_assert(IsSymmetricBilinearKernel<L1Error<void>>);
+
+
+	///////////////////////////////////////////////////////////////////
+	/// Not a bilinear form, but can be evaluated as such. Do not use this
+	/// to create a mass/stiffness matrix.
+	///
+	/// Compute the value E_L2(u,v) = int_D( (u-v)^2 * wt)
+	///////////////////////////////////////////////////////////////////
+	template<IsKernelWeight Weight=void>
+	struct L2SquaredError : public KLinearKernel<2,Weight,2,L2SquaredError<Weight>> {
+		using BASE = KLinearKernel<2,Weight,2,L2SquaredError<Weight>>;
+		static_assert(BASE::IS_SYMMETRIC);
+		template<typename QR>
+		using ValueArgType = BASE::template ValueArgType<QR>;
+		template<typename QR>
+		using GradArgType = BASE::template GradArgType<QR>;
+		template<typename QR>
+		using WeightArgType = BASE::template WeightArgType<QR>;
+		template<typename QR>
+		using ValueArg = typename BASE::template ValueArg<QR>;
+		template<typename QR>
+		using GradArg = typename BASE::template GradArg<QR>;
+		template<typename QR>
+		using WeightArg = typename BASE::template WeightArg<QR>;
+		using WeightType = Weight;
+		
+		using BASE::BASE;
+
+		static constexpr std::array<bool,2> NEED_VALS{true,true};
+		static constexpr std::array<bool,2> NEED_GRAD{false,false};
+		static constexpr bool IMPL_NEEDS_GEO_POINTS = false;
+
+		template<typename QuadRule>
+		[[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(ValueArg<QuadRule> vals,	
+				GradArg<QuadRule>, WeightArg<QuadRule> wt_ptr, const QuadRule& qr) noexcept {
+			//sanity check
+			GUTIL_ASSERT(BASE::IsValArgValid(vals));
+			if constexpr (BASE::NEEDS_WEIGHT) {GUTIL_ASSERT(wt_ptr);}
+
+			//types and compile constants
+			using Scalar = typename QuadRule::Scalar_t;
+			static constexpr int N = QuadRule::TOTAL_QUAD_POINTS;
+			static constexpr auto qw = QuadRule::quad_w();
+
+			const auto& u_vals = *(vals[1]);
+			const auto& v_vals = *(vals[0]);
+
+			//accumulation
+			Scalar val{0};
+			GUTIL_SIMD(reduction(+:val))
+			for (int i=0; i<N; ++i) {
+				Scalar delta = u_vals[i] - v_vals[i];
+				if constexpr (BASE::NEEDS_WEIGHT) {
+					val += delta*delta * (*wt_ptr)[i] * qw[i];
+				}
+				else {
+					val += delta*delta * qw[i];
+				}
+			}
+
+			return val * qr.jac_det();
+		}
+	};
+	static_assert(IsSymmetricBilinearKernel<L2SquaredError<void>>);
+
+
+	///////////////////////////////////////////////////////////////////
+	/// Not a bilinear form, but can be evaluated as such. Do not use this
+	/// to create a mass/stiffness matrix.
+	///
+	/// Compute the value E_H1(u,v) = int_D( |grad(u)-grad(v)|^2 * wt)
+	///////////////////////////////////////////////////////////////////
+	template<IsKernelWeight Weight=void>
+	struct H1SquaredError : public KLinearKernel<2,Weight,2,H1SquaredError<Weight>> {
+		using BASE = KLinearKernel<2,Weight,2,H1SquaredError<Weight>>;
+		static_assert(BASE::IS_SYMMETRIC);
+		template<typename QR>
+		using ValueArgType = BASE::template ValueArgType<QR>;
+		template<typename QR>
+		using GradArgType = BASE::template GradArgType<QR>;
+		template<typename QR>
+		using WeightArgType = BASE::template WeightArgType<QR>;
+		template<typename QR>
+		using ValueArg = typename BASE::template ValueArg<QR>;
+		template<typename QR>
+		using GradArg = typename BASE::template GradArg<QR>;
+		template<typename QR>
+		using WeightArg = typename BASE::template WeightArg<QR>;
+		using WeightType = Weight;
+
+		using BASE::BASE;
+
+		static constexpr std::array<bool,2> NEED_VALS{false,false};
+		static constexpr std::array<bool,2> NEED_GRAD{true,true};
+		static constexpr bool IMPL_NEEDS_GEO_POINTS = false;
+
+		template<typename QuadRule>
+		[[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(ValueArg<QuadRule>,	
+				GradArg<QuadRule> grad, WeightArg<QuadRule> wt_ptr, const QuadRule& qr) noexcept {
+			//sanity check
+			GUTIL_ASSERT(BASE::IsGradArgValid(grad));
+			if constexpr (BASE::NEEDS_WEIGHT) {GUTIL_ASSERT(wt_ptr);}
+
+			//types and compile constants
+			using Scalar = typename QuadRule::Scalar_t;
+			static constexpr int N = QuadRule::TOTAL_QUAD_POINTS;
+			static constexpr auto qw = QuadRule::quad_w();
+
+			const auto& u_grad = *(grad[1]);
+			const auto& v_grad = *(grad[0]);
+
+			//chain rule. note we need the jacobian inverse at the dof support depth
+			const Scalar j_i_xx = qr.jacobian_diag_inv[u_grad.depth][0]*qr.jacobian_diag_inv[v_grad.depth][0];
+			const Scalar j_i_yy = qr.jacobian_diag_inv[u_grad.depth][1]*qr.jacobian_diag_inv[v_grad.depth][1];
+			const Scalar j_i_zz = qr.jacobian_diag_inv[u_grad.depth][2]*qr.jacobian_diag_inv[v_grad.depth][2];
+			
+			//accumulation
+			Scalar val{0};
+			GUTIL_SIMD(reduction(+:val))
+			for (int i=0; i<N; ++i) {
+				Scalar delta[3];
+				delta[0] = u_grad[0][i] - v_grad[0][i];
+				delta[1] = u_grad[1][i] - v_grad[1][i];
+				delta[2] = u_grad[2][i] - v_grad[2][i];
+
+				if constexpr (BASE::NEEDS_WEIGHT) {
+					//note the access pattern is dof->component->value at quad point
+					val += (delta[0]*delta[0] * j_i_xx +
+							delta[1]*delta[1] * j_i_yy +
+							delta[2]*delta[2] * j_i_zz ) * (*wt_ptr)[i] * qw[i];
+				}
+				else {
+					//note the access pattern is dof->component->value at quad point
+					val += (delta[0]*delta[0] * j_i_xx +
+							delta[1]*delta[1] * j_i_yy +
+							delta[2]*delta[2] * j_i_zz ) * qw[i];
+				}
+			}
+
+			return val * qr.jac_det();
+		}
+	};
+	static_assert(IsSymmetricBilinearKernel<H1SquaredError<void>>);
 }

@@ -59,6 +59,7 @@ namespace GV {
 
 		static constexpr std::array<bool,1> NEED_VALS{true};
 		static constexpr std::array<bool,1> NEED_GRAD{false};
+		static constexpr bool IMPL_NEEDS_GEO_POINTS = false;
 		
 		template<typename QuadRule>
 		[[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(ValueArg<QuadRule> vals,	
@@ -88,4 +89,74 @@ namespace GV {
 		}
 	};
 	static_assert(IsLinearKernel<L2LinearKernel<void>>);
+
+
+
+	///////////////////////////////////////////////////////////////////
+	/// Pseudo linear forms
+	///////////////////////////////////////////////////////////////////
+	///////////////////////////////////////////////////////////////////
+	///////////////////////////////////////////////////////////////////
+	/// Not a linear form, but can be evaluated as such.
+	///
+	/// Compute the value E_L1(v) = int_D( |v-f| * wt) given a function f
+	/////////////////////////////////////////////////////////////////// 
+	template<auto f, IsKernelWeight Weight=void>
+	struct L2ExactErrorKernel : public KLinearKernel<1,Weight,0,L2ExactErrorKernel<f,Weight>> {
+		using BASE = KLinearKernel<1,Weight,0,L2ExactErrorKernel<f,Weight>>;
+		template<typename QR>
+		using ValueArgType = BASE::template ValueArgType<QR>;
+		template<typename QR>
+		using GradArgType = BASE::template GradArgType<QR>;
+		template<typename QR>
+		using WeightArgType = BASE::template WeightArgType<QR>;
+		template<typename QR>
+		using ValueArg = typename BASE::template ValueArg<QR>;
+		template<typename QR>
+		using GradArg = typename BASE::template GradArg<QR>;
+		template<typename QR>
+		using WeightArg = typename BASE::template WeightArg<QR>;
+		using WeightType = Weight;
+		
+		using BASE::BASE;
+
+		static constexpr std::array<bool,1> NEED_VALS{true};
+		static constexpr std::array<bool,1> NEED_GRAD{false};
+		static constexpr bool IMPL_NEEDS_GEO_POINTS = true;
+		
+		template<typename QuadRule>
+		[[nodiscard]] static typename QuadRule::Scalar_t CachedEvalImpl(ValueArg<QuadRule> vals,	
+				GradArg<QuadRule>, WeightArg<QuadRule> wt_ptr, const QuadRule& qr) noexcept {
+			//sanity check
+			GUTIL_ASSERT(BASE::IsValArgValid(vals));
+			if constexpr (BASE::NEEDS_WEIGHT) {GUTIL_ASSERT(wt_ptr);}
+
+			//types and compile constants
+			using Scalar_t = typename QuadRule::Scalar_t;
+			static constexpr int N = QuadRule::TOTAL_QUAD_POINTS;
+			static constexpr auto qw = QuadRule::quad_w();
+
+			const auto& v_vals = *(vals[0]); //convert pointer to reference
+			const auto x = qr.geo_x();
+			const auto y = qr.geo_y();
+			const auto z = qr.geo_z();
+
+			Scalar_t val{0};
+			GUTIL_SIMD(reduction(+:val))
+			for (int i=0; i<N; ++i) {
+				Scalar_t delta = v_vals[i] - f(x[i], y[i], z[i]);
+				if constexpr (BASE::NEEDS_WEIGHT) {
+					val += delta*delta * (*wt_ptr)[i] * qw[i];
+				}
+				else {
+					val += delta*delta * qw[i];
+				}
+			}
+			return val * qr.jac_det();
+		}
+	};
+	static_assert(IsLinearKernel<L2ExactErrorKernel<[](float,float,float){return 0.f;}, void>>);
+
+
+
 }

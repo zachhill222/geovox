@@ -322,7 +322,7 @@ namespace GV {
 		/// A few fallback/generic methods.
 		/// Note that coefficients are indexed right to left.
 		//////////////////////////////////////////////////////////////////
-		template<typename... Spans> requires (sizeof...(Spans)==K && AllArgsSameAs<std::span<const Scalar_t>, Spans...>)
+		template<typename... Spans> requires (sizeof...(Spans)==K) // && AllArgsSameAs<std::span<const Scalar_t>, Spans...>)
 		[[nodiscard]] Scalar_t evaluate(Spans... x_spans) const noexcept {
 			GUTIL_PROFILE_FUNCTION();
 			std::array<std::span<const Scalar_t>, K> X{x_spans...};
@@ -549,9 +549,9 @@ namespace GV {
 		//////////////////////////////////////////////////////////////
 		const KLinearForm& kform;
 		QuadRule_t qr;
-		uint8_t qr_depth{};
+		uint8_t qr_depth{};		//depth required to ensure that all support elements are found for a given quadrature element
 		Kernel_t kernel{};
-		Weight_t weight{};
+		Weight_t weight{};		//TODO: move to the kernel
 
 		CacheTuple_t dof_caches{};
 		[[no_unique_address]] WeightArg wt_cache{};
@@ -569,7 +569,7 @@ namespace GV {
 			if constexpr (K==0) {qr_depth = 0;}
 			else {
 				qr_depth = [&]<size_t... Is>(std::index_sequence<Is...>) {
-					return std::min((uint8_t)kform.mesh().max_depth, gutil::max(kform.template get_handler<Is>().max_depth_distance()...));
+					return gutil::min((uint8_t)kform.mesh().max_depth, gutil::max(kform.template get_handler<Is>().max_depth_distance...));
 				}(std::make_index_sequence<K>{});
 			}
 		}
@@ -590,7 +590,7 @@ namespace GV {
 			if constexpr (K==0) {qr_depth = 0;}
 			else {
 				qr_depth = [&]<size_t... Is>(std::index_sequence<Is...>) {
-					return std::min((uint8_t)kform.mesh().max_depth, gutil::max(kform.template get_handler<Is>().max_depth_distance()...));
+					return std::min((uint8_t)kform.mesh().max_depth, gutil::max(kform.template get_handler<Is>().max_depth_distance...));
 				}(std::make_index_sequence<K>{});
 			}
 			getters = make_getters_impl(which, std::make_index_sequence<N_HANDLERS>{});
@@ -603,7 +603,7 @@ namespace GV {
 		// 	if constexpr (K==0) {qr_depth = 0;}
 		// 	else {
 		// 		qr_depth = [&]<size_t... Is>(std::index_sequence<Is...>) {
-		// 			return std::min((uint8_t)kform.mesh().max_depth, gutil::max(kform.template get_handler<Is>().max_depth_distance()...));
+		// 			return std::min((uint8_t)kform.mesh().max_depth, gutil::max(kform.template get_handler<Is>().max_depth_distance...));
 		// 		}(std::make_index_sequence<K>{});
 		// 	}
 		// 	getters = make_getters_impl(which, std::make_index_sequence<N_HANDLERS>{});
@@ -615,8 +615,10 @@ namespace GV {
 		//////////////////////////////////////////////////////////////
 		void set_element(MeshElem_t el) noexcept {
 			qr.set_element(el, qr_depth);
+			if constexpr (Kernel_t::NEEDS_GEO_POINTS) {
+				qr.build_geometric_coords();
+			}
 			if constexpr (Kernel_t::NEEDS_WEIGHT) {
-				if constexpr (Weight_t::NEEDS_GEO_POINTS) {qr.build_geometric_coords();}
 				wt_cache = weight.template build_weights<QuadRule_t>(qr);
 			}
 			build_caches(el);

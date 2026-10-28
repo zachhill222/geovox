@@ -456,6 +456,21 @@ namespace GV {
 				if constexpr (NEEDS_GRAD) {existing->grad.emplace_back(existing->dofs[j], qr);}
 			}
 		}
+
+		[[nodiscard]] ScalarValueCache<QuadRule_t> reconstruct_field(std::span<const Scalar_t> global_coefs) noexcept {
+			GUTIL_ASSERT(!vals.empty() && "the dof values were not cached");
+			GUTIL_ASSERT(handler.n_dofs() == global_coefs.size());
+			GUTIL_ASSERT(vals.size() == dofs.size());
+
+			//gather local coefficients
+			ScalarValueCache<QuadRule_t> result{};
+			for (size_t j=0; j<dofs.size(); ++j) {
+				result += global_coefs[global_idx[j]] * vals[j];
+			}
+
+			//evaluate and return
+			return result;
+		}
 	};
 
 

@@ -118,8 +118,7 @@ inline constexpr auto u_exact = [](Scalar_t x, Scalar_t y, Scalar_t z) constexpr
 inline constexpr auto f_source   = [](Scalar_t, Scalar_t, Scalar_t) constexpr noexcept { return Scalar_t{6}; };
 inline constexpr auto g_boundary = [](Scalar_t, Scalar_t, Scalar_t) constexpr noexcept { return Scalar_t{0}; };
 
-using L2ErrorWeight_t = GV::L2DiffuseErrorWeight<Assembly_t, u_exact>;
-using ErrorForm_t     = GV::LinearForm<N_QUAD_POINTS_PER_AXIS+1, Scalar_t, DofHandler_t, GV::L2LinearKernel<>, L2ErrorWeight_t>;
+using ErrorForm_t     = GV::LinearForm<N_QUAD_POINTS_PER_AXIS+1, Scalar_t, DofHandler_t, GV::L2ExactErrorKernel<u_exact,InteriorWeight_t>>;
 
 
 /////////////////////////////////////////////////////////////
@@ -185,13 +184,13 @@ void solve_with_spmat(MeshHandler_t& m_handler, DofHandler_t& d_handler, CoefHan
 	GV::AssemblyDiffuseDomain<Assembly_t>::SetEps(eps);
 
 	InteriorWeight_t interior_wt{};	//phi
-	auto penalty_wt = (Scalar_t{1}/(eps*eps*eps)) * ExteriorWeight_t{}; //(1-phi)/eps^3
+	auto penalty_kernel = (Scalar_t{1}/(eps*eps*eps)) * GV::L2BilinearKernel<ExteriorWeight_t>{}; //(1-phi)/eps^3
 
 	{
 		GUTIL_TIMER("Building triplets");
-		auto poisson_form = GV::MakeBilinearForm<N_QUAD_POINTS_PER_AXIS,Scalar_t>(d_handler, GV::H1BilinearKernel_SW{}, interior_wt);
+		auto poisson_form = GV::MakeBilinearForm<N_QUAD_POINTS_PER_AXIS,Scalar_t>(d_handler, GV::H1BilinearKernel<InteriorWeight_t>{});
 
-		auto penalty_form = GV::MakeBilinearForm<N_QUAD_POINTS_PER_AXIS,Scalar_t>(d_handler, GV::L2BilinearKernel_SW{}, penalty_wt);
+		auto penalty_form = GV::MakeBilinearForm<N_QUAD_POINTS_PER_AXIS,Scalar_t>(d_handler, penalty_kernel);
 
 		//each build_triplets de-duplicates it's own list
 		//let eigen sum the entries from both parts of the form
@@ -210,8 +209,8 @@ void solve_with_spmat(MeshHandler_t& m_handler, DofHandler_t& d_handler, CoefHan
 		GV::ModifiedFunctionKernelWeight<Assembly_t, f_source> source_wt{};
 		GV::ModifiedFunctionKernelWeight<Assembly_t, g_boundary> boundary_wt{};
 
-		auto source_form = GV::MakeLinearForm<N_QUAD_POINTS_PER_AXIS,Scalar_t>(d_handler, GV::L2LinearKernel_W{}, interior_wt*source_wt);
-		auto boundary_form = GV::MakeLinearForm<N_QUAD_POINTS_PER_AXIS,Scalar_t>(d_handler, GV::L2LinearKernel_W{}, penalty_wt*boundary_wt);
+		auto source_form = GV::MakeLinearForm<N_QUAD_POINTS_PER_AXIS,Scalar_t>(d_handler, (interior_wt*source_wt)*GV::L2LinearKernel<>{});
+		auto boundary_form = GV::MakeLinearForm<N_QUAD_POINTS_PER_AXIS,Scalar_t>(d_handler, (penalty_wt*boundary_wt)*GV::L2LinearKernel<>{});
 		
 		//each call to evaluate_vector accumulates into the provided span
 		source_form.evaluate_vector(GV::as_span(b));
@@ -237,7 +236,7 @@ void solve_with_spmat(MeshHandler_t& m_handler, DofHandler_t& d_handler, CoefHan
 void log_solution(const MeshHandler_t& m_handler, const DofHandler_t& d_handler, const CoefHandler_t& c_handler) {
 	//compute the L2 error
 	ErrorForm_t e_form(d_handler);
-	auto err = gutil::sqrt(e_form.integrate_weight(c_handler.get_coefs(0)));
+	auto err = gutil::sqrt(e_form.evaluate(c_handler.get_coefs(0)));
 
 	GUTIL_LOG("L2 error: ", err, " n_dofs= ", d_handler.n_dofs(), " min_h= ", m_handler.min_element_size());
 	mesh_size.push_back(m_handler.min_element_size());

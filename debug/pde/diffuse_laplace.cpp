@@ -85,8 +85,8 @@ inline constexpr auto u_exact = [](Scalar_t x, Scalar_t y, Scalar_t z) constexpr
 inline constexpr auto f_source = [](Scalar_t, Scalar_t, Scalar_t) constexpr noexcept { return Scalar_t{6}; };
 inline constexpr auto g_boundary = [](Scalar_t, Scalar_t, Scalar_t) constexpr noexcept { return Scalar_t{0}; };
 
-using L2ErrorWeight_t = GV::L2DiffuseErrorWeight<Assembly_t, u_exact>;
-using ErrorForm_t     = GV::LinearForm<4, Scalar_t, DofHandler_t, GV::L2LinearKernel<>, L2ErrorWeight_t>;
+// using L2ErrorWeight_t = GV::L2DiffuseErrorWeight<Assembly_t, u_exact>;
+// using ErrorForm_t     = GV::LinearForm<4, Scalar_t, DofHandler_t, L2ErrorWeight_t{}*GV::L2SquaredError<>>;
 
 ///////////////////////////////////////////////////////////////////////////
 /// Weight/kernel/form aliases. StaticID left at its default (0) throughout
@@ -100,15 +100,15 @@ using ExteriorWeight_t = GV::AssemblyPhaseFieldWeight<false, Assembly_t>;
 using SourceWeight_t   = GV::ProductKernelWeight<InteriorWeight_t, GV::ModifiedFunctionKernelWeight<Assembly_t, f_source>>;
 using BoundaryWeight_t = GV::ProductKernelWeight<ExteriorWeight_t, GV::ModifiedFunctionKernelWeight<Assembly_t, g_boundary>>;
 
-using LaplaceKernel_t  = GV::H1BilinearKernel<true>;
-using PenaltyKernel_t  = GV::L2BilinearKernel<true>;
+using LaplaceKernel_t  = GV::H1BilinearKernel<InteriorWeight_t>;
+using PenaltyKernel_t  = GV::L2BilinearKernel<ExteriorWeight_t>; //multiply by the scale
 
-using LaplaceForm_t  = GV::BilinearForm<4, Scalar_t, DofHandler_t, DofHandler_t, LaplaceKernel_t, InteriorWeight_t>;
-using SourceForm_t   = GV::LinearForm<4, Scalar_t, DofHandler_t, GV::L2LinearKernel<true>, SourceWeight_t>;
-using PenaltyForm_t  = GV::BilinearForm<4, Scalar_t, DofHandler_t, DofHandler_t, PenaltyKernel_t,
-                            GV::ScaledKernelWeight<Scalar_t, ExteriorWeight_t>>;
-using BoundaryForm_t = GV::LinearForm<4, Scalar_t, DofHandler_t, GV::L2LinearKernel<true>,
-                            GV::ScaledKernelWeight<Scalar_t, BoundaryWeight_t>>;
+// using LaplaceForm_t  = GV::BilinearForm<4, Scalar_t, DofHandler_t, DofHandler_t, LaplaceKernel_t, InteriorWeight_t>;
+// using SourceForm_t   = GV::LinearForm<4, Scalar_t, DofHandler_t, GV::L2LinearKernel<true>, SourceWeight_t>;
+// using PenaltyForm_t  = GV::BilinearForm<4, Scalar_t, DofHandler_t, DofHandler_t, PenaltyKernel_t,
+//                             GV::ScaledKernelWeight<Scalar_t, ExteriorWeight_t>>;
+// using BoundaryForm_t = GV::LinearForm<4, Scalar_t, DofHandler_t, GV::L2LinearKernel<true>,
+//                             GV::ScaledKernelWeight<Scalar_t, BoundaryWeight_t>>;
 
 
 
@@ -170,8 +170,11 @@ int main(int argc, char* argv[]) {
 		// ---- Assemble A = Laplace-term + Penalty-term, via shared triplets ----
 		// mesh_handler.mesh.sort_elements_by_color();
 		const Scalar_t eps3_inv = Scalar_t{1}/(eps*eps*eps);
-		PenaltyForm_t penalty_form(d_handler, PenaltyKernel_t{}, GV::ScaledKernelWeight<Scalar_t, ExteriorWeight_t>(eps3_inv));
-		LaplaceForm_t laplace_form(d_handler);
+		auto penalty_form = GV::MakeBilinearForm<4,Scalar_t>(d_handler, eps3_inv*PenaltyKernel_t{});
+		auto laplace_form = GV::MakeBilinearForm<4,Scalar_t>(d_handler, LaplaceKernel_t{});
+		// PenaltyForm_t penalty_form(d_handler, PenaltyKernel_t{}, GV::ScaledKernelWeight<Scalar_t, ExteriorWeight_t>(eps3_inv));
+		// LaplaceForm_t laplace_form(d_handler);
+
 		// GV::BilinearFormOperator laplace_op(laplace_form);
 		// GV::BilinearFormOperator penalty_op(penalty_form);
 		// auto lhs_op = laplace_op + penalty_op;
@@ -197,8 +200,10 @@ int main(int argc, char* argv[]) {
 		delete t1;
 
 		// ---- Assemble b = Source-term + Boundary-term ----
-		SourceForm_t   source_form(d_handler);
-		BoundaryForm_t boundary_form(d_handler, GV::L2LinearKernel<true>{}, GV::ScaledKernelWeight<Scalar_t, BoundaryWeight_t>(eps3_inv));
+		auto source_form = GV::MakeLinearForm<4,Scalar_t>(d_handler, GV::L2LinearKernel<SourceWeight_t>{});
+		auto boundary_form = GV::MakeLinearForm<4,Scalar_t>(d_handler, eps3_inv*GV::L2LinearKernel<BoundaryWeight_t>{});
+		// SourceForm_t   source_form(d_handler);
+		// BoundaryForm_t boundary_form(d_handler, GV::L2LinearKernel<true>{}, GV::ScaledKernelWeight<Scalar_t, BoundaryWeight_t>(eps3_inv));
 
 		std::vector<Scalar_t> rhs(n, 0);
 		{
@@ -238,8 +243,9 @@ int main(int argc, char* argv[]) {
 			}
 			
 			//compute the L2 error
-			ErrorForm_t e_form(d_handler);
-			auto l2_err = gutil::sqrt(e_form.integrate_weight(c_handler.get_coefs(0)));
+			auto e_form = GV::MakeLinearForm<4,Scalar_t>(d_handler, GV::L2ExactErrorKernel<u_exact,InteriorWeight_t>{});
+			// ErrorForm_t e_form(d_handler);
+			auto l2_err = gutil::sqrt(e_form.evaluate(c_handler.get_coefs(0)));
 			GUTIL_LOG("Computed L2 error: ", l2_err, " n_dofs= ", d_handler.n_dofs(), " min_h= ", mesh_handler.min_element_size());
 		}
 

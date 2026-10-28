@@ -15,6 +15,7 @@ namespace GV {
 		{Kernel::IS_SYMMETRIC} -> std::convertible_to<bool>;
 		{Kernel::NEED_VALS}    -> std::convertible_to<std::array<bool,Kernel::K>>;
 		{Kernel::NEED_GRAD}    -> std::convertible_to<std::array<bool,Kernel::K>>;
+		{Kernel::IMPL_NEEDS_GEO_POINTS} -> std::convertible_to<bool>;
 		typename Kernel::WeightType;
 	};
 
@@ -57,9 +58,8 @@ namespace GV {
 	/// to left (i.e., v is index 0 and u is index 1). This allows us to keep consistent indexing
 	/// through various types and have column-major storage indexing be the natural order.
 	//////////////////////////////////////////////////////////////////
-	template<size_t K_, typename Weight, size_t NSymmetric, typename Derived> requires (NSymmetric <= K_)
+	template<size_t K_, IsKernelWeight Weight, size_t NSymmetric, typename Derived> requires (NSymmetric <= K_)
 	struct KLinearKernel {
-		static_assert(std::same_as<Weight,void> || IsKernelWeight<Weight>);
 		//////////////////////////////////////////////////////////////////
 		/// Track essential constants.
 		//////////////////////////////////////////////////////////////////
@@ -68,6 +68,11 @@ namespace GV {
 		static constexpr bool   NEEDS_WEIGHT = N_WEIGHTS>0;
 		static constexpr size_t N_SYMMETRIC  = NSymmetric;
 		static constexpr bool   IS_SYMMETRIC = N_SYMMETRIC==K;
+		static constexpr bool   NEEDS_GEO_POINTS = [](){
+			if constexpr (NEEDS_WEIGHT) {return Derived::IMPL_NEEDS_GEO_POINTS || Weight::NEEDS_GEO_POINTS;}
+			else {return Derived::IMPL_NEEDS_GEO_POINTS;}
+		}();
+
 		using WeightType = Weight;
 		static_assert(N_SYMMETRIC!=1, "A single symmetric argument makes no sense.");
 
@@ -210,6 +215,7 @@ namespace GV {
 
 		static constexpr std::array<bool,K> NEED_VALS = [](){std::array<bool,K> ar{}; ar.fill(false); return ar;}();
 		static constexpr std::array<bool,K> NEED_GRAD = [](){std::array<bool,K> ar{}; ar.fill(false); return ar;}();
+		static constexpr bool IMPL_NEEDS_GEO_POINTS = false;
 
 		template<typename QR>
 		[[nodiscard]] static typename QR::Scalar_t CachedEvalImpl(ValueArg<QR>, GradArg<QR>, WeightArg<QR>, const QR&) noexcept {
@@ -238,6 +244,7 @@ namespace GV {
 
 		static constexpr std::array<bool,K> NEED_VALS = [](){std::array<bool,K> ar{}; ar.fill(false); return ar;}();
 		static constexpr std::array<bool,K> NEED_GRAD = [](){std::array<bool,K> ar{}; ar.fill(false); return ar;}();
+		static constexpr bool IMPL_NEEDS_GEO_POINTS = false;
 
 		template<typename QR>
 		[[nodiscard]] static typename QR::Scalar_t CachedEvalImpl(ValueArg<QR>, GradArg<QR>, WeightArg<QR>, const QR& qr) noexcept requires(!BASE::NEEDS_WEIGHT) {
@@ -303,6 +310,7 @@ namespace GV {
 
 		static constexpr std::array<bool,Kernel::K> NEED_VALS = Kernel::NEED_VALS;
 		static constexpr std::array<bool,Kernel::K> NEED_GRAD = Kernel::NEED_GRAD;
+		static constexpr bool IMPL_NEEDS_GEO_POINTS = Kernel::IMPL_NEEDS_GEO_POINTS;
 		T scale{1};
 		[[no_unique_address]] Kernel kernel{};
 
@@ -317,10 +325,10 @@ namespace GV {
 		}
 	};
 
-	template<typename T, IsKLinearKernel Kernel>
+	template<gutil::IsScalar T, IsKLinearKernel Kernel>
 	[[nodiscard]] inline constexpr ScaledKernel<T,Kernel> MakeScaledKernel(T scale, Kernel k = Kernel{}) noexcept {return {scale,std::move(k)}; }
 
-	template<typename T, IsKLinearKernel Kernel>
+	template<gutil::IsScalar T, IsKLinearKernel Kernel>
 	[[nodiscard]] inline constexpr ScaledKernel<T,Kernel> operator*(T scale, Kernel k) noexcept {return {scale,std::move(k)}; }
 
 
@@ -349,6 +357,7 @@ namespace GV {
 
 		static constexpr std::array<bool,Kernel::K> NEED_VALS = Kernel::NEED_VALS;
 		static constexpr std::array<bool,Kernel::K> NEED_GRAD = Kernel::NEED_GRAD;
+		static constexpr bool IMPL_NEEDS_GEO_POINTS = Kernel::IMPL_NEEDS_GEO_POINTS;
 		[[no_unique_address]] Kernel kernel{};
 		
 		template<typename QR>
@@ -399,7 +408,8 @@ namespace GV {
 
 		static constexpr std::array<bool,K1::K> NEED_VALS = GV::OrArrays(K1::NEED_VALS, K2::NEED_VALS);
 		static constexpr std::array<bool,K1::K> NEED_GRAD = GV::OrArrays(K1::NEED_GRAD, K2::NEED_GRAD);
-		
+		static constexpr bool IMPL_NEEDS_GEO_POINTS = K1::IMPL_NEEDS_GEO_POINTS || K2::IMPL_NEEDS_GEO_POINTS;
+
 		[[no_unique_address]] K1 left{};
 		[[no_unique_address]] K2 right{};
 		
@@ -489,8 +499,10 @@ namespace GV {
 		using BASE::BASE;
 		constexpr WeightedVariant(Kernel k) : BASE(), kernel{std::move(k)} {}
 
+		static constexpr bool NEEDS_WEIGHT = !std::same_as<void,Weight>;
 		static constexpr std::array<bool,Kernel::K> NEED_VALS = Kernel::NEED_VALS;
 		static constexpr std::array<bool,Kernel::K> NEED_GRAD = Kernel::NEED_GRAD;
+		static constexpr bool IMPL_NEEDS_GEO_POINTS = Kernel::IMPL_NEEDS_GEO_POINTS;
 		[[no_unique_address]] Kernel kernel{};
 		
 		template<typename QR>
@@ -514,4 +526,7 @@ namespace GV {
 
 	template<IsKLinearKernel Kernel, IsKernelWeight Weight> requires (!Kernel::NEEDS_WEIGHT)
 	[[nodiscard]] inline constexpr WeightedVariant<Kernel,Weight> MakeWeightedVariant(Kernel k = Kernel{}) noexcept {return {std::move(k)};}
+
+	template<IsKLinearKernel Kernel, IsKernelWeight Weight> requires (!Kernel::NEEDS_WEIGHT)
+	[[nodiscard]] inline constexpr WeightedVariant<Kernel,Weight> operator*(Weight wt, Kernel k) noexcept {return MakeWeightedVariant<Kernel,Weight>(k);}
 }

@@ -25,7 +25,7 @@ using DofElem_t     = typename DofHandler_t::DofElem_t;
 
 using CoefHandler_t = GV::CoefHandler<DofHandler_t,Scalar_t,1>;
 
-using Kernel_t = GV::L2LinearKernel<false>;
+using Kernel_t = GV::L2LinearKernel<>;
 
 struct Weight_t {
 	static constexpr bool NEEDS_GEO_POINTS = true;

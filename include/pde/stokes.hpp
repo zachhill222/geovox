@@ -230,43 +230,43 @@ namespace GV {
 		/////////////////////////////////////////////////////////
 		auto make_A_form() const {
 			//a(u_i,v) = int( grad(u_i)*grad(v) * mu*phi)
-			return MakeBilinearForm<N_QUAD,Scalar_t>(u_handler, H1BilinearKernel_SW{}, viscosity * InteriorWeight_t{});
+			return MakeBilinearForm<N_QUAD,Scalar_t>(u_handler, (viscosity * InteriorWeight_t{})*H1BilinearKernel<>{});
 		}
 
 		auto make_A_penalty_form() const {
 			//a_p(u_i,v) = int(u_i * v * mu*(1-phi)/eps^3)
 			const Scalar_t eps = ExteriorWeight_t::eps;	//static, same as InteriorWeight_t::eps
-			return MakeBilinearForm<N_QUAD,Scalar_t>(u_handler, L2BilinearKernel_SW{}, (viscosity/(eps*eps*eps)) * ExteriorWeight_t{});
+			return MakeBilinearForm<N_QUAD,Scalar_t>(u_handler, ((viscosity/(eps*eps*eps)) * ExteriorWeight_t{}) * L2BilinearKernel<>{});
 		}
 
 		auto make_M_velocity_form() const {
 			//m(u,v) = int (u*v*phi) for use in computing L2 norms
-			return MakeBilinearForm<N_QUAD,Scalar_t>(u_handler,L2BilinearKernel_SW{}, InteriorWeight_t{});
+			return MakeBilinearForm<N_QUAD,Scalar_t>(u_handler,L2BilinearKernel<InteriorWeight_t>{});
 		}
 
 		auto make_M_pressure_form() const {
 			//m(p,q) = int (p*q*phi) for use in computing L2 norms
-			return MakeBilinearForm<N_QUAD,Scalar_t>(p_handler,L2BilinearKernel_SW{}, InteriorWeight_t{});
+			return MakeBilinearForm<N_QUAD,Scalar_t>(p_handler,L2BilinearKernel<InteriorWeight_t>{});
 		}
 
 		template<int Axis> requires(0<=Axis && Axis<3)
 		auto make_G_form() const {
 			//G(p,v) = int( \partial_i(p) * v * phi)
 			//(Top right block, p is trial, v is test)
-			return MakeBilinearForm<N_QUAD,Scalar_t>(p_handler, u_handler, PartialValBilinearForm<Axis,InteriorWeight_t>{}, InteriorWeight_t{});
+			return MakeBilinearForm<N_QUAD,Scalar_t>(p_handler, u_handler, PartialValBilinearForm<Axis,InteriorWeight_t>{});
 		}
 
 		template<int Axis> requires(0<=Axis && Axis<3)
 		auto make_Gt_form() const {
 			//Gt(u,q) = int( \partial_i(u) * q * phi)
 			//(Bottom left block, u is trial, q is test)
-			return MakeBilinearForm<N_QUAD,Scalar_t>(u_handler, p_handler, PartialValBilinearForm<Axis,InteriorWeight_t>{}, InteriorWeight_t{});
+			return MakeBilinearForm<N_QUAD,Scalar_t>(u_handler, p_handler, PartialValBilinearForm<Axis,InteriorWeight_t>{});
 		}
 
 		template<int Axis> requires(0<=Axis && Axis<3)
 		auto make_acc_form() const {
 			//l(v) = int( f_i * v * phi) where f_i is the axis component of the body acceleration
-			return MakeLinearForm<N_QUAD,Scalar_t>(u_handler, L2LinearKernel_W{}, body_acceleration[Axis]*InteriorWeight_t{});
+			return MakeLinearForm<N_QUAD,Scalar_t>(u_handler, (body_acceleration[Axis]*InteriorWeight_t{})*L2LinearKernel<>{});
 		}
 
 
