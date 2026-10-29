@@ -322,8 +322,8 @@ namespace GV {
 		/// A few fallback/generic methods.
 		/// Note that coefficients are indexed right to left.
 		//////////////////////////////////////////////////////////////////
-		template<typename... Spans> requires (sizeof...(Spans)==K) // && AllArgsSameAs<std::span<const Scalar_t>, Spans...>)
-		[[nodiscard]] Scalar_t evaluate(Spans... x_spans) const noexcept {
+		template<typename... Spans> requires (sizeof...(Spans)==K)
+		[[nodiscard]] Scalar_t evaluate_by_tensor(Spans... x_spans) const noexcept {
 			GUTIL_PROFILE_FUNCTION();
 			std::array<std::span<const Scalar_t>, K> X{x_spans...};
 
@@ -355,6 +355,46 @@ namespace GV {
 				GUTIL_OMP(single)
 				{
 					t_thread_resource.resize(n_threads);
+					t_local_x.resize(n_threads);
+					t_val.assign(n_threads, Scalar_t{0});
+				}
+				GUTIL_OMP(barrier)
+			});
+
+			Scalar_t total{0};
+			for (Scalar_t v : t_val) {total += v;}
+			return total;
+		}
+
+		template<typename... Spans> requires (sizeof...(Spans)==K)
+		[[nodiscard]] Scalar_t evaluate(Spans... x_spans) const noexcept {
+			GUTIL_PROFILE_FUNCTION();
+			std::array<std::span<const Scalar_t>, K> X{x_spans...};
+
+			std::vector<DynamicVectorValueCache<Scalar_t,K>> t_local_x;
+			std::vector<Scalar_t> t_val;
+
+			this->for_each_element(
+			//action
+			[&](auto& k_eval, const auto& range) {
+				auto& local_x = t_local_x[range.tid];
+
+				std::array<size_t,K> sizes;
+				[&]<size_t... Slot>(std::index_sequence<Slot...>) {
+					((sizes[Slot] = std::get<GetHandlerIndex(Slot)>(k_eval.dof_caches).global_idx.size()), ...);
+				}(std::make_index_sequence<K>{});
+				local_x.resize(sizes);
+
+				[&]<size_t... Slot>(std::index_sequence<Slot...>) {
+					(GatherLocalVector(X[Slot], std::get<GetHandlerIndex(Slot)>(k_eval.dof_caches), local_x[Slot]), ...);
+				}(std::make_index_sequence<K>{});
+
+				t_val[range.tid] += k_eval.evaluate_reconstructed(std::as_const(local_x).to_spans());
+			},
+			//init
+			[&](size_t n_threads, size_t tid) {
+				GUTIL_OMP(single)
+				{
 					t_local_x.resize(n_threads);
 					t_val.assign(n_threads, Scalar_t{0});
 				}
@@ -553,8 +593,8 @@ namespace GV {
 		Kernel_t kernel{};
 		Weight_t weight{};		//TODO: move to the kernel
 
-		CacheTuple_t dof_caches{};
-		[[no_unique_address]] WeightArg wt_cache{};
+		CacheTuple_t dof_caches{};	//for each dof_handler, cache the dof values at quadrature points on the current element
+		[[no_unique_address]] WeightArg wt_cache{};	
 
 		//data only used for snapshots
 		[[no_unique_address]] std::array<const void*, N_HANDLERS> bin_sort_vectors{};
@@ -690,6 +730,62 @@ namespace GV {
 		[[nodiscard]] Scalar_t operator()() const noexcept requires (K==0) {
 			return operator()({});
 		}
+
+
+		//////////////////////////////////////////////////////////////
+		/// Evaluate the kernel using the reconstructed fields rather than
+		/// the basis functions.
+		//////////////////////////////////////////////////////////////
+		[[nodiscard]] auto evaluate_reconstructed(const std::array<std::span<const Scalar_t>, K>& local_x) const noexcept {
+			//Data that the ValArg points to. Note that this never changes address, so the ValueArg vals only need to be set once.
+			static thread_local std::array<DofValueCache<QuadRule_t>,K> field_vals{};
+			static thread_local ValueArg vals = [&](){
+				ValueArg result{};
+				[&]<size_t... Ks>(std::index_sequence<Ks...>) {
+					((result[Ks] = &field_vals[Ks]), ...);
+				}(std::make_index_sequence<K>{});
+				return result;
+			}();
+
+			// static thread_local std::array<VectorValueCache<QuadRule_t>,K> grad_vals{};
+			static thread_local GradArg grads{}; //point to grad_vals when gradient support is needed
+			grads.fill(nullptr);
+
+			//reconstruct the fields
+			[&]<size_t... Ks>(std::index_sequence<Ks...>) {
+				((void)([&]{
+					if constexpr (Kernel_t::NEED_VALS[Ks]) {
+						//re-set the field data
+						auto& field_cache = field_vals[Ks];
+						field_cache.depth = qr.q_el.depth();
+						std::fill(field_cache.data(), field_cache.data()+field_cache.size(), Scalar_t{0});
+
+						//compute the field data
+						auto& handler_cache = std::get<GetHandlerIndex(Ks)>(dof_caches);
+						handler_cache.reconstruct_field(field_cache, local_x[Ks]);
+
+						//link the field data to the args
+						vals[Ks] = &field_cache;
+					}
+					//TODO: fill grads if needed
+				}()), ...);
+			}(std::make_index_sequence<K>{});
+
+
+			//get pointer to the weight if needed
+			const WeightArg* wt_ptr{nullptr};
+			if constexpr (Kernel_t::NEEDS_WEIGHT) {wt_ptr = &wt_cache;}
+
+			//evaluate and return
+			if constexpr (Kernel_t::template HasStaticEval<QuadRule_t>()) {
+				return Kernel_t::CachedEval(vals, grads, wt_ptr, qr);
+			}
+			else {
+				return kernel.cached_eval(vals, grads, wt_ptr, qr);
+			}
+		}
+
+
 
 
 		//////////////////////////////////////////////////////////////

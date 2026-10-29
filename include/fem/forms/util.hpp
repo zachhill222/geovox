@@ -335,9 +335,12 @@ namespace GV {
 		using BASE = ScalarValueCache<QuadRule_t>;
 		using BASE::N;
 		using BASE::val;
-		const uint8_t depth;
+		uint8_t depth{0};
 
-		/// Initalize by evaluating a dof
+		/// Initialize by setting the depth only and manually populate the values
+		DofValueCache(uint8_t d=0) : BASE(), depth{d} {}
+
+		/// Initialize by evaluating a dof
 		template<typename DOF_t>
 		DofValueCache(DOF_t dof, const QuadRule_t& qr) : depth(dof.depth_u8()) {
 			const uint8_t loc  = dof.local_dof_number(qr.support_element[depth]);
@@ -458,19 +461,36 @@ namespace GV {
 			}
 		}
 
-		[[nodiscard]] ScalarValueCache<QuadRule_t> reconstruct_field(std::span<const Scalar_t> global_coefs) noexcept {
+		[[nodiscard]] ScalarValueCache<QuadRule_t> reconstruct_field(std::span<const Scalar_t> local_coefs) const noexcept {
 			GUTIL_ASSERT(!vals.empty() && "the dof values were not cached");
-			GUTIL_ASSERT(handler.n_dofs() == global_coefs.size());
+			GUTIL_ASSERT(vals.size() == local_coefs.size());
 			GUTIL_ASSERT(vals.size() == dofs.size());
 
 			//gather local coefficients
+
+			//TODO: use AST to collapse into a single simd with reduction?
+			//NOTE: simd is already used in the ScalarValueCache multiplication and addition
 			ScalarValueCache<QuadRule_t> result{};
 			for (size_t j=0; j<dofs.size(); ++j) {
-				result += global_coefs[global_idx[j]] * vals[j];
+				result += local_coefs[j] * vals[j];
 			}
 
-			//evaluate and return
 			return result;
+		}
+
+		void reconstruct_field(DofValueCache<QuadRule_t>& result, std::span<const Scalar_t> local_coefs) const noexcept {
+			GUTIL_ASSERT(!vals.empty() && "the dof values were not cached");
+			GUTIL_ASSERT(vals.size() == local_coefs.size());
+			GUTIL_ASSERT(vals.size() == dofs.size());
+
+			//gather local coefficients
+
+			//TODO: use AST to collapse into a single simd with reduction?
+			//NOTE: simd is already used in the ScalarValueCache multiplication and addition
+			//NOTE: result must already be set to 0
+			for (size_t j=0; j<dofs.size(); ++j) {
+				result += local_coefs[j] * vals[j];
+			}
 		}
 	};
 
