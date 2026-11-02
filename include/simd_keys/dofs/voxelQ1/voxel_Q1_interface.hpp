@@ -36,6 +36,7 @@ namespace DOFS {
 		using MeshElem_t = VoxelElement<0>;
 		using MeshVert_t = VoxelVertex<0>;
 
+		static constexpr uint8_t  DIMENSION      = 3;
 		static constexpr uint8_t  PERIOD         = Period;
 		static constexpr uint64_t N_DOF_PER_ELEM = LagrangeQ1::N_DOF_PER_ELEM;
 		static constexpr uint64_t N_SUPPORT_ELEM = LagrangeQ1::N_SUPPORT_ELEM;

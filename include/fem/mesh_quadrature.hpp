@@ -86,9 +86,9 @@ namespace GV {
 		std::vector<T>											jacobian_det_inv{};
 		std::vector<T>											geometric_coords{};
 
-		[[nodiscard]] constexpr auto jac_det() const noexcept {return jacobian_det[q_el.depth()];}
+		[[nodiscard]] constexpr auto  jac_det()  const noexcept {return jacobian_det[q_el.depth()];}
 		[[nodiscard]] constexpr auto& jac_diag() const noexcept {return jacobian_diag[q_el.depth()];}
-		[[nodiscard]] constexpr auto& jac_inv() const noexcept {return jacobian_diag_inv[q_el.depth()];}
+		[[nodiscard]] constexpr auto& jac_inv()  const noexcept {return jacobian_diag_inv[q_el.depth()];}
 
 		std::span<const T,TOTAL_QUAD_POINTS> quad_x(uint8_t depth) const noexcept {
 			return std::span<const T,TOTAL_QUAD_POINTS>{&proj_quad_pts[depth][0], TOTAL_QUAD_POINTS};
