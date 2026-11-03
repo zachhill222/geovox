@@ -8,6 +8,146 @@
 
 namespace GV {
 
+
+	/////////////////////////////////////////////////////////////////////////////////
+	/// Standard functions that can be used for building diffuse domain functions.
+	/// Define by their normalized input r=sd/eps. Note that the user must apply the chain
+	/// rule for the derivatives. (i.e, multiply the result by 1/eps).
+	///
+	/// Note that the sign convention is sdf(x)<0 on the interior of the domain and
+	/// heaviside(sdf(x)/eps) is approximately the characteristic function on the domain
+	/// (i.e., 1 on the interior and 0 on the exterior).
+	/////////////////////////////////////////////////////////////////////////////////
+	namespace diffuse {
+		/// Tanh
+		GUTIL_DECLARE_SIMD()
+		template<typename T>
+		[[nodiscard]] inline constexpr T heaviside_tanh(T r) noexcept {
+			return T{0.5} * (T{1} - std::tanh(r*T{3}));
+		}
+
+		GUTIL_DECLARE_SIMD()
+		template<typename T>
+		[[nodiscard]] inline constexpr T delta_tanh(T r) noexcept {
+			const T th = std::tanh(r*T{3});
+			return T{-1.5} * (T{1} - th*th);
+		}
+
+
+		/// Compact sin/cos
+		GUTIL_DECLARE_SIMD()
+		template<typename T>
+		[[nodiscard]] inline constexpr T heaviside_compact_trig(T r) noexcept {
+			//1/2 - r/2 - 1/2pi * sin(pi*r)
+			if (r < -T{1}) {return T{1};}
+			if (r >  T{1}) {return T{0};}
+			return  T{0.5}*( T{1} - r - T{0.3183098862} * std::sin( T{3.14159265359}*r ));
+		}
+
+		GUTIL_DECLARE_SIMD()
+		template<typename T>
+		[[nodiscard]] inline constexpr T delta_compact_trig(T r) noexcept {
+			if (r < -T{1} || r > T{1}) {return T{0};}
+			return  T{-0.5} * (T{1} + std::cos(T{3.14159265359}*r));
+		}
+
+
+		/// Compact Hermite interpolation. These are cheap to evaluate, so we write them in a more simd friendly way.
+		GUTIL_DECLARE_SIMD()
+		template<typename T>
+		[[nodiscard]] inline constexpr T heaviside_compact_poly5(T r) noexcept {
+			//p(r) = 1/2 - 15/16*r + 5/8*r^3 - 3/16*r^5
+			r = std::clamp(r,T{-1}, T{1});
+			const T r2 = r*r;
+			return  T{0.5} + r*( T{-0.9375} + r2*(T{0.625} - r2*T{0.1875}));
+		}
+
+		GUTIL_DECLARE_SIMD()
+		template<typename T>
+		[[nodiscard]] inline constexpr T delta_compact_poly5(T r) noexcept {
+			//p'(r) = -15/16 + 15/8*r^2 - 15/16*r^4 = -15/16 * (1 - 2r^2 + r^4) = -15/16 * (1-r^2)^2
+			r = std::clamp(r,T{-1}, T{1});
+			const T w = T{1}-r*r;
+			return  T{-0.9375}*w*w;
+		}
+	}
+
+
+	/////////////////////////////////////////////////////////////////////////////////
+	/// A class to combine the heaviside and delta approximations. When using more expensive
+	/// computations (e.g, tanh), it may be useful to have variants with cached results.
+	///
+	/// The individual HeavisideFn and DeltaFn callables must be stateless.
+	/////////////////////////////////////////////////////////////////////////////////
+	template<typename T, auto HeavisideFn, auto DeltaFn>
+	struct DiffuseDomainPhi {
+		static_assert(std::is_invocable_r_v<T, decltype(HeavisideFn), T>);
+		static_assert(std::is_invocable_r_v<T, decltype(DeltaFn), T>);
+
+		T eps{1};
+		T eps_inv{1};
+		DiffuseDomainPhi(T ep) : eps{ep}, eps_inv{T{1}/ep} {}
+
+		constexpr void set_eps(T ep) noexcept {
+			eps = ep;
+			eps_inv = T{1}/ep;
+		}
+
+		GUTIL_DECLARE_SIMD()
+		[[nodiscard]] constexpr T heaviside(T sd) const noexcept {
+			return HeavisideFn(sd*eps_inv);
+		}
+
+		GUTIL_DECLARE_SIMD()
+		[[nodiscard]] constexpr T delta(T sd) const noexcept {
+			return eps_inv*DeltaFn(sd*eps_inv);
+		}
+	};
+
+	using DefaultDiffuseDomainPhi = DiffuseDomainPhi<double, diffuse::heaviside_compact_poly5<double>, diffuse::delta_compact_poly5<double>>;
+
+
+
+	/////////////////////////////////////////////////////////////////////////////////
+	/// A class to take a signed distance function and compute the phase field function
+	/// that represents the diffuse domain.
+	/////////////////////////////////////////////////////////////////////////////////
+	template<typename T, typename Sdf, typename Grad=std::nullptr_t, typename Phi=DefaultDiffuseDomainPhi>
+	struct SDFunction {
+		using Scalar_t = T;
+
+
+		Phi phi{};
+		constexpr void set_eps(T eps) noexcept { phi.set_eps(eps); }
+
+		Sdf sdf{};
+		Grad grad{};
+
+		
+
+
+	};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 	template<gutil::IsReal T, uint8_t Period=0, bool Interior=false, int HeavisideFunc=0> requires(Period<8)
 	struct SignedDistanceSpheres : public GV::PeriodicVolumeOctree<gutil::Sphere<3,T>, Period> {
 		using BASE = GV::PeriodicVolumeOctree<gutil::Sphere<3,T>, Period>;
